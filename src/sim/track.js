@@ -654,7 +654,12 @@ export class Track {
     const street = ro.mode === 'street';
 
     const markRange = (a, b, fn) => {
-      for (let i = a; i !== b + 1; i = (i + 1) % N) fn(i);
+      // inclusive range a..b going forward around the lap; the end is compared after wrapping so b = N-1 terminates
+      const last = ((b % N) + N) % N;
+      for (let i = ((a % N) + N) % N, n = 0; n < N; n++, i = (i + 1) % N) {
+        fn(i);
+        if (i === last) break;
+      }
     };
     const frac = (c, f) => (c.start + Math.round(((c.end - c.start + N) % N) * f)) % N;
 
