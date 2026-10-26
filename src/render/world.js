@@ -124,7 +124,7 @@ function nightWindows(mat) {
           float h = fract(sin(dot(cell, vec2(12.9898, 78.233))) * 43758.5453);
           float dark = step(c.b, c.r + 0.1) * 0.0 + step(0.2, c.b - c.r) * step(c.b, 0.45);
           float on = max(lit, dark * step(h, 0.38));
-          totalEmissiveRadiance += vec3(1.0, 0.82, 0.5) * on * uNight * 1.4;
+          totalEmissiveRadiance += vec3(1.0, 0.82, 0.5) * on * uNight * 2.9;
         }`
       );
   };
@@ -1150,7 +1150,7 @@ export class World {
     const pm = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.1, 0.16, 12, 6), new THREE.MeshStandardMaterial({ color: 0x4a4f56, roughness: 0.6, metalness: 0.5 }), poles.length);
     const m = new THREE.Matrix4();
     poles.forEach((p, i) => { m.makeTranslation(p[0], p[1], p[2]); pm.setMatrixAt(i, m); });
-    const glow = new THREE.PointsMaterial({ size: 7, sizeAttenuation: true, map: softParticleTexture(), color: 0xfff0cf, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
+    const glow = new THREE.PointsMaterial({ size: 7, sizeAttenuation: true, map: softParticleTexture(), color: new THREE.Color(0xfff0cf).multiplyScalar(3.5), transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
     const gp = new THREE.Points(new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(heads, 3)), glow);
     gp.frustumCulled = false;
     const poolMat = new THREE.MeshBasicMaterial({ map: softParticleTexture(), color: 0xfff0d6, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });

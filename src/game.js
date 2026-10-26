@@ -740,6 +740,7 @@ class Game {
     else {
       this.renderer.shadowMap.enabled = false;
       this.save.settings.blur = false;
+      this.save.settings.bloom = false;
     }
     this.resize();
     this.toast(p.steps <= 3 ? `Frame rate was ${fps.toFixed(0)} fps: lowered the render resolution (Settings > Automatic quality)` : 'Frame rate is still low: shadows and motion blur turned off');
@@ -780,7 +781,7 @@ class Game {
       const pp = this.input.poll(dt, 0);
       if (pp.pause) return this.resume();
       this.audio.update(s.player, [], this.listener(), dt, true);
-      this.post.render(s.scene, this.camera, 0);
+      this.post.render(s.scene, this.camera, 0, this.bloomFor(s));
       return;
     }
     if (this.state === 'replay') {
@@ -792,10 +793,17 @@ class Game {
       return;
     }
     if (this.state === 'race') this.runSession(s, dt);
-    this.post.render(s.scene, this.camera, this.speedBlur(s));
+    this.post.render(s.scene, this.camera, this.speedBlur(s), this.bloomFor(s));
   }
 
   /** Motion blur strength 0..1: grows exponentially with speed, a little more with DRS / ERS boost. */
+  /** Bloom strength: a whisper by day, a strong glow around lights at dusk and at night. */
+  bloomFor(s) {
+    const set = this.save.settings;
+    if (set.bloom === false || set.quality === 'low') return 0;
+    return clamp(0.04 + 0.8 * (s.nightK || 0) + 0.2 * (s.duskK || 0), 0, 0.9);
+  }
+
   speedBlur(s) {
     const set = this.save.settings;
     if (!set.blur || set.calm || set.quality === 'low' || s.camRig.mode === 'tv' || s.paused) return 0;
@@ -987,6 +995,8 @@ class Game {
     const nightRace = s.cfg.timeOfDay === 'night';
     const dusk = nightRace ? 0.9 : 0.88 * Math.pow(prog, 1.1);
     const night = nightRace ? 1 : 0.55 * smooth01((prog - 0.72) / 0.28);
+    s.nightK = night;
+    s.duskK = dusk;
     const atmo = world.setAtmosphere({ dusk, wet: race.wet, rain: race.rain, night });
     s.scene.fog.color.copy(atmo.fog);
     s.scene.fog.density = 1.1 / (s.track.theme.fogFar * atmo.fogMul);
@@ -1287,7 +1297,7 @@ class Game {
     s.world.focusShadow(s.views.get(s.player).group.position);
     s.world.update(dt, performance.now() / 1000);
     this.audio.update(s.player, [], this.listener(), dt, true);
-    this.post.render(s.scene, cam, 0);
+    this.post.render(s.scene, cam, 0, this.bloomFor(s));
     const fl = this._photoUI.querySelector('.pflash');
     if (ph.shot) {
       ph.shot = false;
@@ -1447,7 +1457,7 @@ class Game {
     s.rain.update(dt, this.camera.position, s.race.rain);
     this.audio.update(s.player, [], this.listener(), dt, true);
     this.updateReplayUI();
-    this.post.render(s.scene, this.camera, 0);
+    this.post.render(s.scene, this.camera, 0, this.bloomFor(s));
   }
 
   /** The pace car: a yellow car with a flashing light bar, created when it is first needed. */

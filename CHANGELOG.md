@@ -38,6 +38,7 @@ Everything below was added or fixed in this release, grouped by area.
 - Track-limit and pit rules unchanged from 1.1; the fast-forward to results is now about 20 times faster.
 
 ### Presentation
+- **Bloom**: an HDR bright-pass and gaussian blur (quarter resolution, two rounds) makes lit windows, floodlight bulbs, tail lights and the hot brake discs glow at dusk and at night; it fades to almost nothing in daylight, is off on Low quality (and in Settings, and when the frame-rate watchdog steps in). Costs one extra pass chain only while it is visible.
 - Radial **motion blur** that builds exponentially with speed (and a little more with DRS and boost); camera **rumble** that rises exponentially with speed and RPM, strongest from the cockpit.
 - **Rain**: GPU-animated rain streaks, wet glossy asphalt, grey sky and denser fog, water spray behind every wheel.
 - **Skid marks** are persistent (36 000 quads for the whole session), also from heavy braking; fainter on a wet track.

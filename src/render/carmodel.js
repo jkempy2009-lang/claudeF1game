@@ -445,7 +445,7 @@ export class CarView {
       if (wd.glow.visible !== k > 0.02) wd.glow.visible = k > 0.02;
       if (k > 0.02) {
         wd.glowMat.opacity = Math.min(1, k * 1.25);
-        wd.glowMat.color.setRGB(1, 0.32 + 0.5 * k, 0.06 + 0.55 * k * k);
+        wd.glowMat.color.setRGB(3.2, (0.32 + 0.5 * k) * 3.2, (0.06 + 0.55 * k * k) * 3.2);
       }
     }
     // DRS flap, brake light, damage

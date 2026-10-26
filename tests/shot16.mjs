@@ -1,0 +1,20 @@
+// Profile screen with some progress. Usage: node tests/shot16.mjs outdir
+import { createRequire } from 'node:module';
+import fs from 'node:fs';
+const require = createRequire(import.meta.url);
+const { chromium } = require('playwright');
+const [out] = process.argv.slice(2);
+fs.mkdirSync(out, { recursive: true });
+const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--enable-webgl'] });
+const page = await browser.newPage({ viewport: { width: 1120, height: 630 } });
+const logs = [];
+page.on('console', (m) => { if (m.type() === 'error') logs.push(m.text()); });
+page.on('pageerror', (e) => logs.push('[pageerror] ' + e.message));
+await page.addInitScript(() => localStorage.setItem('apex-grand-prix.v1', JSON.stringify({ stats: { races: 14, wins: 3, podiums: 7, poles: 2, fastestLaps: 4, passes: 120, distance: 812000, laps: 96 }, achievements: { first_race: 1, first_win: 1, podium: 1 }, records: { rade: { best: 66.9 }, vettore: { best: 69.1 } }, settings: { quality: 'medium' } })));
+await page.goto('http://localhost:8099/index.html');
+await page.waitForSelector('[data-act=quick]', { timeout: 60000 });
+await page.click('[data-act=profile]');
+await page.waitForTimeout(800);
+await page.screenshot({ path: `${out}/profile.png` });
+console.log(logs.join('\n') || 'no errors');
+await browser.close();

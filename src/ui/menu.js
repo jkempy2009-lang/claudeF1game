@@ -10,7 +10,7 @@ import { CHAMP_CAL, sanitizeCareer, UPGRADE_KEYS, UPGRADE_INFO, UPGRADE_MAX, upg
 
 export const SAVE_KEY = 'apex-grand-prix.v1';
 
-export const DEFAULT_SETTINGS = { quality: 'high', volume: 0.55, units: 'kmh', line: true, minimap: true, shake: true, camera: 'chase', tower: true, blur: true, steerSpeed: 1, padDead: 0.07, rumble: true, autoQuality: true, cbSafe: false, calm: false, bigHud: false };
+export const DEFAULT_SETTINGS = { quality: 'high', volume: 0.55, units: 'kmh', line: true, minimap: true, shake: true, camera: 'chase', tower: true, blur: true, steerSpeed: 1, padDead: 0.07, rumble: true, autoQuality: true, cbSafe: false, calm: false, bigHud: false, bloom: true };
 export const DEFAULT_CONFIG = {
   mode: 'race',
   trackId: 'northfield',
@@ -109,6 +109,7 @@ export function sanitizeSettings(raw) {
     rumble: bool(r.rumble, D.rumble),
     autoQuality: bool(r.autoQuality, D.autoQuality),
     cbSafe: bool(r.cbSafe, D.cbSafe),
+    bloom: bool(r.bloom, D.bloom),
     calm: bool(r.calm, D.calm),
     bigHud: bool(r.bigHud, D.bigHud),
   };
@@ -457,6 +458,7 @@ export class Menu {
         ${this.toggle('s.line', 'Racing line guide', 'Green: keep going. Yellow: ease off. Red: brake now (key L)', s.line !== false)}
         ${this.toggle('s.shake', 'Camera shake', 'Kerbs, speed, engine rumble and impacts', s.shake)}
         ${this.toggle('s.blur', 'Motion blur', 'Radial speed blur that builds up fast at high speed (not on Low quality)', s.blur !== false)}
+        ${this.toggle('s.bloom', 'Bloom', 'Lights, windows and hot brake discs glow at dusk and at night (High and Medium quality)', s.bloom !== false)}
         ${this.toggle('s.cbSafe', 'Colour-blind-safe guide', 'Racing line in blue / yellow / magenta instead of green / yellow / red', s.cbSafe)}
         ${this.toggle('s.calm', 'Reduce motion', 'No motion blur, camera shake or flashing lights', s.calm)}
         ${this.toggle('s.bigHud', 'Larger HUD', 'Scales the race HUD up by a fifth', s.bigHud)}
