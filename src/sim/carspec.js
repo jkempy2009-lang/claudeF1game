@@ -8,8 +8,21 @@ export const COMPOUNDS = {
   soft: { id: 'soft', name: 'Soft', letter: 'S', color: '#ee3340', mu: 1.0, wearLaps: 14, tOpt: 100, tRange: 24 },
   medium: { id: 'medium', name: 'Medium', letter: 'M', color: '#f6d13a', mu: 0.965, wearLaps: 24, tOpt: 98, tRange: 28 },
   hard: { id: 'hard', name: 'Hard', letter: 'H', color: '#f2f2f2', mu: 0.93, wearLaps: 38, tOpt: 96, tRange: 32 },
+  // full wets: deep tread that clears water, soft and cool-running, but they overheat and wear quickly on a dry track
+  wet: { id: 'wet', name: 'Wet', letter: 'W', color: '#3a8bff', mu: 0.88, wearLaps: 22, tOpt: 80, tRange: 50, wetTyre: true },
 };
-export const COMPOUND_IDS = ['soft', 'medium', 'hard'];
+export const COMPOUND_IDS = ['soft', 'medium', 'hard', 'wet'];
+export const DRY_COMPOUND_IDS = ['soft', 'medium', 'hard'];
+
+/**
+ * Grip multiplier for a compound on a track with `wet` water level (0 dry .. 1 flooded).
+ * Slicks lose 30 % of their grip on a wet track; wets lose a little on a dry one.
+ */
+export function wetGripFactor(compound, wet) {
+  const e = smoothstep(0.08, 0.7, wet);
+  if (compound.wetTyre) return 1 - 0.1 * (1 - e) - 0.08 * e;
+  return 1 - 0.3 * e;
+}
 
 /** Per-surface tyre grip multiplier and rolling resistance coefficient. Indexed by SURF. */
 export const SURFACE = [];

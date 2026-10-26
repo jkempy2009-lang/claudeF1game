@@ -103,7 +103,7 @@ class ParticlePool {
 
 /** Skid marks: a ring buffer of quads laid on the asphalt. */
 class SkidMarks {
-  constructor(maxQuads = 9000) {
+  constructor(maxQuads = 36000) {
     this.max = maxQuads;
     this.pos = new Float32Array(maxQuads * 4 * 3);
     this.col = new Float32Array(maxQuads * 4);
@@ -166,8 +166,10 @@ export class Effects {
     this.smoke = new ParticlePool(700, { drag: 0.9, gravity: 0.6 });
     this.dust = new ParticlePool(500, { drag: 0.8, gravity: -3 });
     this.sparks = new ParticlePool(500, { additive: true, gravity: -14, drag: 0.4 });
+    this.spray = new ParticlePool(1400, { drag: 1.5, gravity: -1.2 });
     this.skid = new SkidMarks();
-    scene.add(this.smoke.points, this.dust.points, this.sparks.points, this.skid.mesh);
+    this.wet = 0;
+    scene.add(this.smoke.points, this.dust.points, this.sparks.points, this.spray.points, this.skid.mesh);
     this.rnd = mulberry32(99);
     this.acc = new Map();
   }
@@ -186,11 +188,23 @@ export class Effects {
       const slip = car.slipVis[w];
       const onAsphalt = sf === SURF.ASPHALT || sf === SURF.PIT || sf === SURF.KERB || sf === SURF.RUNOFF;
       // skid marks
-      if (full && onAsphalt && slip > 0.35) {
+      // heavy braking drags the tyres into the surface: lock-ups and near-lock-ups leave rubber (it all stays down for the session)
+      const heavyBrake = car.brake > 0.8 && car.speed > 22 && car.kappa[w] < -0.1 && w < 2;
+      if (full && onAsphalt && (slip > 0.35 || heavyBrake)) {
         const nx = -si, nz = -co; // sideways in world (x, -y)
         // lateral direction of the tyre in world coords: car left in physics (-sin, cos) -> world (-sin, -cos)
-        this.skid.add(key + w, wpos[0], wpos[1], wpos[2], -si, -co, 0.32, clamp(0.25 + slip * 0.45, 0, 0.8));
+        this.skid.add(key + w, wpos[0], wpos[1], wpos[2], -si, -co, 0.32, clamp((0.22 + Math.max(slip, heavyBrake ? 0.45 : 0) * 0.45) * (1 - 0.65 * this.wet), 0, 0.8));
       } else if (full) this.skid.add(key + w, 0, 0, 0, 0, 0, 0, 0);
+      // water thrown up by the tyres in the rain: a rooster tail behind every wheel
+      if (this.wet > 0.12 && onAsphalt && car.speed > 16 && full) {
+        const nn = (this.acc.get(key + 's' + w) || 0) + dt * (14 + car.speed * 0.5) * this.wet * (w >= 2 ? 1 : 0.55);
+        let kk = Math.floor(nn);
+        this.acc.set(key + 's' + w, nn - kk);
+        while (kk-- > 0) {
+          const sp = 0.8 + R() * 0.2;
+          this.spray.emit(wpos[0] + (R() - 0.5) * 0.4, wpos[1] + 0.12, wpos[2] + (R() - 0.5) * 0.4, -car.u * co * 0.12 + (R() - 0.5) * 2, 0.9 + R() * 1.8, car.u * si * 0.12 + (R() - 0.5) * 2, 0.5 + R() * 0.5, 1.6 + car.speed * 0.012, (0.11 + 0.07 * this.wet) * Math.min(1, car.speed / 45), 0.55 + R() * 0.55, sp * 0.92, sp * 0.96, sp);
+        }
+      }
       // smoke
       if (onAsphalt && slip > 0.18 && car.speed > 5) {
         const n = (this.acc.get(key + w) || 0) + dt * (30 + slip * 70);
@@ -241,6 +255,7 @@ export class Effects {
     this.smoke.update(dt, viewportScale);
     this.dust.update(dt, viewportScale);
     this.sparks.update(dt, viewportScale);
+    this.spray.update(dt, viewportScale);
     this.skid.flush();
   }
 }

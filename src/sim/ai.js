@@ -1,3 +1,4 @@
+import { wetGripFactor } from './carspec.js';
 import { clamp, lerp, loopDelta, mod, smoothstep, wrapAngle, mulberry32 } from '../util/math.js';
 
 const CAR_LEN = 5.5;
@@ -134,6 +135,7 @@ export class AIDriver {
       g /= 4;
       // a broken wing, floor or punctured tyre costs grip as well: drive to what the car has left
       const punct = Math.max(car.puncture[0], car.puncture[1], car.puncture[2], car.puncture[3]);
+      g *= wetGripFactor(comp, car.wetness || 0);
       g *= 1 - clamp(0.4 * (car.damageFront || 0) + 0.15 * (car.damageRear || 0) + 0.2 * (car.damageFloor || 0) + 0.35 * punct, 0, 0.6);
       const want = Math.sqrt(clamp(g / 0.96, 0.35, 1));
       this.gripAdapt += (Math.min(1, want) - this.gripAdapt) * 0.5;
@@ -178,6 +180,13 @@ export class AIDriver {
     if (car.onGrass || Math.abs(car.d) > tr.wl[car.i] + 1.5) vt = Math.min(vt, 28);
     // traffic cap
     vt = Math.min(vt, this.trafficCap(vt, race));
+    if (race.sc && race.sc.state !== 'none' && this.pitState === 'none') {
+      // behind the pace car everyone slows; cars at the back may close up the queue a little faster
+      const ahead = car.ahead;
+      const gapM = ahead ? Math.max(0, loopDelta(ahead.s, car.s, tr.length)) : 0;
+      const scGap = Math.max(0, loopDelta(race.sc.s, car.s, tr.length));
+      vt = Math.min(vt, 40 + 0.07 * Math.min(ahead ? gapM : scGap, 320));
+    }
     // pit lane + approach braking to the limiter and the box
     inp.pitLimit = 0;
     if (this.pitState !== 'none') {
@@ -203,7 +212,7 @@ export class AIDriver {
     let thr = 0, brk = 0;
     {
       const paceTot = vt / Math.max(1, prof.v[idx]);
-      const capBrake = Math.max(15, prof.env.brakeDecel(Math.max(V, 5), 0.92));
+      const capBrake = Math.max(12, prof.env.brakeDecel(Math.max(V, 5), 0.92) * this.gripAdapt * this.gripAdapt);
       const maxDist = (V * V) / (2 * 0.4 * capBrake) + 40;
       let aReq = 0;
       const step = Math.max(1, Math.round(6 / prof.ds));
@@ -221,7 +230,7 @@ export class AIDriver {
       const brakeFromErr = errNow < -1.5 ? (-errNow - 1.5) * 2.2 : 0;
       // brake late: only once the stopping demand approaches what the brakes (plus drag) can do; until then follow
       // the target speed. Lower levels leave a bigger margin (brakeBias).
-      const aLate = 0.78 * this.dp.brakeBias * (capBrake + aDrag * 0.9);
+      const aLate = (0.78 - 0.14 * (car.wetness || 0)) * this.dp.brakeBias * (capBrake + aDrag * 0.9);
       // traffic: deceleration needed to stop behind a car in our lane that is slower than us or braking
       let aTraffic = 0;
       for (const n of this.neigh) {
@@ -241,7 +250,7 @@ export class AIDriver {
         thr = clamp(0.16 + (want + aDrag) / (aMax + aDrag), 0, 1);
         if (errNow > 3) thr = 1;
         // friction circle: the more lateral grip we are using, the less throttle the rears can take
-        const ayUse = Math.min(1, Math.abs(car.ayF) / Math.max(10, prof.env.latAccel(Math.max(V, 10), 0.97)));
+        const ayUse = Math.min(1, Math.abs(car.ayF) / Math.max(10, prof.env.latAccel(Math.max(V, 10), 0.97) * this.gripAdapt * this.gripAdapt));
         thr = Math.min(thr, 0.15 + 1.1 * Math.sqrt(Math.max(0, 1 - ayUse * ayUse)));
         // rear stepping out: lift
         const aR = Math.max(Math.abs(car.alpha[2]), Math.abs(car.alpha[3]));
@@ -266,8 +275,9 @@ export class AIDriver {
     // --- DRS / ERS
     const straight = Math.abs(kt) < 0.0025 && Math.abs(kPath) < 0.003;
     inp.drs = !!car.drsAllowed && thr > 0.95 && brk < 0.05 && straight;
+    const underSc = race.sc && race.sc.state !== 'none';
     const gapAhead = car.gapAhead ?? 99;
-    inp.boost = thr > 0.95 && straight && car.soc > 0.12 && (gapAhead < 1.8 || car.soc > 0.55 || race.lapsLeft(car) <= 1);
+    inp.boost = !underSc && thr > 0.95 && straight && car.soc > 0.12 && (gapAhead < 1.8 || car.soc > 0.55 || race.lapsLeft(car) <= 1);
 
     // --- stuck recovery handled by Race using stuckT
     if (V < 1.2 && race.phase === 'racing' && race.time > this.goTime + 6 && this.pitState === 'none') this.stuckT += dt;
@@ -286,6 +296,12 @@ export class AIDriver {
       const ds = loopDelta(o.s, car.s, Ltr);
       if (ds < -60 || ds > 90) continue;
       list.push({ c: o, ds, dd: o.d - car.d, v: o.speed });
+    }
+    // the pace car counts as the car in front
+    const sc = race.sc;
+    if (sc && sc.state !== 'none') {
+      const ds = loopDelta(sc.s, car.s, Ltr);
+      if (ds > 0 && ds < 90) list.push({ c: sc.pseudo, ds, dd: 0, v: sc.v, pace: true });
     }
     const V = Math.max(car.speed, 5);
     const base = this.basePath(car.s);
@@ -316,7 +332,7 @@ export class AIDriver {
       const o = blocker.c;
       const gap = blocker.ds - CAR_LEN;
       const closing = V - blocker.v;
-      const willing = this.dp.aggression + (straight ? 0.3 : -0.1) + (gap < 12 ? 0.25 : 0);
+      const willing = this.dp.aggression + (straight ? 0.3 : -0.1) + (gap < 12 ? 0.25 : 0) - 0.3 * (car.wetness || 0);
       if (!this.passSide) {
         // choose the side: the inside of the coming corner when it is close (late-braking dive), otherwise the side with room
         const needLeft = o.d + 3.0, needRight = o.d - 3.0;
@@ -395,6 +411,13 @@ export class AIDriver {
       }
     }
     // never plan a position outside the track
+    if (sc && sc.state !== 'none') {
+      // behind the pace car: no racing, stay on the line
+      this.passSide = 0;
+      this.defendSide = 0;
+      this.rcMode = 'free';
+      target = 0;
+    }
     this.offTarget = clamp(target, -wr - base, wl - base);
   }
 
@@ -408,7 +431,8 @@ export class AIDriver {
       const overlap = clamp((3.0 - lat) / 0.9, 0, 1);
       const gap = n.ds - CAR_LEN;
       // desired: be able to stop behind it
-      const c = n.v + (gap - 7.5) * 0.9;
+      const hold = (race.sc && race.sc.state !== 'none' ? 14 : 7.5) + 6 * (car.wetness || 0); // queue up a little further back behind the pace car / in the wet
+      const c = n.v + (gap - hold) * 0.9;
       cap = Math.min(cap, lerp(vt, Math.max(c, 2), overlap));
     }
     return cap;

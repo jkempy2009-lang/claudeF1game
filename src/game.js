@@ -11,6 +11,7 @@ import { CarView } from './render/carmodel.js';
 import { PitCrew } from './render/crew.js';
 import { Guideline } from './render/guideline.js';
 import { PostFX } from './render/postfx.js';
+import { Rain } from './render/rain.js';
 import { Effects } from './render/effects.js';
 import { CameraRig, CAMERA_MODES, CAMERA_NAMES } from './render/camera.js';
 import { Input } from './ui/input.js';
@@ -398,6 +399,7 @@ class Game {
       seed: cfg.seed ?? ((Math.random() * 1e6) | 0),
       qualiTimes: cfg.mode === 'race' ? cfg.qualiTimes || null : null,
       upgrades: cfg.upgrades || null,
+      weather: cfg.weather || 'dry',
       equalCars: cfg.career ? false : cfg.equalCars !== false,
     });
     await nextFrame();
@@ -428,6 +430,8 @@ class Game {
       views.set(car, view);
     }
     const effects = new Effects(scene);
+    const rain = new Rain();
+    scene.add(rain.mesh);
     const guide = new Guideline(track, profile);
     scene.add(guide.mesh);
     guide.setVisible(this.save.settings.line !== false);
@@ -444,7 +448,7 @@ class Game {
       scene.add(ghostView.group);
     }
     this.session = {
-      cfg: { ...cfg, seed: race.opt.seed }, track, race, world, scene, views, effects, camRig, ghostView, guide,
+      cfg: { ...cfg, seed: race.opt.seed }, track, race, world, scene, views, effects, rain, camRig, ghostView, guide,
       acc: 0, alpha: 0, intro: 4.2, introT: 0, paused: false, finishedShown: false, radioT: 0, fast: false,
       player: race.player, pin: null, sunDir: world.sunDir, stopTimer: 0, lastEventCar: null, seasonRound: this.save.season ? this.save.season.round : null,
       useSeason: cfg.__season,
@@ -724,6 +728,7 @@ class Game {
 
     this.processEvents(s);
 
+    this.updateSafetyCarView(s, dt);
     // views
     const camPos = this.camera.position;
     let nearest = null;
@@ -791,6 +796,18 @@ class Game {
       camRig.update(dt, views.get(player), player, s.track);
       if (!camRig.shakeOn) camRig.impact = 0;
     }
+    // time of day (midday -> dusk over the race) and weather
+    const raceLen = race.totalLaps * s.track.length;
+    const prog = race.opt.mode === 'race' && s.cfg.timeOfDay !== 'day' ? clamp((race.sorted[0] ? race.sorted[0].rs.maxDist : 0) / raceLen, 0, 1) : 0;
+    const dusk = 0.88 * Math.pow(prog, 1.1);
+    const atmo = world.setAtmosphere({ dusk, wet: race.wet, rain: race.rain });
+    s.scene.fog.color.copy(atmo.fog);
+    s.scene.fog.density = 1.1 / (s.track.theme.fogFar * atmo.fogMul);
+    s.scene.background.copy(atmo.fog);
+    s.scene.environmentIntensity = 0.75 * atmo.envMul;
+    this.renderer.toneMappingExposure = 1 + 0.18 * dusk;
+    effects.wet = race.wet;
+    s.rain.update(dt, this.camera.position, race.rain);
     world.focusShadow(views.get(player).group.position);
     world.update(dt, performance.now() / 1000);
     world.setStartLights(race.phase === 'countdown' ? race.lights : 0, race.phase === 'racing' && race.time - race.t0 < 1.5);
@@ -847,6 +864,26 @@ class Game {
             hud.message(`+${e.secs}s penalty`, 'bad', e.reason, 4);
             this.audio.ui('bad');
             hud.radio(`Penalty: ${e.reason}. ${e.secs} seconds added to your race time.`, 6);
+          }
+          break;
+        case 'scDeploy':
+          hud.flag('SAFETY CAR', '#ffc400', 6, 'sc');
+          hud.radio('Safety car, safety car. Stay in position behind the pace car. No overtaking.', 7);
+          this.audio.ui('bad');
+          this.ensureSafetyCar(s);
+          break;
+        case 'scEnding':
+          hud.radio('Safety car in this lap. Get ready to go green.', 5);
+          hud.flag('SC IN THIS LAP', '#ffc400', 4, 'sc');
+          break;
+        case 'scEnd':
+          hud.flag('GREEN FLAG', '#31d17a', 4, 'green');
+          hud.radio('Green, green, green. We are racing again.', 4);
+          break;
+        case 'yellow':
+          if (!s._yellowT || performance.now() - s._yellowT > 12000) {
+            s._yellowT = performance.now();
+            hud.flag('YELLOW FLAG', '#ffd400', 3.5, 'yellow');
           }
           break;
         case 'warning':
@@ -931,6 +968,34 @@ class Game {
   }
 
   /** Qualifying is over for the player: cool-down lap on autopilot, then the grid. */
+  /** The pace car: a yellow car with a flashing light bar, created when it is first needed. */
+  ensureSafetyCar(s) {
+    if (s.scView) return;
+    const team = { id: 'pace', name: 'Safety car', short: 'SC', color: '#f2c400', accent: '#111111', livery: 'stripe', rating: 0.5 };
+    const view = new CarView(team, { number: 0, isPlayer: false, code: 'SC' }, { detail: 'low' });
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.12, 0.9), new THREE.MeshBasicMaterial({ color: 0xff8a00 }));
+    bar.position.set(-0.3, 1.15, 0);
+    view.model.add(bar);
+    view.bar = bar;
+    view.group.visible = false;
+    s.scene.add(view.group);
+    s.scView = view;
+  }
+
+  updateSafetyCarView(s, dt) {
+    const sc = s.race.sc;
+    const v = s.scView;
+    if (!v) return;
+    const on = sc.state !== 'none';
+    v.group.visible = on;
+    if (!on) return;
+    const tr = s.track;
+    const pt = tr.pointAt(sc.s, 0);
+    v.setPose(pt.x, pt.y, pt.heading, pt.h);
+    s.scT = (s.scT || 0) + dt;
+    v.bar.material.color.setHex(Math.floor(s.scT * 5) % 2 ? 0xff8a00 : 0x442200);
+  }
+
   startQualiEnd(s) {
     const { race, player, camRig } = s;
     if (s.fin) return;
@@ -968,6 +1033,18 @@ class Game {
     s.radioT = 0;
     const ts = p.tyreSummary();
     const left = s.race.totalLaps - rs.laps;
+    const rc = s.race;
+    const fc = rc.forecast();
+    if (fc && fc.rainIn < 70 && !s._rainWarn) {
+      s._rainWarn = true;
+      this.hud.radio(`Rain is coming, about ${Math.round(fc.rainIn / 10) * 10} seconds away. Think about wet tyres (B to box, T to choose Wet).`, 7);
+    } else if (rc.wet > 0.35 && !p.compound.wetTyre && s.track.pit && !s._wetCalled) {
+      s._wetCalled = true;
+      this.hud.radio('The track is wet. Box for wet tyres: press B, then T to pick Wet.', 7);
+    } else if (rc.wet < 0.14 && rc.rain < 0.05 && p.compound.wetTyre && !s._dryCalled && rs.laps > 1) {
+      s._dryCalled = true;
+      this.hud.radio('The track is drying. Box for slicks when you are ready.', 6);
+    } else if (rc.wet > 0.35) s._dryCalled = false;
     if (ts.wear > 0.7 && !rs.pitRequested && rs.stops === 0 && left > 1 && s.track.pit && !s._wearCalled) {
       s._wearCalled = true;
       this.hud.radio('Tyres are going off. Press B when you want to box.', 6);

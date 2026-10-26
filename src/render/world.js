@@ -163,6 +163,58 @@ export class World {
     this.group.add(this.sun, this.sun.target);
   }
 
+  /**
+   * Time of day and weather in one call. dusk: 0 midday .. 1 sunset; wet: water on the track; rain: sky/rain intensity.
+   * Returns the fog settings the scene should use. Cheap to call every frame (quantised, skipped when unchanged).
+   */
+  setAtmosphere({ dusk = 0, wet = 0, rain = 0 } = {}) {
+    const key = `${Math.round(dusk * 60)}/${Math.round(wet * 40)}/${Math.round(rain * 40)}`;
+    if (key === this._atmoKey) return this.atmo;
+    this._atmoKey = key;
+    const th = this.theme;
+    if (!this._base) {
+      this._base = {
+        top: new THREE.Color(th.sky.top), horizon: new THREE.Color(th.sky.horizon), sunColor: new THREE.Color(th.sky.sunColor),
+        sunDir: new THREE.Vector3(...th.sky.sun).normalize(), fog: new THREE.Color(th.fog), hemiInt: this.hemi.intensity, sunInt: this.sun.intensity,
+        ground: new THREE.Color(th.fog).multiplyScalar(0.75), cloud: th.cloud ?? 0.8,
+      };
+      this._tmpA = new THREE.Color();
+      this.atmo = { fog: new THREE.Color(th.fog), fogMul: 1, envMul: 1 };
+    }
+    const b = this._base, u = this.sky.material.uniforms;
+    const grey = (c, v) => c.lerp(this._tmpA.setRGB(v * 0.92, v * 0.95, v), clamp(rain * 0.85, 0, 1));
+    const duskTop = this._tmpB || (this._tmpB = new THREE.Color('#27386f')), duskHor = this._tmpC || (this._tmpC = new THREE.Color('#f39a55')), duskSun = this._tmpD || (this._tmpD = new THREE.Color('#ff8532')), duskFog = this._tmpE || (this._tmpE = new THREE.Color('#c98d73'));
+    u.top.value.copy(b.top).lerp(duskTop, dusk);
+    u.horizon.value.copy(b.horizon).lerp(duskHor, dusk);
+    u.sunColor.value.copy(b.sunColor).lerp(duskSun, dusk);
+    u.ground.value.copy(b.ground).multiplyScalar(1 - 0.5 * dusk);
+    grey(u.top.value, 0.42 * (1 - 0.5 * dusk));
+    grey(u.horizon.value, 0.62 * (1 - 0.55 * dusk));
+    // the sun sinks towards the horizon, shadows lengthen
+    const elev = lerp(b.sunDir.y, 0.1, dusk);
+    const hx = b.sunDir.x, hz = b.sunDir.z, hl = Math.hypot(hx, hz) || 1;
+    const k = Math.sqrt(Math.max(0.0001, 1 - elev * elev)) / hl;
+    this.sunDir.set(hx * k, elev, hz * k).normalize();
+    u.sunDir.value.copy(this.sunDir);
+    u.cloud.value = clamp(b.cloud + 0.25 * rain, 0, 1.2);
+    this.sun.color.copy(u.sunColor.value);
+    this.sun.intensity = b.sunInt * (1 - 0.72 * dusk) * (1 - 0.78 * rain);
+    this.hemi.intensity = b.hemiInt * (1 - 0.5 * dusk) * (1 - 0.25 * rain);
+    // fog
+    const f = this.atmo.fog.copy(b.fog).lerp(duskFog, dusk * 0.75);
+    grey(f, 0.6 * (1 - 0.5 * dusk));
+    this.atmo.fogMul = 1 - 0.5 * rain;
+    this.atmo.envMul = (1 - 0.55 * dusk) * (1 - 0.4 * rain);
+    // wet asphalt: darker and glossy, reflecting the sky and the sun
+    const wc = clamp(wet, 0, 1);
+    for (const m of [this.roadMat, this.kerbMat, ...(this.pitMats || [])]) {
+      if (!m) continue;
+      m.color.setRGB(1 - 0.42 * wc, 1 - 0.4 * wc, 1 - 0.34 * wc);
+      m.roughness = (m === this.kerbMat ? 0.7 : 0.92) - 0.62 * wc;
+    }
+    return this.atmo;
+  }
+
   /** Keeps the shadow frustum centred on the action (snapped to texel size to avoid shimmer). */
   focusShadow(pos) {
     const d = this.sunDir;
@@ -341,6 +393,7 @@ export class World {
   buildRoad() {
     const tr = this.track, N = tr.N, T = this.tex;
     const roadMat = new THREE.MeshStandardMaterial({ map: T.asphalt, roughness: 0.92, metalness: 0.0, color: 0xffffff });
+    this.roadMat = roadMat;
     const full = ranges(N, () => true);
     const wl = tr.wl, wr = tr.wr;
     T.asphalt.repeat.set(1, 1);
@@ -371,6 +424,7 @@ export class World {
 
     // kerbs
     const kerbMat = new THREE.MeshStandardMaterial({ map: T.kerb, roughness: 0.7, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
+    this.kerbMat = kerbMat;
     const kg = [];
     for (const [a, b] of ranges(N, (i) => tr.kl[i] > 0.1)) kg.push(this.ribbonGeometry(a, b, (i) => wl[i], (i) => wl[i] + tr.kl[i], { yOff: 0.025, vLen: 2.0, uRepeat: 1 }));
     for (const [a, b] of ranges(N, (i) => tr.kr[i] > 0.1)) kg.push(this.ribbonGeometry(a, b, (i) => -wr[i] - tr.kr[i], (i) => -wr[i], { yOff: 0.025, vLen: 2.0, uRepeat: 1 }));
@@ -519,6 +573,7 @@ export class World {
     const i0 = tr.idx(p.start), i1 = tr.idx(p.start + p.len);
     const c = (i) => tr.pitCentre(i * tr.ds);
     const asphalt = new THREE.MeshStandardMaterial({ map: this.tex.asphalt, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+    (this.pitMats || (this.pitMats = [])).push(asphalt);
     const lane = new THREE.Mesh(this.ribbonGeometry(i0, i1, (i) => c(i) - p.width / 2, (i) => c(i) + p.width / 2, { yOff: 0.012, vLen: 7.5, uRepeat: p.width / 7.5 }), asphalt);
     lane.receiveShadow = true;
     lane.renderOrder = 1;

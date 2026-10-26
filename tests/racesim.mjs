@@ -11,7 +11,7 @@ const laps = +(process.argv[3] || 3);
 const level = +(process.argv[4] ?? 0.8);
 const field = +(process.argv[5] || 20);
 const track = new Track(TRACK_DEFS.find((d) => d.id === id));
-const race = new Race(track, { laps, level, fieldSize: field, playerGrid: 8, tyreWear: 3, mandatoryStop: false, seed: +(process.env.SEED || 5) });
+const race = new Race(track, { laps, level, fieldSize: field, playerGrid: 8, tyreWear: 3, mandatoryStop: false, seed: +(process.env.SEED || 5), weather: process.env.WX || 'dry', compound: ['light', 'heavy'].includes(process.env.WX) ? 'wet' : 'medium' });
 // AI-driven "player"
 const pcar = race.player;
 const prof = race.getProfile(pcar.spec, 'pilotbot');
@@ -29,7 +29,7 @@ while (race.phase !== 'finished' && sim < 60 * 20) {
   if (bot.stuckT > 5) { bot.stuckT = 0; race.resetToTrack(pcar); }
   sim += DT;
   for (const e of race.events) {
-    if (e.type === 'impact') { e.wall ? wallHits++ : impacts++; if (process.env.IMP && (!e.wall || e.speed > 4)) log(`  impact t=${(race.time - race.t0).toFixed(1)} ${e.car.info.code}(${e.car.rs.pos}) x ${e.other ? e.other.info.code : 'WALL'}(${e.other ? e.other.rs.pos : ''}) at s=${e.car.s.toFixed(0)} v=${e.speed.toFixed(1)} rc=${e.car.driver ? e.car.driver.rcMode : '-'}/${e.other && e.other.driver ? e.other.driver.rcMode : '-'} dd=${e.other ? (e.car.d - e.other.d).toFixed(1) : e.car.d.toFixed(1)}`); }
+    if (e.type === 'impact') { e.wall ? wallHits++ : impacts++; if (process.env.IMP && (!e.wall || e.speed > 4)) log(`  impact t=${(race.time - race.t0).toFixed(1)} ${e.car.info.code}(${e.car.rs.pos}) x ${e.other ? e.other.info.code : 'WALL'}(${e.other ? e.other.rs.pos : ''}) at s=${e.car.s.toFixed(0)} v=${e.speed.toFixed(1)} rc=${e.car.driver ? e.car.driver.rcMode : '-'} comp=${e.car.compound.letter} T=${e.car.temp[0].toFixed(0)}/${e.car.temp[2].toFixed(0)} wr=${(e.car.wear[0]*100).toFixed(0)} ga=${e.car.driver ? e.car.driver.gripAdapt.toFixed(2) : '-'} V=${(e.car.speed*3.6).toFixed(0)}/${e.other && e.other.driver ? e.other.driver.rcMode : '-'} dd=${e.other ? (e.car.d - e.other.d).toFixed(1) : e.car.d.toFixed(1)}`); }
     else if (e.type === 'recover') { recover++; if (process.env.IMP) log(`  recover t=${(race.time - race.t0).toFixed(1)} ${e.car.info.code} s=${e.car.s.toFixed(0)} d=${e.car.d.toFixed(1)}`); }
     else if (e.type === 'pitStopEnd') pits++;
     else if (e.type === 'penalty') { pens++; if (process.env.PEN) log(`  penalty ${e.car.info.code} ${e.reason} t=${(race.time-race.t0).toFixed(1)}`); }

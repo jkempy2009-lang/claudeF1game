@@ -59,12 +59,16 @@ function fresh(setup = {}, assist = {}) {
   c2.reset(0, 0, 0, 300 / 3.6);
   let t2 = 0;
   while (c2.u > 1 && t2 < 15) { c2.step(DT, { throttle: 0, brake: 1, steer: 0 }); t2 += DT; }
-  check('braking time without ABS (lock-ups cost time)', t2, t * 0.98, t * 1.7, ' s');
+  check('braking time without ABS (lock-ups cost time)', t2, t * 0.98, t * 1.9, ' s');
+  const hottest = Math.max(...c2.temp), flatMax = Math.max(...c2.flat);
+  check('lock-ups flat-spot the tyres', flatMax, 0.15, 1.01);
+  check('lock-ups spike tyre temperature vs ABS braking', hottest - Math.max(...car.temp), 8, 400, ' C');
 }
 
 // ---- steady-state cornering: find max sustained lateral accel by circling at radius R
-function skidpad(R, vStart, vEnd, setup) {
+function skidpad(R, vStart, vEnd, setup, wetness = 0) {
   const car = fresh(setup);
+  car.wetness = wetness;
   car.reset(0, -R, 0, 8);
   // place on circle centre (0,0), going counter-clockwise (left turn), start at (0,-R) heading +x
   let best = 0, bestV = 0, lastOk = 0;
@@ -105,6 +109,13 @@ function skidpad(R, vStart, vEnd, setup) {
   check('R=150 m peak lateral g (high speed)', r3.best, 3.4, 6.2, ` g @${kmh(r3.bestV).toFixed(0)}km/h`);
   const lowWing = skidpad(150, 30, 110, { frontWing: 0, rearWing: 0 });
   check('low-wing setup has less grip at speed', lowWing.best / r3.best, 0.6, 0.96, ' ratio');
+  // weather
+  const dryM = skidpad(100, 15, 90, { compound: 'medium' }), wetM = skidpad(100, 15, 90, { compound: 'medium' }, 1);
+  const dryW = skidpad(100, 15, 90, { compound: 'wet' }), wetW = skidpad(100, 15, 90, { compound: 'wet' }, 1);
+  // the tyre loses 30 %; the car then corners slower, so it also has less downforce: the peak-g ratio falls further
+  check('rain cuts slick cornering g (tyre grip -30 %)', wetM.best / dryM.best, 0.5, 0.8, ' ratio');
+  check('wet tyres restore grip in the rain', wetW.best / wetM.best, 1.2, 1.8, ' ratio');
+  check('wet tyres give up some grip on a dry track', dryW.best / dryM.best, 0.7, 0.97, ' ratio');
 }
 
 // ---- tyre temperature, wear are sane

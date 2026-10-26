@@ -416,7 +416,10 @@ export class CarView {
     // DRS flap, brake light, damage
     this.drsPivot.rotation.z = car.drsPos * 0.55;
     const br = car.brake > 0.08;
-    this.brakeLight.material.color.setHex(br ? 0xff1010 : 0x400000);
+    // brake light; while the hybrid system harvests the lamp strobes amber/red
+    this.harvT = (this.harvT || 0) + dt;
+    const strobe = car.harvesting && !br ? (Math.floor(this.harvT * 9) % 2 ? 0xffa010 : 0xff2010) : null;
+    this.brakeLight.material.color.setHex(strobe ?? (br ? 0xff1010 : car.harvesting ? 0xff6a10 : 0x400000));
     const df = car.damageFront || 0, dr = car.damageRear || 0;
     this.frontWingR.visible = df < 0.8;
     this.frontWingL.rotation.z = -df * 0.25;

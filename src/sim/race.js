@@ -1,5 +1,5 @@
 import { Car } from './car.js';
-import { makeSpec, COMPOUNDS, COMPOUND_IDS } from './carspec.js';
+import { makeSpec, COMPOUNDS, COMPOUND_IDS, DRY_COMPOUND_IDS, wetGripFactor } from './carspec.js';
 import { buildSpeedProfile, lineGeometry } from './speedprofile.js';
 import { AIDriver } from './ai.js';
 import { collideCars, collideWalls } from './collision.js';
@@ -20,6 +20,8 @@ export const DIFFICULTIES = [
 export const DEFAULT_OPTIONS = {
   mode: 'race', // race | timetrial | qualifying
   qualiTime: 180, // seconds of session in qualifying
+  weather: 'dry', // dry | light | heavy | changing
+  safetyCar: true, // pace car and yellow flags when 3+ cars are stranded
   equalCars: true, // all cars share the player's specification
   upgrades: null, // career car development { power, aero, grip } levels
   qualiTimes: null, // { driverCode: bestLap } from a qualifying session: sets the grid
@@ -71,6 +73,11 @@ export class Race {
     this.bestSectors = [Infinity, Infinity, Infinity];
     this.ghostRec = [];
     this.ghostBest = null;
+    this.sc = { state: 'none', s: 0, v: 0, t: 0, clearT: 0, count: 0, pseudo: { s: 0, d: 0, speed: 0, axF: 0, info: {}, rs: {} }, ahead: null };
+    this.yellow = false;
+    this.rain = 0; // intensity now, 0..1
+    this.wet = 0; // water on the track, 0..1
+    this.setupWeather();
     this.setupField();
   }
 
@@ -159,7 +166,8 @@ export class Race {
     grid.forEach((g, k) => {
       const { seat, player } = g;
       const team = seat.team;
-      const compound = player ? opt.compound : aiCompounds[rng() < 0.45 ? 0 : rng() < 0.75 ? 1 : 2];
+      let compound = player ? opt.compound : aiCompounds[rng() < 0.45 ? 0 : rng() < 0.75 ? 1 : 2];
+      if (!player && this.wet > 0.4) compound = 'wet';
       const spec = this.makeCarSpec(team, compound, player);
       const car = new Car(spec, track);
       car.wearMult = opt.tyreWear;
@@ -206,6 +214,7 @@ export class Race {
       }
       this.cars.push(car);
     });
+    for (const c of this.cars) c.wetness = this.wet;
     this.sorted = [...this.cars];
     // cars start at the grid slot but the line crossing counts laps from distance 0 at the start line
     this.cars.forEach((c) => this.updateRank());
@@ -334,6 +343,8 @@ export class Race {
         this.updatePit(car, dt * 4);
         this.updateRules(car, dt * 4);
       }
+      this.updateWeather(dt * 4);
+      this.updateSafetyCar(dt * 4);
       this.updateFinish();
       this.adaptPace();
       this.recoverStuck(dt * 4);
@@ -640,7 +651,7 @@ export class Race {
       }
       if (zone !== k && rs.drsEligible[k] && loopDelta(car.s, z.end, tr.length) > 10 && loopDelta(car.s, z.end, tr.length) < 200) rs.drsEligible[k] = false;
     }
-    car.drsAllowed = enabled && zone >= 0 && !!rs.drsEligible[zone] && !rs.inPitLane && !rs.service && Math.abs(car.latG) < 1.4;
+    car.drsAllowed = enabled && this.sc.state === 'none' && zone >= 0 && !!rs.drsEligible[zone] && !rs.inPitLane && !rs.service && Math.abs(car.latG) < 1.4;
     car.drsZone = zone;
     car.drsEligible = rs.drsEligible.some(Boolean);
   }
@@ -679,6 +690,17 @@ export class Race {
         if (ts.wear > 0.72 && !done) drv.wantsPit = true;
         if (ts.wear > 0.88) drv.wantsPit = true;
         if (car.damageFront > 0.45 && lapsLeft > 2) drv.wantsPit = true;
+        // weather: wets once the track is properly wet, slicks once it dries out
+        if (this.track.pit && lapsLeft > 1) {
+          if (this.wet > 0.4 && !car.compound.wetTyre) {
+            drv.wantsPit = true;
+            rs.nextCompound = 'wet';
+          } else if (this.wet < 0.14 && this.rain < 0.05 && car.compound.wetTyre) {
+            drv.wantsPit = true;
+            rs.nextCompound = DRY_COMPOUND_IDS[1];
+          }
+        }
+        if (this.sc.state === 'deployed' && ts.wear > 0.4 && rs.stops === 0 && lapsLeft > 3 && rs.plannedStop != null) drv.wantsPit = true; // a cheap stop
       }
     }
     // player: stopped in the box?
@@ -700,7 +722,8 @@ export class Race {
         let next = rs.nextCompound;
         if (!next) {
           const cur = car.compound.id;
-          const options = COMPOUND_IDS.filter((c) => c !== cur);
+          const options = (this.wet > 0.3 ? ['wet'] : DRY_COMPOUND_IDS).filter((c) => c !== cur);
+          if (!options.length) options.push(cur);
           next = options[Math.floor(this.rng() * options.length)];
         }
         car.fitTyres(COMPOUNDS[next]);
@@ -746,6 +769,162 @@ export class Race {
     rs.penalty += secs;
     rs.penaltyLog.push({ secs, reason, t: this.time });
     this.pushEvent({ type: 'penalty', car, secs, reason });
+  }
+
+  // ---- weather -----------------------------------------------------------------------------------------------
+  setupWeather() {
+    const w = this.opt.weather;
+    this.wx = [];
+    if (this.isQuali || this.opt.mode === 'timetrial') {
+      if (w === 'light') this.wet = 0.5;
+      else if (w === 'heavy') this.wet = 0.9;
+      if (w === 'light' || w === 'heavy') this.wx.push({ t0: -1, t1: 1e9, level: w === 'heavy' ? 1 : 0.45 });
+      this.rain = this.wx.length ? this.wx[0].level : 0;
+      return;
+    }
+    const lapT = this.track.length / 52; // rough lap time, s
+    const dur = lapT * Math.min(this.opt.laps, 40);
+    const r = this.rng;
+    if (w === 'light') {
+      this.wet = 0.5;
+      this.wx.push({ t0: -1, t1: 1e9, level: 0.45 });
+    } else if (w === 'heavy') {
+      this.wet = 0.92;
+      this.wx.push({ t0: -1, t1: 1e9, level: 1 });
+    } else if (w === 'changing') {
+      // one or two showers somewhere in the race
+      const n = dur > 500 && r() < 0.5 ? 2 : 1;
+      let t = dur * (0.15 + 0.25 * r());
+      for (let k = 0; k < n; k++) {
+        const len = Math.max(90, dur * (0.15 + 0.2 * r()));
+        this.wx.push({ t0: t, t1: t + len, level: 0.5 + 0.5 * r() });
+        t += len + dur * (0.15 + 0.1 * r());
+      }
+    }
+    this.rain = this.wx.length && this.wx[0].t0 < 0 ? this.wx[0].level : 0;
+  }
+
+  /** Forecast text for the HUD / radio: the next change, if there is one. */
+  forecast() {
+    const t = this.t0 == null ? 0 : this.time - this.t0;
+    for (const seg of this.wx) {
+      if (seg.t0 > t) return { rainIn: seg.t0 - t, level: seg.level };
+    }
+    return null;
+  }
+
+  updateWeather(dt) {
+    if (this.phase !== 'racing' && this.phase !== 'countdown' && this.phase !== 'grid') return;
+    const t = this.t0 == null ? 0 : this.time - this.t0;
+    let target = 0;
+    for (const seg of this.wx) if (t >= seg.t0 && t < seg.t1) target = Math.max(target, seg.level);
+    // rain intensity eases in and out
+    this.rain += clamp(target - this.rain, -dt * 0.02, dt * 0.015);
+    // water collects when it rains and dries slowly (faster when it is not raining)
+    if (this.rain > 0.04) this.wet = Math.min(1, this.wet + this.rain * 0.012 * dt);
+    else this.wet = Math.max(0, this.wet - 0.0045 * dt);
+    if (this.rain > 0.04 && this.wet > this.rain * 1.05 + 0.1) this.wet -= 0.004 * dt; // light rain only wets the track so much
+    for (const c of this.cars) c.wetness = this.wet;
+  }
+
+  // ---- safety car --------------------------------------------------------------------------------------------
+  /** AI cars that are stranded: stationary on or beside the track, not in the pits and not at the start. */
+  disabledCars() {
+    const tr = this.track;
+    const out = [];
+    for (const c of this.cars) {
+      if (!c.driver || c.rs.finished || c.rs.inPitLane || c.rs.service || c.inGarage) continue;
+      const beside = Math.abs(c.d) > tr.wl[c.i] + 1.5 || Math.abs(c.d) > tr.wr[c.i] + 1.5;
+      if (c.speed < 3.5 && (c.driver.stuckT > 1.2 || (beside && c.speed < 1.5))) out.push(c);
+    }
+    return out;
+  }
+
+  updateSafetyCar(dt) {
+    const sc = this.sc;
+    const tr = this.track;
+    if (!this.opt.safetyCar || this.isQuali || this.opt.mode === 'timetrial' || this.phase !== 'racing') return;
+    const t = this.time - this.t0;
+    const dis = t > 20 ? this.disabledCars() : [];
+    const stalled = this.player && this.player.rs.pos > 0 ? dis : dis;
+    // yellow flag while any car is stranded (local hazard)
+    const yel = stalled.length > 0 && sc.state === 'none';
+    if (yel !== this.yellow) {
+      this.yellow = yel;
+      this.pushEvent({ type: yel ? 'yellow' : 'yellowClear' });
+    }
+    if (sc.state === 'none') {
+      sc.count = stalled.length;
+      const lapsLeft = this.sorted[0] ? this.totalLaps - this.sorted[0].rs.laps : 9;
+      if (stalled.length >= 3 && lapsLeft > 1 && !this.chequered) this.deploySafetyCar();
+      return;
+    }
+    // positions the pace car uses
+    sc.t += dt;
+    const lead = this.sorted.find((c) => !c.rs.finished && !c.rs.dnf) || null;
+    const vTarget = sc.state === 'ending' ? 60 : 38;
+    const accel = sc.v < vTarget ? 4 : -4;
+    sc.v += clamp(vTarget - sc.v, -Math.abs(accel) * dt, Math.abs(accel) * dt);
+    // wait for the leader when it is far behind, so the queue forms behind the pace car
+    if (sc.state === 'deployed' && lead) {
+      const gap = loopDelta(sc.s, lead.s, tr.length);
+      if (gap > 120) sc.v = Math.min(sc.v, Math.max(20, lead.speed * 0.9));
+      else if (gap < 25) sc.v = Math.max(sc.v, lead.speed + 2);
+    }
+    sc.s = mod(sc.s + sc.v * dt, tr.length);
+    const ps = sc.pseudo;
+    ps.s = sc.s;
+    ps.speed = sc.v;
+    ps.d = 0;
+    if (sc.state === 'deployed') {
+      sc.clearT = stalled.length ? 0 : sc.clearT + dt;
+      if (sc.clearT > 8 && sc.t > 28) {
+        sc.state = 'ending';
+        this.pushEvent({ type: 'scEnding' });
+      }
+    } else if (sc.state === 'ending' && tr.pit) {
+      // the pace car peels off into the pit lane; green flag once it has gone
+      const toPit = mod(tr.pit.start - sc.s, tr.length);
+      if (toPit > tr.length - 40 || toPit < 3) {
+        sc.state = 'none';
+        this.yellow = false;
+        this.pushEvent({ type: 'scEnd' });
+      }
+    } else if (sc.state === 'ending' && !tr.pit && sc.t > 60) {
+      sc.state = 'none';
+      this.pushEvent({ type: 'scEnd' });
+    }
+    this.policeSafetyCar();
+  }
+
+  deploySafetyCar() {
+    const sc = this.sc;
+    const lead = this.sorted.find((c) => !c.rs.finished && !c.rs.dnf);
+    if (!lead) return;
+    sc.state = 'deployed';
+    sc.t = 0;
+    sc.clearT = 0;
+    sc.s = mod(lead.s + 60, this.track.length);
+    sc.v = Math.max(38, lead.speed * 0.9);
+    sc.pseudo.s = sc.s;
+    sc.pseudo.speed = sc.v;
+    sc.ahead = this.player ? this.player.ahead : null;
+    this.yellow = false;
+    this.pushEvent({ type: 'scDeploy' });
+  }
+
+  /** Overtaking behind the pace car is not allowed: the player is penalised for passing a running car. */
+  policeSafetyCar() {
+    const p = this.player, sc = this.sc;
+    if (!p || p.rs.finished || p.rs.inPitLane || this.opt.mode !== 'race') return;
+    if (sc.state !== 'deployed') return;
+    const prev = sc.ahead;
+    const now = p.ahead;
+    if (prev && prev !== now && p.behind === prev && prev.speed > 8 && !prev.rs.inPitLane && this.time - (sc.lastPen || -99) > 15) {
+      sc.lastPen = this.time;
+      this.addPenalty(p, 5, 'Overtaking under the safety car');
+    }
+    sc.ahead = now;
   }
 
   // ---- rules ---------------------------------------------------------------------------------------------------

@@ -40,7 +40,7 @@ export class HUD {
     this.lastMini = 0;
     root.innerHTML = `
       <div id="tower" class="hud-box"><div class="hd"><span>Race</span><span id="tw-lap"></span></div><div id="tw-rows"></div></div>
-      <div id="topbar" class="hud-box"><div class="lap" id="tb-lap"></div><div class="clock" id="tb-clock"></div></div>
+      <div id="topbar" class="hud-box"><div class="lap" id="tb-lap"></div><div class="clock" id="tb-clock"></div><div class="wx" id="tb-wx"></div></div>
       <div id="timing" class="hud-box">
         <div><span class="cur" id="t-cur">0:00.000</span><span class="delta" id="t-delta"></span></div>
         <div class="lines"><span>Last</span><span id="t-last">--:--.---</span><span>Best</span><span id="t-best">--:--.---</span><span>Fastest</span><span id="t-fast">--:--.---</span></div>
@@ -76,7 +76,7 @@ export class HUD {
       <div class="touch" id="touch"><button class="l" data-k="left">◀</button><button class="r" data-k="right">▶</button><button class="b" data-k="brake">BRK</button><button class="g" data-k="throttle">GAS</button></div>
     `;
     this.el = {
-      twRows: $('#tw-rows'), twLap: $('#tw-lap'), tbLap: $('#tb-lap'), tbClock: $('#tb-clock'),
+      twRows: $('#tw-rows'), twLap: $('#tw-lap'), tbLap: $('#tb-lap'), tbClock: $('#tb-clock'), tbWx: $('#tb-wx'),
       cur: $('#t-cur'), delta: $('#t-delta'), last: $('#t-last'), best: $('#t-best'), fast: $('#t-fast'), sec: $('#t-sec'),
       mini: $('#minimap canvas'), lights: $('#lights'), msgs: $('#msgs'), radio: $('#radio'), radioT: $('#radio-t'), pit: $('#pit'),
       revs: $('#revs'), soc: $('#d-soc'), socb: $('#d-socb'), drs: $('#d-drs'), boost: $('#d-boost'), gap: $('#d-gap'),
@@ -344,9 +344,24 @@ export class HUD {
     }
     const rt = race.t0 != null ? race.time - race.t0 : 0;
     let clockTxt = race.phase === 'grid' || race.phase === 'countdown' ? (race.opt.mode === 'timetrial' ? 'Time trial' : 'Formation') : formatTime(Math.max(0, rt), 1);
-    if (race.isQuali) clockTxt = rs.laps < 1 ? 'Out lap' : rs.finished ? 'Session over' : rs.laps < 2 ? 'Push lap' : 'Flying lap';
+    if (race.sc && race.sc.state !== 'none') clockTxt = race.sc.state === 'ending' ? 'SC in this lap' : 'SAFETY CAR';
+    else if (race.isQuali) clockTxt = rs.laps < 1 ? 'Out lap' : rs.finished ? 'Session over' : rs.laps < 2 ? 'Push lap' : 'Flying lap';
     else if (race.opt.mode === 'timetrial') clockTxt = rs.laps < 2 ? (rs.laps === 0 ? 'Out lap' : 'Push lap') : 'Flying lap';
     txt(el.tbClock, clockTxt);
+
+    // weather
+    let wx = '';
+    if (race.wet > 0.12 || race.rain > 0.05) {
+      wx = race.rain > 0.05 ? `Rain ${Math.round(race.rain * 100)}% · track ${race.wet > 0.6 ? 'soaked' : race.wet > 0.3 ? 'wet' : 'damp'}` : `Track ${race.wet > 0.6 ? 'soaked' : race.wet > 0.3 ? 'wet' : 'damp'} · drying`;
+    } else {
+      const f = race.forecast && race.forecast();
+      if (f && f.rainIn < 150) wx = `Rain in ${mmss(f.rainIn)}`;
+    }
+    if (this._wx !== wx) {
+      this._wx = wx;
+      el.tbWx.textContent = wx;
+      el.tbWx.style.display = wx ? '' : 'none';
+    }
 
     // gaps
     const ahead = p.ahead, behind = p.behind;
@@ -366,7 +381,8 @@ export class HUD {
     el.tyT.textContent = `Temp ${Math.round(ts.temp)}°C`;
     el.tyF.textContent = `Fuel ${p.fuel.toFixed(1)} kg`;
     const dmg = Math.max(p.damageFront || 0, p.damageRear || 0, p.damageFloor || 0);
-    el.tyD.textContent = dmg > 0.05 ? `Damage ${Math.round(dmg * 100)}%` : '';
+    const flat = Math.max(p.flat[0], p.flat[1], p.flat[2], p.flat[3]);
+    el.tyD.textContent = dmg > 0.05 ? `Damage ${Math.round(dmg * 100)}%` : flat > 0.2 ? 'Flat spots' : '';
     for (let w = 0; w < 4; w++) {
       const tb = el.tyreBoxes[w];
       const temp = p.temp[w];

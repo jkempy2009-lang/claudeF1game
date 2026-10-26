@@ -24,6 +24,8 @@ export const DEFAULT_CONFIG = {
   adaptive: false,
   qualify: false,
   equalCars: true,
+  weather: 'dry',
+  timeOfDay: 'progress',
   frontWing: null,
   rearWing: null,
   brakeBias: 0.58,
@@ -65,6 +67,8 @@ export function sanitizeConfig(raw) {
     adaptive: bool(r.adaptive, D.adaptive),
     qualify: bool(r.qualify, D.qualify),
     equalCars: bool(r.equalCars, D.equalCars),
+    weather: oneOf(r.weather, ['dry', 'light', 'heavy', 'changing'], D.weather),
+    timeOfDay: oneOf(r.timeOfDay, ['progress', 'day'], D.timeOfDay),
     frontWing: wing(r.frontWing),
     rearWing: wing(r.rearWing),
     brakeBias: num(r.brakeBias, 0.5, 0.7, D.brakeBias),
@@ -278,6 +282,8 @@ export class Menu {
         ${this.slider('playerGrid', 'Your starting position', Math.min(c.playerGrid, c.fieldSize), 1, c.fieldSize, 1, 'P' + Math.min(c.playerGrid, c.fieldSize))}
       </div>`}
       <div class="panel"><h3>Tyres &amp; rules</h3>
+        <div class="field"><label>Weather</label>${this.chips('weather', [{ value: 'dry', label: 'Dry' }, { value: 'light', label: 'Light rain' }, { value: 'heavy', label: 'Heavy rain' }, { value: 'changing', label: 'Changeable' }], c.weather)}<div class="hint">Rain cuts slick-tyre grip by about 30 %: fit Wet tyres in the pits (T cycles the next set). Changeable: dry start, a shower somewhere in the race.</div></div>
+        <div class="field"><label>Lighting</label>${this.chips('timeOfDay', [{ value: 'progress', label: 'Midday to dusk' }, { value: 'day', label: 'Always midday' }], c.timeOfDay)}</div>
         <div class="field"><label>Starting compound</label>${this.chips('compound', COMPOUND_IDS.map((id) => ({ value: id, label: COMPOUNDS[id].name, dot: COMPOUNDS[id].color })), c.compound)}</div>
         <div class="field"><label>Tyre wear</label>${this.chips('tyreWear', [{ value: 0, label: 'Off' }, { value: 1.5, label: 'Low' }, { value: 3, label: 'Normal' }, { value: 6, label: 'High' }], c.tyreWear)}<div class="hint">Normal makes the Soft last about 5 laps and the Hard about 12. High forces a stop in a short race.</div></div>
         ${this.toggle('damage', 'Damage', 'Wings, floor and tyre punctures from contact', c.damage)}
@@ -525,6 +531,8 @@ export class Menu {
       }
       if (k === 'diff') c.level = +v;
       else if (k === 'compound') c.compound = v;
+      else if (k === 'weather') { c.weather = v; if ((v === 'light' || v === 'heavy') && !COMPOUNDS[c.compound].wetTyre) c.compound = 'wet'; else if ((v === 'dry' || v === 'changing') && COMPOUNDS[c.compound].wetTyre) c.compound = 'medium'; }
+      else if (k === 'timeOfDay') c.timeOfDay = v;
       else if (k === 'tyreWear') c.tyreWear = +v;
       else if (k === 'tc') c.assists.tc = +v;
       else if (k === 'stability') c.assists.stability = +v;

@@ -1,6 +1,6 @@
 import { G, clamp, lerp, smoothstep, wrapAngle } from '../util/math.js';
 import { SURF } from './track.js';
-import { AIR_DENSITY, SURFACE, engineTorque } from './carspec.js';
+import { AIR_DENSITY, SURFACE, engineTorque, wetGripFactor } from './carspec.js';
 
 export const FL = 0, FR = 1, RL = 2, RR = 3;
 const AMBIENT = 30;
@@ -45,11 +45,14 @@ export class Car {
     this.absF = new Float64Array(4).fill(1);
     this.surf = new Uint8Array(4);
     this.puncture = new Float64Array(4);
+    this.flat = new Float64Array(4); // flat-spotted by lock-ups (0..1), cleared by a tyre change
     this.wheelFx = new Float64Array(4);
     this.wheelFy = new Float64Array(4);
 
     this.fuel = spec.fuelKg;
     this.soc = 0.6;
+    this.harvesting = false;
+    this.wetness = 0; // track water level, set by the race
     this.compound = spec.compound;
     this.reset(0, 0, 0);
   }
@@ -350,6 +353,7 @@ export class Car {
       const wearF = 1 - 0.06 * wearW - 0.2 * smoothstep(0.62, 1.0, wearW);
       let mu = Math.max(0.7, mu0 - sp.loadSens * (Fz - sp.fz0)) * comp.mu * tempF * wearF * surf.grip * (front ? sp.frontGrip : sp.rearGrip);
       if (this.puncture[w] > 0) mu *= 1 - 0.55 * this.puncture[w];
+      mu *= (1 - 0.16 * this.flat[w]) * wetGripFactor(comp, this.wetness) * (sf === SURF.KERB ? 1 - 0.14 * this.wetness : 1);
       const sx = kap / sp.kappaPeak;
       const sy = Math.tan(al) / Math.tan(sp.alphaPeak);
       const s = Math.hypot(sx, sy) + 1e-9;
@@ -399,9 +403,15 @@ export class Car {
       const slideLat = Math.max(absVl, 2) * Math.tan(Math.abs(al));
       const P = Math.abs(FxW * slideLong) + Math.abs(FyW) * slideLat;
       const Prr = 0.02 * Fz * absVl;
-      this.temp[w] += ((TUNE.heat * (P + Prr)) / TYRE_HEAT_CAP - (this.temp[w] - AMBIENT) * (TUNE.coolBase + TUNE.coolSpeed * V)) * dt;
+      this.temp[w] += ((TUNE.heat * (comp.wetTyre ? 0.55 : 1) * (P + Prr)) / TYRE_HEAT_CAP - (this.temp[w] - AMBIENT) * (TUNE.coolBase + TUNE.coolSpeed * V) * (1 + 0.6 * this.wetness)) * dt;
+      // a locked wheel scrubs the same patch of rubber: the surface temperature spikes, a flat spot forms and wear races ahead
+      const locked = absVl > 6 && kap < -0.6;
+      if (locked) {
+        this.temp[w] += 55 * dt * clamp(1 - (this.temp[w] - comp.tOpt) / 75, 0, 1);
+        this.flat[w] = Math.min(1, this.flat[w] + dt * 0.5);
+      }
       const overheat = Math.max(0, this.temp[w] - comp.tOpt - comp.tRange * 0.9) / 30;
-      this.wear[w] = Math.min(1.2, this.wear[w] + ((P * dt) / (comp.wearLaps * WEAR_REF_J)) * (this.wearMult ?? 1) * (1 + 2 * overheat) * dens);
+      this.wear[w] = Math.min(1.2, this.wear[w] + ((P * dt) / (comp.wearLaps * WEAR_REF_J)) * (this.wearMult ?? 1) * (1 + 3 * overheat + (locked ? 5 : 0) + (comp.wetTyre ? 2.5 * (1 - smoothstep(0.05, 0.4, this.wetness)) : 0)) * dens);
 
       // to body frame
       const Fxb = FxW * cd - FyW * sd;
@@ -467,6 +477,7 @@ export class Car {
     if (brk > 0.05 && this.gear > 0) harvest = sp.ersPower * Math.min(1, brk * 1.2);
     else if (thr < 0.05 && speed > 10) harvest = sp.ersPower * 0.25;
     this.soc = clamp(this.soc + ((harvest - ersP) * dt) / sp.ersCapacity, 0, 1);
+    this.harvesting = harvest > 0.2 * sp.ersPower && this.soc < 0.999;
 
     this.locate();
     this.pitch = lerp(this.pitch, clamp(-this.axF * 0.0006, -0.025, 0.025), 1 - Math.exp(-dt * 5));
@@ -494,6 +505,7 @@ export class Car {
     this.wear.fill(0);
     this.temp.fill(72);
     this.puncture.fill(0);
+    this.flat.fill(0);
   }
 
   /** Apply an impact (energy in J at body point (lx, ly)) - damages wings/floor and may puncture. */
@@ -511,5 +523,6 @@ export class Car {
   repair() {
     this.damageFront = this.damageRear = this.damageFloor = 0;
     this.puncture.fill(0);
+    this.flat.fill(0);
   }
 }

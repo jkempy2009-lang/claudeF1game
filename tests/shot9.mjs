@@ -1,0 +1,32 @@
+// Screenshots of weather / dusk / blur / safety car. Usage: node tests/shot9.mjs outdir [trackId]
+import { createRequire } from 'node:module';
+import fs from 'node:fs';
+const require = createRequire(import.meta.url);
+const { chromium } = require('playwright');
+const [out, track = 'vettore'] = process.argv.slice(2);
+fs.mkdirSync(out, { recursive: true });
+const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--enable-webgl'] });
+const page = await browser.newPage({ viewport: { width: 1120, height: 630 } });
+const logs = [];
+page.on('console', (m) => { if (m.type() === 'error') logs.push(m.text()); });
+page.on('pageerror', (e) => logs.push('[pageerror] ' + e.message + '\n' + (e.stack || '').split('\n').slice(0, 4).join('\n')));
+await page.addInitScript((t) => localStorage.setItem('apex-grand-prix.v1', JSON.stringify({ config: { trackId: t, laps: 6, level: 0.3, fieldSize: 8, playerGrid: 3, team: 1, mode: 'race', weather: 'dry' }, settings: { quality: 'medium', camera: 'chase' } })), track);
+await page.goto('http://localhost:8099/index.html');
+await page.waitForTimeout(4000);
+await page.click('[data-act=quick]');
+await page.waitForSelector('#hud:not(.hidden)', { timeout: 180000 });
+await page.waitForTimeout(500);
+const shot = async (name) => { await page.waitForTimeout(2500); await page.screenshot({ path: `${out}/${name}.png`, timeout: 180000 }); console.log('saved', name); };
+// get up to speed on the straight
+await page.evaluate(() => { const a = window.apex; a.session.introCancelled = true; a.debugSkip(14); });
+await shot('1-dry-speed');
+await page.evaluate(() => { const r = window.apex.session.race; r.rain = 1; r.wet = 1; r.wx = [{ t0: -1, t1: 1e9, level: 1 }]; });
+await page.evaluate(() => window.apex.debugSkip(3));
+await shot('2-heavy-rain');
+await page.evaluate(() => { const r = window.apex.session.race; r.rain = 0; r.wet = 0; r.wx = []; window.apex.session.cfg.timeOfDay = 'progress'; r.sorted[0].rs.maxDist = r.totalLaps * window.apex.session.track.length * 0.97; });
+await shot('3-dusk');
+await page.evaluate(() => { const r = window.apex.session.race; r.deploySafetyCar(); });
+await page.evaluate(() => window.apex.debugSkip(2));
+await shot('4-safety-car');
+console.log(logs.join('\n') || 'no errors');
+await browser.close();
