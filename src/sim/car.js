@@ -116,6 +116,11 @@ export class Car {
     return this.spec.dryMass + this.fuel;
   }
 
+  /** Yaw inertia (kg m^2): the fuel sits near the CG, so it adds only a little. */
+  get inertia() {
+    return this.spec.izDry + this.fuel * 0.45;
+  }
+
   /** Re-projects the body on the track (also called after teleports/collision corrections). */
   locate() {
     const p = this.track.project(this.x, this.y, this.lastHint, tmpProj);
@@ -153,7 +158,7 @@ export class Car {
   step(dt, inp) {
     const sp = this.spec;
     const mass = this.mass;
-    const iz = sp.izDry + this.fuel * 0.45;
+    const iz = this.inertia;
     const L = sp.wheelbase;
     const a = this.a, b = this.b;
     this.px = this.x;

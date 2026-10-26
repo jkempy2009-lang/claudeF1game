@@ -455,9 +455,10 @@ export class Race {
         const a = cars[i], b = cars[j];
         if (a.rs.service || b.rs.service) continue;
         const r = collideCars(a, b);
-        if (r && r.energy) {
+        if (r) {
           a.locate();
           b.locate();
+          if (!r.energy) continue; // pushed apart with no closing speed
           // a sustained rub counts as one incident: new event only after the pair has been apart for a moment
           const key = i * 32 + j;
           const last = this.pairContact.get(key) ?? -9;

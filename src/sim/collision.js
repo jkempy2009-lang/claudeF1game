@@ -1,10 +1,10 @@
 import { clamp } from '../util/math.js';
 
-// Body outline relative to the CG (CG is ~2.0 m behind the nose of the front wing, 3.5 m ahead of the rear wing tip).
+// Body outline relative to the CG (the nose of the front wing is 3.0 m ahead of it, the rear wing tip 2.45 m behind).
 export const BODY = { front: 3.0, rear: -2.45, half: 0.98 };
-const CX = (BODY.front + BODY.rear) / 2;
-const HL = (BODY.front - BODY.rear) / 2;
 const HW = BODY.half;
+/** Returned when the cars were only pushed apart (no closing speed): positions changed, no impact to report. */
+const PUSHED = Object.freeze({ energy: 0, speed: 0, la: null, lb: null, lx: 0, ly: 0, wx: 0, wy: 0 });
 
 /** Corners of the car outline in body coordinates: front-left, front-right, rear-right, rear-left. */
 export const CORNERS = [
@@ -13,8 +13,6 @@ export const CORNERS = [
   [BODY.rear, -HW],
   [BODY.rear, HW],
 ];
-
-const SQRT = Math.sqrt;
 
 function worldCorners(c, out) {
   const co = Math.cos(c.theta), si = Math.sin(c.theta);
@@ -30,13 +28,19 @@ const ca = new Float64Array(8), cb = new Float64Array(8);
 /** Applies an impulse j (world frame, vector jx,jy) at world offset (rx,ry) from the CG and updates u,v,r. */
 function applyImpulse(c, jx, jy, rx, ry) {
   const m = c.mass;
-  const iz = c.spec.izDry + c.fuel * 0.45;
+  const iz = c.inertia;
   const co = Math.cos(c.theta), si = Math.sin(c.theta);
   let vx = c.u * co - c.v * si + jx / m;
   let vy = c.u * si + c.v * co + jy / m;
   c.u = vx * co + vy * si;
   c.v = -vx * si + vy * co;
   c.r += (rx * jy - ry * jx) / iz;
+}
+
+/** A world-frame offset from the CG expressed in the car's own frame (x forward, y left). */
+function toLocal(car, rx, ry) {
+  const co = Math.cos(car.theta), si = Math.sin(car.theta);
+  return [rx * co + ry * si, -rx * si + ry * co];
 }
 
 function velAt(c, rx, ry) {
@@ -47,7 +51,8 @@ function velAt(c, rx, ry) {
 
 /**
  * Car/car collision: separating-axis test between the two outlines, positional separation, then an impulse with
- * restitution + tangential friction at the deepest contact. Returns impact energy (J) or 0.
+ * restitution + tangential friction at the deepest contact. Returns 0 when the outlines do not touch, PUSHED when they were only
+ * separated, otherwise { energy (J), la, lb (contact point in each car's frame), speed (closing speed) }.
  */
 export function collideCars(a, b, restitution = 0.12) {
   const dx = b.x - a.x, dy = b.y - a.y;
@@ -97,66 +102,70 @@ export function collideCars(a, b, restitution = 0.12) {
   if (!cnt) { px = (a.x + b.x) / 2; py = (a.y + b.y) / 2; } else { px /= cnt; py /= cnt; }
 
   const ma = a.mass, mb = b.mass;
+  // lever arms and the contact point in each car's frame are taken where the cars actually overlapped, before they are separated
+  const rax = px - a.x, ray = py - a.y, rbx = px - b.x, rby = py - b.y;
+  const la = toLocal(a, rax, ray), lb = toLocal(b, rbx, rby);
   const push = minPen + 0.01;
   a.x -= nx * push * (mb / (ma + mb));
   a.y -= ny * push * (mb / (ma + mb));
   b.x += nx * push * (ma / (ma + mb));
   b.y += ny * push * (ma / (ma + mb));
 
-  const rax = px - a.x, ray = py - a.y, rbx = px - b.x, rby = py - b.y;
   const va = velAt(a, rax, ray), vb = velAt(b, rbx, rby);
-  const rvx = vb[0] - va[0], rvy = vb[1] - va[1];
-  const vn = rvx * nx + rvy * ny;
-  if (vn >= 0) return 0;
-  const ia = a.spec.izDry + a.fuel * 0.45, ib = b.spec.izDry + b.fuel * 0.45;
+  const vn = (vb[0] - va[0]) * nx + (vb[1] - va[1]) * ny;
+  if (vn >= 0) return PUSHED;
+  const ia = a.inertia, ib = b.inertia;
   const rnA = rax * ny - ray * nx, rnB = rbx * ny - rby * nx;
   const denom = 1 / ma + 1 / mb + (rnA * rnA) / ia + (rnB * rnB) / ib;
   const j = (-(1 + restitution) * vn) / denom;
   applyImpulse(a, -j * nx, -j * ny, rax, ray);
   applyImpulse(b, j * nx, j * ny, rbx, rby);
-  // tangential friction (scrubbing)
+  // tangential friction (scrubbing): sliding speed after the normal impulse, with the effective mass along the tangent
   const tx = -ny, ty = nx;
-  const vt = rvx * tx + rvy * ty;
-  const jt = clamp(-vt / denom, -0.25 * j, 0.25 * j);
+  const va2 = velAt(a, rax, ray), vb2 = velAt(b, rbx, rby);
+  const vt = (vb2[0] - va2[0]) * tx + (vb2[1] - va2[1]) * ty;
+  const rtA = rax * ty - ray * tx, rtB = rbx * ty - rby * tx;
+  const denomT = 1 / ma + 1 / mb + (rtA * rtA) / ia + (rtB * rtB) / ib;
+  const jt = clamp(-vt / denomT, -0.25 * j, 0.25 * j);
   applyImpulse(a, -jt * tx, -jt * ty, rax, ray);
   applyImpulse(b, jt * tx, jt * ty, rbx, rby);
   const energy = 0.5 * (1 / (1 / ma + 1 / mb)) * vn * vn;
-  // local contact points for damage placement
-  const loc = (car) => {
-    const co = Math.cos(car.theta), si = Math.sin(car.theta);
-    const rx = px - car.x, ry = py - car.y;
-    return [rx * co + ry * si, -rx * si + ry * co];
-  };
-  const la = loc(a), lb = loc(b);
   return { energy, la, lb, speed: -vn };
 }
 
 /**
  * Barrier collisions: each outline corner is tested against the wall distance on the side it is closest to.
- * Returns the strongest impact {energy, lx, ly, speed} or null.
+ * Returns the strongest impact {energy, lx, ly, speed}, PUSHED when the car was only moved off a wall, or null.
  */
 const tmp = { i: 0, t: 0, s: 0, d: 0, dist: 0 };
 export function collideWalls(car, track, restitution = 0.2, friction = 0.35) {
   worldCorners(car, ca);
   let worst = null;
   const co = Math.cos(car.theta), si = Math.sin(car.theta);
+  let moved = false;
   const resolve = (pen, nx, ny, wx, wy) => {
-    // positional correction (move the whole car out of the barrier)
-    car.x += nx * (pen + 0.01);
-    car.y += ny * (pen + 0.01);
+    // the lever arm is where the corner met the wall, before the car is moved out of it
     const rx = wx - car.x, ry = wy - car.y;
+    // positional correction (move the whole car out of the barrier); the other corners move with it, so a nose-on hit is not corrected twice
+    const sx = nx * (pen + 0.01), sy = ny * (pen + 0.01);
+    car.x += sx;
+    car.y += sy;
+    for (let m = 0; m < 4; m++) { ca[m * 2] += sx; ca[m * 2 + 1] += sy; }
+    moved = true;
     const v = velAt(car, rx, ry);
     const vn = v[0] * nx + v[1] * ny;
     if (vn >= 0) return;
-    const m = car.mass, iz = car.spec.izDry + car.fuel * 0.45;
+    const m = car.mass, iz = car.inertia;
     const rn = rx * ny - ry * nx;
     const denom = 1 / m + (rn * rn) / iz;
     const j = (-(1 + restitution) * vn) / denom;
     applyImpulse(car, j * nx, j * ny, rx, ry);
     // friction along the wall
     const tx = -ny, ty = nx;
-    const vt = v[0] * tx + v[1] * ty;
-    const jt = clamp(-vt / denom, -friction * j, friction * j);
+    const v2 = velAt(car, rx, ry);
+    const vt = v2[0] * tx + v2[1] * ty;
+    const rt = rx * ty - ry * tx;
+    const jt = clamp(-vt / (1 / m + (rt * rt) / iz), -friction * j, friction * j);
     applyImpulse(car, jt * tx, jt * ty, rx, ry);
     const energy = 0.5 * m * vn * vn;
     if (!worst || energy > worst.energy) {
@@ -184,5 +193,5 @@ export function collideWalls(car, track, restitution = 0.2, friction = 0.35) {
       if (pp > 0) resolve(pp, pitSide * track.nx[p.i], pitSide * track.ny[p.i], wx, wy);
     }
   }
-  return worst;
+  return worst || (moved ? PUSHED : null);
 }

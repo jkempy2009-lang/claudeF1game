@@ -49,7 +49,7 @@ export function keyLabel(code) {
 export function sanitizeKeys(raw) {
   const out = {};
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
-  for (const [a] of KEY_ACTIONS) {
+  for (const a of [...KEY_ACTIONS.map((k) => k[0]), 'confirm']) { // confirm is not listed on the controls screen, but a key taken from it must stay taken
     const v = raw[a];
     if (!Array.isArray(v)) continue;
     const codes = v.filter((c) => typeof c === 'string' && KEY_CODE.test(c) && !RESERVED.has(c)).slice(0, 3);
@@ -78,13 +78,28 @@ export function bindKey(custom, action, code) {
   return out; // an action that lost its only key stays unbound until the player gives it one (or resets the keys)
 }
 
-const dead = (v, d) => (Math.abs(v) < d ? 0 : (v - Math.sign(v) * d) / (1 - d));
+const dead = (v, d) => {
+  d = clamp(d, 0, 0.9);
+  return Math.abs(v) < d ? 0 : (v - Math.sign(v) * d) / (1 - d);
+};
+const FORM_TAG = /^(INPUT|TEXTAREA|SELECT)$/;
+const STALE_MS = 500;
+
+/** Keys pressed since the last poll. A press that nobody polled for half a second (typed in a menu) is stale and no longer counts. */
+class Pressed extends Map {
+  has(code) {
+    const t = super.get(code);
+    return t !== undefined && performance.now() - t < STALE_MS;
+  }
+}
 
 /** Keyboard + gamepad (+ touch overlay) -> a single driver input state with sensible ramping for digital keys. */
 export class Input {
   constructor() {
     this.down = new Set();
-    this.pressed = new Set();
+    this.pressed = new Pressed();
+    this.padLast = -1e9;
+    this.capture = () => true; // the game narrows this to the states where the keys drive the car (so menus keep Tab, Space and the arrows)
     this.throttle = 0;
     this.brake = 0;
     this.steer = 0;
@@ -97,11 +112,18 @@ export class Input {
     this.rumbleT = 0;
     window.addEventListener('keydown', (e) => {
       if (e.repeat) return;
-      if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.code)) e.preventDefault();
+      if (e.ctrlKey || e.metaKey) return; // browser shortcuts (reload, zoom) are not driving inputs
+      const typing = e.target && FORM_TAG.test(e.target.tagName || '');
+      if (!typing && this.capture() && ['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
+      if (typing) return;
       this.down.add(e.code);
-      this.pressed.add(e.code);
+      this.pressed.set(e.code, performance.now());
     });
-    window.addEventListener('keyup', (e) => this.down.delete(e.code));
+    window.addEventListener('keyup', (e) => {
+      this.down.delete(e.code);
+      if (e.code === 'MetaLeft' || e.code === 'MetaRight') this.down.clear(); // the browser swallows the keyups of keys released under Cmd
+    });
+    document.addEventListener('visibilitychange', () => { if (document.hidden) this.down.clear(); });
     window.addEventListener('blur', () => this.down.clear());
   }
 
@@ -113,10 +135,16 @@ export class Input {
     return this.keys[action].some((k) => this.pressed.has(k));
   }
 
+  /** The first standard-mapped pad (a wheel or joystick with an odd layout is only used when nothing else is plugged in). */
   pad() {
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-    for (const p of pads) if (p && p.connected && p.axes.length >= 2) return p;
-    return null;
+    let any = null;
+    for (const p of pads) {
+      if (!p || !p.connected || p.axes.length < 2) continue;
+      if (p.mapping === 'standard') return p;
+      any = any || p;
+    }
+    return any;
   }
 
   /** Gamepad vibration: kerbs and rough ground, tyres at the limit, impacts. Cheap: updates ten times a second. */
@@ -133,26 +161,31 @@ export class Input {
     const strong = clamp(slip * 0.5 + impact * 1.2, 0, 1);
     const weak = clamp(car.kerbShake * 0.9 + (car.onGrass ? 0.3 : 0), 0, 1);
     if (strong < 0.03 && weak < 0.03) return;
-    act.playEffect('dual-rumble', { duration: 120, strongMagnitude: strong, weakMagnitude: weak }).catch(() => {});
+    try {
+      Promise.resolve(act.playEffect('dual-rumble', { duration: 120, strongMagnitude: strong, weakMagnitude: weak })).catch(() => {});
+    } catch { /* an unsupported effect type must not break the frame */ }
   }
 
   /** Called once per rendered frame with the frame dt and the player's speed (m/s). */
-  poll(dt, speed) {
+  poll(dt, speed, idle = false) {
     const out = { throttle: 0, brake: 0, steer: 0, boost: false, gearUp: false, gearDown: false, drsPress: false, pitToggle: false, tyreCycle: false, camera: false, reset: false, pause: false, lookBack: false, map: false, mute: false, autoToggle: false, line: false, tele: false, confirm: false, ersCycle: false, fuelCycle: false, bbDelta: 0 };
-    // keyboard ramps
+    // keyboard ramps (frozen while paused or in a replay: the world is not moving, so the pedals must not wind up)
+    if (idle) this.throttle = this.brake = this.steer = 0;
     const kThr = this.isDown('throttle') || this.touch.throttle;
     const kBrk = this.isDown('brake') || this.touch.brake;
     const kL = this.isDown('left') || this.touch.left;
     const kR = this.isDown('right') || this.touch.right;
-    this.throttle += clamp((kThr ? 1 : 0) - this.throttle, -dt * 12, dt * 5.5);
-    this.brake += clamp((kBrk ? 1 : 0) - this.brake, -dt * 14, dt * 5);
-    if (kBrk && this.brake < 0.28) this.brake = 0.28; // initial bite
-    const target = (kL ? 1 : 0) - (kR ? 1 : 0);
-    const sp = clamp(speed / 85, 0, 1);
-    const attack = (4.6 - 2.6 * sp) * this.opts.steerSpeed; // slower build-up at speed: digital steering is a blunt tool
-    const release = (7.5 - 2.0 * sp) * this.opts.steerSpeed;
-    const rate = target !== 0 && Math.sign(target) === Math.sign(this.steer || target) ? attack : release;
-    this.steer += clamp(target - this.steer, -dt * rate, dt * rate);
+    if (!idle) {
+      this.throttle += clamp((kThr ? 1 : 0) - this.throttle, -dt * 12, dt * 5.5);
+      this.brake += clamp((kBrk ? 1 : 0) - this.brake, -dt * 14, dt * 5);
+      if (kBrk && this.brake < 0.28) this.brake = 0.28; // initial bite
+      const target = (kL ? 1 : 0) - (kR ? 1 : 0);
+      const sp = clamp(speed / 85, 0, 1);
+      const attack = (4.6 - 2.6 * sp) * this.opts.steerSpeed; // slower build-up at speed: digital steering is a blunt tool
+      const release = (7.5 - 2.0 * sp) * this.opts.steerSpeed;
+      const rate = target !== 0 && Math.sign(target) === Math.sign(this.steer || target) ? attack : release;
+      this.steer += clamp(target - this.steer, -dt * rate, dt * rate);
+    }
     out.throttle = this.throttle;
     out.brake = this.brake;
     out.steer = this.steer;
@@ -183,17 +216,16 @@ export class Input {
       const rt = p.buttons[7] ? p.buttons[7].value : 0, lt = p.buttons[6] ? p.buttons[6].value : 0;
       const b = (i) => !!(p.buttons[i] && p.buttons[i].pressed);
       const edge = (i) => b(i) && !this.padPrev[i];
-      const using = Math.abs(ax) > 0.05 || rt > 0.05 || lt > 0.05 || b(0) || b(1) || b(2) || b(3);
+      const using = Math.abs(ax) > 0.05 || rt > 0.05 || lt > 0.05 || p.buttons.some((x) => x.pressed); // Start, d-pad and bumpers count too: a pad that only pauses must still resume
       const now = performance.now();
       if (using) this.padLast = now;
       const kbd = kThr || kBrk || kL || kR;
       if (kbd) this.padLast = -1e9;
-      this.padActive = now - (this.padLast ?? -1e9) < 2500;
+      this.padActive = now - this.padLast < 2500;
       if (this.padActive) {
         out.steer = -Math.sign(ax) * Math.pow(Math.abs(ax), 1.35);
-        out.throttle = Math.max(out.throttle * 0, rt);
+        out.throttle = rt;
         out.brake = lt;
-        out.boost = out.boost || b(2) || b(5) && false;
         out.gearUp = out.gearUp || edge(5);
         out.gearDown = out.gearDown || edge(4);
         out.drsPress = out.drsPress || edge(0);

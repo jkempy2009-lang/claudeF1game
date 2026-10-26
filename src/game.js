@@ -67,6 +67,7 @@ class Game {
     this.state = 'boot';
     this.tracks = {};
     this.input = new Input();
+    this.input.capture = () => this.state === 'race' || this.state === 'replay' || this.state === 'photo' || this.state === 'paused' && !this.menu.current;
     this.audio = new AudioEngine();
     this.lastT = performance.now();
     try {
@@ -823,7 +824,7 @@ class Game {
     if (!s) return;
     if (this.state === 'paused') {
       // keep rendering the frozen world (camera still)
-      const pp = this.input.poll(dt, 0);
+      const pp = this.input.poll(dt, 0, true);
       if (pp.pause) return this.resume();
       this.audio.update(s.player, [], this.listener(), dt, true);
       this.post.render(s.scene, this.camera, 0, this.bloomFor(s));
@@ -1473,7 +1474,7 @@ class Game {
     if (!r) return;
     const rec = s.rec;
     const wasEnter = this.input.pressed.has('Enter'); // Space is play / pause in a replay, so only Enter (and Esc / P) leave it
-    const input = this.input.poll(dt, 0);
+    const input = this.input.poll(dt, 0, true);
     if (input.pause || wasEnter) return this.endReplay();
     if (input.camera) this.replayAction('cam');
     if (r.playing) {
