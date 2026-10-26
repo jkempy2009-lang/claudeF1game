@@ -1,0 +1,18 @@
+{
+  "name": "apex-grand-prix",
+  "version": "1.0.0",
+  "description": "Apex Grand Prix - a 3D Formula-style racing game with a real tyre/aero/powertrain model, AI field and adjustable difficulty.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "node tools/build.mjs --watch",
+    "build": "node tools/build.mjs",
+    "test": "node tests/run.mjs",
+    "plot": "node tools/plot-tracks.mjs"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "three": "^0.186.1"
+  }
+}
