@@ -515,7 +515,7 @@ export class Menu {
       <div class="hint" style="margin-top:.5rem">A weaker car is a tougher start: prize money buys upgrades, and strong seasons earn offers from better teams.</div></div>
       <div class="grid2" style="margin-top:1rem">
         <div class="panel"><h3>AI difficulty</h3>${this.chips('cn.level', DIFFICULTIES.map((d) => ({ value: d.level, label: d.name })), diff.level)}<div class="hint">${esc(diff.blurb)}. It rises a little every season.</div></div>
-        <div class="panel"><h3>Season</h3><div class="field"><label>Calendar</label>${this.chips('cn.rounds', [{ value: 4, label: '4 rounds' }, { value: 8, label: '8 rounds' }], n.rounds)}</div>
+        <div class="panel"><h3>Season</h3><div class="field"><label>Calendar</label>${this.chips('cn.rounds', [{ value: 4, label: '4 rounds' }, { value: 8, label: TRACK_DEFS.length + ' rounds (all circuits)' }], n.rounds)}</div>
         <div class="field"><label>Race distance</label>${this.chips('cn.distance', DISTANCES.map((d) => ({ value: d.id, label: `${d.name} · ${d.km} km` })), n.distance)}</div></div></div>
       <div class="footer"><button class="btn sm" data-act="main">◀ Back</button><div class="hint">${esc(TEAMS[n.team].name)} · ${n.rounds} rounds · ${esc(diff.name)}</div><button class="btn primary" data-act="careerstart">Start career</button></div></section>`;
   }

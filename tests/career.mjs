@@ -9,7 +9,7 @@ const ok = (n, c, x = '') => { console.log(`${c ? 'PASS' : 'FAIL'}  ${n} ${x}`);
 
 const career = C.newCareer({ team: 6, level: 0.5, rounds: 4 });
 ok('new career has a 4 round calendar', career.season.calendar.length === 4);
-ok('8 round calendar', C.makeCalendar(8).length === 8);
+ok('full calendar uses every circuit', C.makeCalendar(8).length === TRACK_DEFS.length && TRACK_DEFS.length >= 10);
 ok('lapsFor scales with distance', C.lapsFor(3000, 'sprint') < C.lapsFor(3000, 'grandprix'));
 ok('upgrade fails without budget', !C.buyUpgrade({ ...career, budget: 5, upgrades: { ...career.upgrades } }, 'power').ok);
 const r = C.buyUpgrade(career, 'aero');

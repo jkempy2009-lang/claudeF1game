@@ -1,6 +1,6 @@
 # Apex Grand Prix
 
-A 3D Formula-style racing game that runs in the browser. Twenty cars, four original circuits, a physics model built from first principles (not a canned arcade handling model), and an AI field with adjustable difficulty.
+A 3D Formula-style racing game that runs in the browser. Twenty cars, ten original circuits, a physics model built from first principles (not a canned arcade handling model), and an AI field with adjustable difficulty.
 
 **Play:** open `dist/apex-grand-prix.html` (single self-contained file), or serve `docs/` with any static server (GitHub Pages works: set the source to the `docs` folder).
 
@@ -30,6 +30,8 @@ npm run test:leak    # browser: GPU resources across repeated sessions
 | Monte Aurora Ring | 3.8 km | Alpine, wide open, fast and winding |
 | Mirage International Circuit | 5.1 km | Desert: two huge straights joined by hairpins |
 | Parc Lumière | 3.8 km | Tight city-park ribbon between barriers |
+| Porto Vecchio Harbour Circuit | 4.3 km | Waterfront blast then tight docks, street walls |
+| Sakura Ridge Circuit | 5.5 km | Wooded ridge, flowing esses, 36 m of elevation change |
 
 **Racing** – standing start with lights, 10 fictional teams x 2 drivers, live timing tower with real time gaps, sector timing (purple/green), best-lap delta, DRS (detection line + <1 s rule, painted lines and signs), ERS deploy/harvest with a boost button and three ERS modes, fuel mix, live brake bias, slipstream and dirty air, damage (wings, bendable and crumpling sidepods, floor, punctures), tyre compounds (including **Wet**) with a temperature window, wear and lock-up flat spots, mandatory-stop option, pit lane with speed limiter and an **interactive pit stop** (time your presses on the four wheel nuts: 2.5 s if perfect), track-limits warnings, collision penalties, pit speeding penalties, **safety car**, marshal recovery, fast-forward to the final classification.
 

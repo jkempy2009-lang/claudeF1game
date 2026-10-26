@@ -11,8 +11,8 @@ Everything below was added or fixed in this release, grouped by area.
 - **Instant replay**: the last 30 seconds of the race for every car are recorded (30 Hz ring buffer) and can be replayed from the pause menu or the results screen with TV / chase / low / helicopter / cockpit / T-cam cameras, slow motion, scrubbing and a choice of which car to follow.
 - **Photo mode** (pause menu): free-fly camera with mouse look, zoom and a one-click PNG capture.
 
-### New circuits (4)
-- *Autódromo Costa Azul* (coastal, rolling, 4.6 km), *Monte Aurora Ring* (alpine, winding, 3.8 km), *Mirage International Circuit* (desert, two huge straights, 5.1 km) and *Parc Lumière* (tight city park, 3.8 km). All have pits, auto-generated DRS zones, brake boards, kerbs, run-off, scenery, recommended wing setups and clean AI laps. The career 8-round calendar uses all eight circuits.
+### New circuits (6)
+- *Autódromo Costa Azul* (coastal, rolling, 4.6 km), *Monte Aurora Ring* (alpine, winding, 3.8 km), *Mirage International Circuit* (desert, two huge straights, 5.1 km) and *Parc Lumière* (tight city park, 3.8 km). All have pits, auto-generated DRS zones, brake boards, kerbs, run-off, scenery, recommended wing setups and clean AI laps. *Porto Vecchio Harbour Circuit* (street, 4.3 km, a long waterfront straight into slow docks) and *Sakura Ridge Circuit* (wooded ridge, 5.5 km, 36 m of elevation change). The long career calendar now uses all ten circuits. `node tools/checktrack.mjs` reports length, self-clearance, tightest radius and elevation for every circuit.
 
 ### Racing, rules and AI
 - **AI recalibrated against human lap times** (Hautes-Fagnes 1:19, Vettore 1:08.5, Rade 1:06.4): brakes late and hard instead of bleeding speed over a long distance, speed envelope accounts for lateral load transfer, the racing line is smoothed so it can be driven at 340 km/h, longer steering preview. Legend: Vettore 1:08.0, Rade 1:05.3, Hautes-Fagnes 1:17.8, Northfield 1:22.3. Elite about 3 % slower, Pro 7 %, Amateur 13 %, Rookie 20 %.
