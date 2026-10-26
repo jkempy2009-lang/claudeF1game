@@ -6,15 +6,17 @@ const PIT_LIMIT = 22.2;
 
 /** Maps a 0..1 difficulty slider to driver behaviour. */
 export function difficultyParams(level) {
-  const L = clamp(level, 0, 1);
+  // 0..1 is the normal slider; above 1 is the 'Apex' preset: the same cars driven right at the limit of the profile
+  const L = clamp(level, 0, 1.3);
+  const Lc = Math.min(1, L);
   return {
     // fraction of the speed profile the AI drives: Legend = 100 % (about the pace of a very good human lap), Rookie ~ 21 % slower
     pace: 0.8 + 0.2 * Math.pow(L, 0.8),
-    mistakesPerLap: 1.4 * (1 - L) ** 2 + 0.03,
-    reaction: 0.55 - 0.38 * L,
-    aggression: 0.2 + 0.7 * L,
+    mistakesPerLap: 1.4 * (1 - Lc) ** 2 + 0.03 * (1 - 0.6 * Math.max(0, L - 1) / 0.3),
+    reaction: Math.max(0.1, 0.55 - 0.38 * L),
+    aggression: Math.min(1, 0.2 + 0.7 * L),
     lineScale: 0.55 + 0.45 * Math.min(1, L * 1.4), // how much of the racing line they use (novices stay near the middle)
-    brakeBias: 0.85 + 0.13 * L, // how late they brake relative to the maximum
+    brakeBias: 0.85 + 0.13 * Lc, // how late they brake relative to the maximum
   };
 }
 
@@ -180,7 +182,7 @@ export class AIDriver {
     if (car.onGrass || Math.abs(car.d) > tr.wl[car.i] + 1.5) vt = Math.min(vt, 28);
     // traffic cap
     vt = Math.min(vt, this.trafficCap(vt, race));
-    if (race.sc && race.sc.state !== 'none' && this.pitState === 'none') {
+    if (race.sc && race.sc.state !== 'none' && (this.pitState === 'none' || !tr.inPitRange(car.s))) {
       // behind the pace car everyone slows; cars at the back may close up the queue a little faster
       const ahead = car.ahead;
       const gapM = ahead ? Math.max(0, loopDelta(ahead.s, car.s, tr.length)) : 0;
@@ -192,8 +194,11 @@ export class AIDriver {
     if (this.pitState !== 'none') {
       const limStart = tr.pit.limitStart;
       const toLimit = mod(limStart - s, tr.length);
-      if (this.pitState === 'in' && toLimit < 400 && !tr.inPitLimiter(s)) {
-        vt = Math.min(vt, Math.sqrt(PIT_LIMIT * PIT_LIMIT + 2 * 38 * Math.max(0, toLimit - 6)));
+      if (this.pitState === 'in' && toLimit < 500 && !tr.inPitLimiter(s)) {
+        // arrive at the limit at the start of the entry ramp (the turn-in), not after it
+        const toRamp = mod(tr.pit.start - s, tr.length);
+        const d = toRamp < tr.length - 80 ? Math.max(0, toRamp - 6) : 0;
+        vt = Math.min(vt, Math.sqrt(PIT_LIMIT * PIT_LIMIT * 0.94 + 2 * 9 * d));
       }
       if (tr.inPitLimiter(s) || this.pitState === 'stopped') {
         vt = Math.min(vt, PIT_LIMIT * 0.97);
@@ -223,6 +228,20 @@ export class AIDriver {
         if (V > vj) {
           const a = (V * V - vj * vj) / (2 * Math.max(dist - 2, 1));
           if (a > aReq) aReq = a;
+        }
+      }
+      // pit lane: the limiter line and the box are hard braking targets just like corners
+      if (this.pitState === 'in') {
+        if (!tr.inPitLimiter(s)) {
+          // be at the limit before the entry ramp starts turning: braking and the first steering must not overlap
+          const toRamp = mod(tr.pit.start - s, tr.length);
+          const toLimit = mod(tr.pit.limitStart - s, tr.length);
+          const vL = PIT_LIMIT * 0.97;
+          const dist = toRamp < tr.length - 80 ? toRamp * 0.8 : toLimit;
+          if (toLimit < 500 && V > vL) aReq = Math.max(aReq, (V * V - vL * vL) / (2 * Math.max(dist - 3, 1)));
+        } else if (this.box.s != null) {
+          const toBox = loopDelta(this.box.s, s, tr.length);
+          if (toBox > -2 && toBox < 220 && V > 2) aReq = Math.max(aReq, (V * V) / (2 * Math.max(toBox - 0.3, 0.6)));
         }
       }
       const aDrag = (car.aeroDrag + 0.014 * car.mass * 9.81) / car.mass;
@@ -280,7 +299,7 @@ export class AIDriver {
     inp.boost = !underSc && thr > 0.95 && straight && car.soc > 0.12 && (gapAhead < 1.8 || car.soc > 0.55 || race.lapsLeft(car) <= 1);
 
     // --- stuck recovery handled by Race using stuckT
-    if (V < 1.2 && race.phase === 'racing' && race.time > this.goTime + 6 && this.pitState === 'none') this.stuckT += dt;
+    if (V < 1.2 && race.phase === 'racing' && race.time > this.goTime + 6 && this.pitState !== 'stopped' && !(car.rs && car.rs.service)) this.stuckT += dt;
     else this.stuckT = 0;
     return inp;
   }
@@ -469,6 +488,8 @@ export class AIDriver {
       const toEntry = mod(tr.pit.start - s, tr.length);
       if (this.wantsPit && toEntry < 340 && toEntry > 30 && race.phase === 'racing') this.pitState = 'in';
     } else if (st === 'in') {
+      // missed the entry (spun, ran wide, or the car behind was in the way): give up and call again next lap
+      if (!tr.inPitRange(s) && mod(tr.pit.start - s, tr.length) > 380) { this.pitState = 'none'; return; }
       if (this.box.s != null) {
         const toBox = loopDelta(this.box.s, s, tr.length);
         if (Math.abs(toBox) < 1.4 && car.speed < 1.0 && tr.inPitLimiter(s)) {

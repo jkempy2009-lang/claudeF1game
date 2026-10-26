@@ -52,6 +52,8 @@ export class Car {
     this.fuel = spec.fuelKg;
     this.soc = 0.6;
     this.harvesting = false;
+    this.ersMode = 1; // 0 harvest, 1 balanced, 2 attack
+    this.fuelMode = 1; // 0 lean, 1 standard, 2 rich
     this.wetness = 0; // track water level, set by the race
     this.compound = spec.compound;
     this.reset(0, 0, 0);
@@ -292,9 +294,9 @@ export class Car {
     const ersAvail = this.soc > 0.01;
     const boost = !!inp.boost && ersAvail;
     let ersP = 0;
-    if (ersAvail && thr > 0.5 && this.gear > 0) ersP = (boost ? 1 : 0.3) * sp.ersPower;
+    if (ersAvail && thr > 0.5 && this.gear > 0) ersP = (boost ? 1 : [0.1, 0.3, 0.6][this.ersMode]) * sp.ersPower;
     if (Math.abs(ratio) > 0) {
-      const tPos = engineTorque(this.rpm) * sp.powerScale * thr;
+      const tPos = engineTorque(this.rpm) * sp.powerScale * thr * [0.97, 1, 1.025][this.fuelMode];
       const ersT = (ersP * sp.powerScale * thr) / Math.max((this.rpm * Math.PI) / 30, 300);
       const tBrake = (30 + 0.0075 * this.rpm) * (1 - thr);
       Te = tPos + ersT - tBrake;
@@ -472,11 +474,12 @@ export class Car {
     else if (this.theta < -Math.PI) this.theta += 2 * Math.PI;
 
     // ---------------------------------------------------------------- energy / fuel / ERS
-    const burn = 0.0185 * (0.25 + 0.75 * thr) * (this.fuelRate ?? 1);
+    const burn = 0.0185 * (0.25 + 0.75 * thr) * (this.fuelRate ?? 1) * [0.85, 1, 1.2][this.fuelMode];
     this.fuel = Math.max(0, this.fuel - burn * dt);
     let harvest = 0;
-    if (brk > 0.05 && this.gear > 0) harvest = sp.ersPower * Math.min(1, brk * 1.2);
-    else if (thr < 0.05 && speed > 10) harvest = sp.ersPower * 0.25;
+    const hMul = [1.6, 1, 0.7][this.ersMode];
+    if (brk > 0.05 && this.gear > 0) harvest = sp.ersPower * Math.min(1, brk * 1.2) * hMul;
+    else if (thr < 0.05 && speed > 10) harvest = sp.ersPower * 0.25 * hMul;
     this.soc = clamp(this.soc + ((harvest - ersP) * dt) / sp.ersCapacity, 0, 1);
     this.harvesting = harvest > 0.2 * sp.ersPower && this.soc < 0.999;
 

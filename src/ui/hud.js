@@ -380,7 +380,7 @@ export class HUD {
     el.tyN.textContent = comp.name;
     el.tyW.textContent = `Wear ${Math.round(ts.wear * 100)}%`;
     el.tyT.textContent = `Temp ${Math.round(ts.temp)}°C`;
-    el.tyF.textContent = `Fuel ${p.fuel.toFixed(1)} kg`;
+    el.tyF.textContent = `Fuel ${p.fuel.toFixed(1)} kg · ${['LEAN', 'STD', 'RICH'][p.fuelMode]} · ERS ${['HARV', 'BAL', 'ATK'][p.ersMode]} · BB ${Math.round(p.spec.brakeBias * 100)}`;
     const dm = p.damageSummary();
     const dmg = dm.worst;
     const flat = Math.max(p.flat[0], p.flat[1], p.flat[2], p.flat[3]);

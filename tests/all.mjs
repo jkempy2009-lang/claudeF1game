@@ -10,6 +10,7 @@ const suites = [
   ['weather', 'tests/weather.mjs'],
   ['DRS rules', 'tests/drs.mjs'],
   ['interactive pit stop', 'tests/pitgame.mjs'],
+  ['achievements + stats', 'tests/achievements.mjs'],
 ];
 let failed = 0;
 for (const [name, file] of suites) {

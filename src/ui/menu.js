@@ -4,11 +4,12 @@ import { DIFFICULTIES } from '../sim/race.js';
 import { COMPOUNDS, COMPOUND_IDS } from '../sim/carspec.js';
 import { formatTime } from '../util/math.js';
 import { drawLineChart } from './charts.js';
+import { ACHIEVEMENTS, DEFAULT_STATS } from '../sim/achievements.js';
 import { CHAMP_CAL, sanitizeCareer, UPGRADE_KEYS, UPGRADE_INFO, UPGRADE_MAX, upgradeCost, objectiveFor, DISTANCES, seasonDone, driverStandings, constructorStandings, lapsFor, teamRank } from '../sim/career.js';
 
 export const SAVE_KEY = 'apex-grand-prix.v1';
 
-export const DEFAULT_SETTINGS = { quality: 'high', volume: 0.55, units: 'kmh', line: true, minimap: true, shake: true, camera: 'chase', tower: true, blur: true };
+export const DEFAULT_SETTINGS = { quality: 'high', volume: 0.55, units: 'kmh', line: true, minimap: true, shake: true, camera: 'chase', tower: true, blur: true, steerSpeed: 1, padDead: 0.07, rumble: true, autoQuality: true };
 export const DEFAULT_CONFIG = {
   mode: 'race',
   trackId: 'northfield',
@@ -69,7 +70,7 @@ export function sanitizeConfig(raw) {
     qualify: bool(r.qualify, D.qualify),
     equalCars: bool(r.equalCars, D.equalCars),
     weather: oneOf(r.weather, ['dry', 'light', 'heavy', 'changing'], D.weather),
-    timeOfDay: oneOf(r.timeOfDay, ['progress', 'day'], D.timeOfDay),
+    timeOfDay: oneOf(r.timeOfDay, ['progress', 'day', 'night'], D.timeOfDay),
     frontWing: wing(r.frontWing),
     rearWing: wing(r.rearWing),
     brakeBias: num(r.brakeBias, 0.5, 0.7, D.brakeBias),
@@ -98,6 +99,10 @@ export function sanitizeSettings(raw) {
     camera: oneOf(r.camera, ['chase', 'close', 'cockpit', 'tcam', 'heli', 'tv'], D.camera),
     tower: bool(r.tower, D.tower),
     blur: bool(r.blur, D.blur),
+    steerSpeed: oneOf(+r.steerSpeed, [0.7, 1, 1.4], D.steerSpeed),
+    padDead: num(r.padDead, 0, 0.3, D.padDead),
+    rumble: bool(r.rumble, D.rumble),
+    autoQuality: bool(r.autoQuality, D.autoQuality),
   };
 }
 
@@ -113,10 +118,27 @@ function sanitizeRecords(raw) {
 
 function sanitizeSeason(raw) {
   if (!isObj(raw)) return null;
-  const round = Math.round(num(raw.round, 0, CHAMP_CAL.length, 0));
-  const points = {};
-  if (isObj(raw.points)) for (const [k, v] of Object.entries(raw.points)) if (Number.isFinite(+v)) points[String(k).slice(0, 40)] = Math.max(0, Math.round(+v));
-  return { ...raw, round, points };
+  const ids = TRACK_DEFS.map((t) => t.id);
+  const calendar = Array.isArray(raw.calendar) ? raw.calendar.filter((id) => ids.includes(id)) : CHAMP_CAL.slice();
+  if (!calendar.length) return null;
+  const round = Math.round(num(raw.round, 0, calendar.length, 0));
+  const numMap = (m) => {
+    const out = {};
+    if (isObj(m)) for (const [k, v] of Object.entries(m)) if (Number.isFinite(+v)) out[String(k).slice(0, 40)] = Math.max(0, Math.round(+v));
+    return out;
+  };
+  const strMap = (m) => {
+    const out = {};
+    if (isObj(m)) for (const [k, v] of Object.entries(m)) out[String(k).slice(0, 40)] = String(v).slice(0, 40);
+    return out;
+  };
+  return { calendar, round, points: numMap(raw.points), teamPoints: numMap(raw.teamPoints), teamOf: strMap(raw.teamOf), results: Array.isArray(raw.results) ? raw.results.slice(0, 40) : [] };
+}
+
+function sanitizeStats(raw) {
+  const out = { ...DEFAULT_STATS };
+  if (isObj(raw)) for (const k of Object.keys(DEFAULT_STATS)) if (Number.isFinite(+raw[k])) out[k] = Math.max(0, +raw[k]);
+  return out;
 }
 
 export function loadSave() {
@@ -136,6 +158,9 @@ export function loadSave() {
     ghosts,
     season: sanitizeSeason(raw.season),
     career: sanitizeCareer(raw.career),
+    honours: Array.isArray(raw.honours) ? raw.honours.filter((h) => isObj(h)).slice(-30) : [],
+    stats: sanitizeStats(raw.stats),
+    achievements: isObj(raw.achievements) ? Object.fromEntries(Object.entries(raw.achievements).filter(([k, v]) => ACHIEVEMENTS.some((a) => a.id === k) && Number.isFinite(+v))) : {},
   };
 }
 export function persist(save) {
@@ -191,7 +216,17 @@ export class Menu {
     this.current = name;
     this.lastData = data;
     const fn = this['screen_' + name];
-    this.root.innerHTML = fn.call(this, data);
+    if (!fn) return this.show('main');
+    let html;
+    try {
+      html = fn.call(this, data);
+    } catch (e) {
+      // a broken screen must never trap the player: log it and fall back to the main menu
+      console.error('menu screen failed:', name, e);
+      if (name === 'main') html = '<section class="screen dim"><div class="menu-col"><div class="logo">Apex<br><span>Grand Prix</span></div><button class="btn primary" data-act="quick">Quick race</button></div></section>';
+      else return this.show('main');
+    }
+    this.root.innerHTML = html;
     this.afterRender(name);
   }
 
@@ -240,8 +275,8 @@ export class Menu {
         <button class="btn" data-act="setup" data-mode="race" data-qualify="1">Qualify &amp; race<small>3-minute qualifying with all 20 cars sets your grid slot</small></button>
         <button class="btn" data-act="setup" data-mode="timetrial">Time trial<small>Chase your ghost, alone on the circuit</small></button>
         <button class="btn" data-act="career">Career<small>${this.save.career ? `Season ${this.save.career.seasonNo} · ${TEAMS[this.save.career.team].short} · round ${Math.min(this.save.career.season.round + 1, this.save.career.season.calendar.length)} of ${this.save.career.season.calendar.length}` : 'Pick a team, develop the car, climb the grid across seasons'}</small></button>
-        <button class="btn" data-act="season">Championship<small>${s ? `Round ${Math.min(s.round + 1, CHAMP_CAL.length)} of ${CHAMP_CAL.length} in progress` : '4 rounds, points, a title to win'}</small></button>
-        <div class="row"><button class="btn sm grow" data-act="controls">Controls</button><button class="btn sm grow" data-act="settings">Settings</button></div>
+        <button class="btn" data-act="season">Championship<small>${s ? `Round ${Math.min(s.round + 1, s.calendar.length)} of ${s.calendar.length} in progress` : '4 rounds, points, a title to win'}</small></button>
+        <div class="row"><button class="btn sm grow" data-act="controls">Controls</button><button class="btn sm grow" data-act="profile">Profile</button><button class="btn sm grow" data-act="settings">Settings</button></div>
       </div>
       <div class="version">v1.1 · WASD / arrows to drive · works with gamepads</div>
     </section>`;
@@ -308,7 +343,7 @@ export class Menu {
       </div>`}
       <div class="panel"><h3>Tyres &amp; rules</h3>
         <div class="field"><label>Weather</label>${this.chips('weather', [{ value: 'dry', label: 'Dry' }, { value: 'light', label: 'Light rain' }, { value: 'heavy', label: 'Heavy rain' }, { value: 'changing', label: 'Changeable' }], c.weather)}<div class="hint">Rain cuts slick-tyre grip by about 30 %: fit Wet tyres in the pits (T cycles the next set). Changeable: dry start, a shower somewhere in the race.</div></div>
-        <div class="field"><label>Lighting</label>${this.chips('timeOfDay', [{ value: 'progress', label: 'Midday to dusk' }, { value: 'day', label: 'Always midday' }], c.timeOfDay)}</div>
+        <div class="field"><label>Lighting</label>${this.chips('timeOfDay', [{ value: 'progress', label: 'Midday to dusk' }, { value: 'day', label: 'Always midday' }, { value: 'night', label: 'Night race' }], c.timeOfDay)}</div>
         <div class="field"><label>Starting compound</label>${this.chips('compound', COMPOUND_IDS.map((id) => ({ value: id, label: COMPOUNDS[id].name, dot: COMPOUNDS[id].color })), c.compound)}</div>
         <div class="field"><label>Tyre wear</label>${this.chips('tyreWear', [{ value: 0, label: 'Off' }, { value: 1.5, label: 'Low' }, { value: 3, label: 'Normal' }, { value: 6, label: 'High' }], c.tyreWear)}<div class="hint">Normal makes the Soft last about 5 laps and the Hard about 12. High forces a stop in a short race.</div></div>
         ${this.toggle('damage', 'Damage', 'Wings, floor and tyre punctures from contact', c.damage)}
@@ -359,12 +394,28 @@ export class Menu {
       ['Throttle', k('W', '↑')], ['Brake / reverse', k('S', '↓')], ['Steer', k('A', 'D', '←', '→')], ['DRS (in a zone, when eligible)', k('Space')], ['ERS boost (hold)', k('Shift')],
       ['Gear up / down (manual)', k('E', 'Q')], ['Pit request toggle', k('B')], ['Change pit tyre', k('T')], ['Camera', k('C')], ['Look back', k('V')],
       ['Reset to track', k('R')], ['Pause', k('Esc', 'P')], ['Racing line guide', k('L')], ['Minimap size', k('M')], ['Mute', k('N')],
+      ['ERS mode: harvest / balanced / attack', k('X')], ['Fuel mix: lean / standard / rich', k('Z')], ['Brake bias (front) + / −', k(']', '[')], ['Pit stop: hit each wheel nut', k('Space')],
     ];
-    const pad = [['Steer', 'Left stick'], ['Throttle / brake', 'RT / LT'], ['DRS', 'A'], ['Boost', 'X'], ['Pit request', 'B'], ['Camera', 'Y'], ['Gears', 'LB / RB'], ['Look back', 'L3'], ['Pause', 'Start'], ['Reset', 'Back']];
+    const pad = [['Steer', 'Left stick'], ['Throttle / brake', 'RT / LT'], ['DRS', 'A'], ['Boost', 'X'], ['Pit request', 'B'], ['Camera', 'Y'], ['Gears', 'LB / RB'], ['Look back', 'L3'], ['Pause', 'Start'], ['Reset', 'Back'], ['Fuel mix / ERS mode', 'D-pad up / down'], ['Next pit tyre', 'D-pad right']];
     return `<section class="screen panel-screen full"><h2>Con<span>trols</span></h2>
       <div class="grid2"><div class="panel"><h3>Keyboard</h3><div class="keys">${rows.map(([n, v]) => `<div class="key"><span>${n}</span><span>${v}</span></div>`).join('')}</div></div>
       <div class="panel"><h3>Gamepad</h3><div class="keys">${pad.map(([n, v]) => `<div class="key"><span>${n}</span><span><kbd>${v}</kbd></span></div>`).join('')}</div>
       <h3 style="margin-top:1.2rem">Racecraft</h3><div class="hint">• Brake in a straight line, then trail off the pedal as you turn in.<br>• Hit the apex kerb, then use all the track on exit — but not past the white line, or you get a track-limits warning.<br>• DRS opens the rear wing for ~10-15 km/h when you are within one second of the car ahead at the detection line.<br>• ERS boost spends the battery: harvest it by braking hard and lifting.<br>• Follow closely and you lose front downforce (dirty air) but gain a slipstream on the straights.<br>• Tyres have a temperature window: scrubbing them sliding overheats them, and worn tyres lose grip fast.<br>• Press <kbd>B</kbd> to call a pit stop — new tyres, repairs, and a limiter in the lane.</div></div></div>
+      <div class="footer"><button class="btn sm" data-act="back">◀ Back</button></div></section>`;
+  }
+
+  screen_profile() {
+    const st = { ...DEFAULT_STATS, ...(this.save.stats || {}) };
+    const have = this.save.achievements || {};
+    const n = Object.keys(have).length;
+    const tile = (k, v) => `<div class="stat"><small>${k}</small><b>${v}</b></div>`;
+    const recs = TRACK_DEFS.map((d) => ({ d, r: this.save.records[d.id] })).filter((x) => x.r);
+    const hon = (this.save.honours || []).slice(-6).reverse();
+    return `<section class="screen panel-screen full"><h2>Driver <span>profile</span></h2>
+      <div class="panel"><div class="stats">${tile('Races', st.races)}${tile('Wins', st.wins)}${tile('Podiums', st.podiums)}${tile('Poles', st.poles)}${tile('Fastest laps', st.fastestLaps)}${tile('Passes', st.passes)}${tile('Distance', Math.round(st.km) + ' km')}${tile('Pit stops', st.pitStops + (st.perfectStops ? ` (${st.perfectStops} perfect)` : ''))}${tile('Clean races', st.cleanRaces)}${tile('Titles', st.championships + st.careerTitles)}</div></div>
+      <div class="grid2" style="margin-top:1rem"><div class="panel"><h3>Achievements · ${n} / ${ACHIEVEMENTS.length}</h3><div class="achs">${ACHIEVEMENTS.map((a) => `<div class="ach ${have[a.id] ? 'got' : ''}"><b>${esc(a.name)}</b><span>${esc(a.desc)}</span></div>`).join('')}</div></div>
+      <div class="panel"><h3>Lap records</h3>${recs.length ? `<table class="results">${recs.map((x) => `<tr><td>${esc(x.d.name)}</td><td><b>${formatTime(x.r.best)}</b></td></tr>`).join('')}</table>` : '<div class="hint">Set a time trial lap to record it here.</div>'}
+        <h3 style="margin-top:1rem">Season history</h3>${hon.length ? `<div class="hint">${hon.map((h) => `P${h.pos} · ${esc(h.team)} · ${h.points} pts`).join('<br>')}</div>` : '<div class="hint">Finish a championship to see it here.</div>'}</div></div>
       <div class="footer"><button class="btn sm" data-act="back">◀ Back</button></div></section>`;
   }
 
@@ -373,6 +424,7 @@ export class Menu {
     return `<section class="screen panel-screen full"><h2>Set<span>tings</span></h2>
       <div class="grid2"><div class="panel"><h3>Graphics</h3>
         <div class="field"><label>Quality</label>${this.chips('quality', [{ value: 'low', label: 'Low' }, { value: 'medium', label: 'Medium' }, { value: 'high', label: 'High' }], s.quality)}<div class="hint">Low: no shadows, fewer trees, lower resolution. Changes apply to the next session.</div></div>
+        ${this.toggle('s.autoQuality', 'Automatic quality', 'Lowers the resolution (then shadows and blur) if the frame rate stays under 40 fps', s.autoQuality !== false)}
         ${this.toggle('s.line', 'Racing line guide', 'Green: keep going. Yellow: ease off. Red: brake now (key L)', s.line !== false)}
         ${this.toggle('s.shake', 'Camera shake', 'Kerbs, speed, engine rumble and impacts', s.shake)}
         ${this.toggle('s.blur', 'Motion blur', 'Radial speed blur that builds up fast at high speed (not on Low quality)', s.blur !== false)}
@@ -382,6 +434,9 @@ export class Menu {
         ${this.slider('s.volume', 'Master volume', Math.round(s.volume * 100), 0, 100, 1, Math.round(s.volume * 100) + '%')}
         <div class="field"><label>Speed units</label>${this.chips('units', [{ value: 'kmh', label: 'km/h' }, { value: 'mph', label: 'mph' }], s.units)}</div>
         <div class="field"><label>Default camera</label>${this.chips('camera', [['chase', 'Chase'], ['close', 'Low chase'], ['cockpit', 'Cockpit'], ['tcam', 'T-cam'], ['tv', 'TV']].map(([v, l]) => ({ value: v, label: l })), s.camera)}</div>
+        <div class="field"><label>Keyboard steering speed</label>${this.chips('steerSpeed', [{ value: 0.7, label: 'Gentle' }, { value: 1, label: 'Normal' }, { value: 1.4, label: 'Quick' }], s.steerSpeed)}<div class="hint">How fast A / D turn the wheel. Gamepads and wheels are not affected.</div></div>
+        ${this.slider('s.padDead', 'Gamepad stick deadzone', Math.round(s.padDead * 100), 0, 30, 1, Math.round(s.padDead * 100) + '%')}
+        ${this.toggle('s.rumble', 'Gamepad vibration', 'Kerbs, grass, tyre slip and impacts', s.rumble !== false)}
         <button class="btn sm" data-act="wipe">Clear saved records</button>
       </div></div>
       <div class="footer"><button class="btn sm" data-act="${data.from === 'pause' ? 'pause' : 'back'}">◀ Back</button></div></section>`;
@@ -392,6 +447,7 @@ export class Menu {
       <div class="menu-col" style="align-items:stretch"><div class="logo" style="font-size:2.6rem">Paused</div>
         <button class="btn primary" data-act="resume">Resume</button>
         <button class="btn" data-act="replay">Instant replay<small>The last 30 seconds from trackside cameras</small></button>
+        <button class="btn" data-act="photo">Photo mode<small>Fly a free camera and save a screenshot</small></button>
         <button class="btn" data-act="restart">Restart session</button>
         <button class="btn" data-act="pausecam">Camera: <span id="camname"></span></button>
         <button class="btn" data-act="pausesettings">Settings</button>
@@ -417,10 +473,12 @@ export class Menu {
       .join('');
     let seasonHtml = '';
     if (season) {
-      const table = Object.entries(season.points).sort((a, b) => b[1] - a[1]).slice(0, 10);
-      seasonHtml = `<div class="panel"><h3>Championship standings after round ${season.round + 1}</h3><table class="results"><tr><th>Pos</th><th>Driver</th><th>Pts</th></tr>${table.map(([n, p], i) => `<tr class="${n === 'You' ? 'me' : ''}"><td class="pos">${i + 1}</td><td>${esc(n)}</td><td><b>${p}</b></td></tr>`).join('')}</table></div>`;
+      const dr = driverStandings(season).slice(0, 10);
+      const cons = constructorStandings(season).slice(0, 6);
+      seasonHtml = `<div class="panel"><h3>Drivers' standings · after round ${season.round} of ${season.calendar.length}</h3><table class="results"><tr><th>Pos</th><th>Driver</th><th>Pts</th></tr>${dr.map((d, i) => `<tr class="${d.name === 'You' ? 'me' : ''}"><td class="pos">${i + 1}</td><td>${esc(d.name)}</td><td><b>${d.pts}</b></td></tr>`).join('')}</table>
+        <h3 style="margin-top:1rem">Constructors</h3><table class="results">${cons.map((d, i) => `<tr><td class="pos">${i + 1}</td><td>${esc(d.team)}</td><td><b>${d.pts}</b></td></tr>`).join('')}</table></div>`;
     }
-    const final = season && season.round + 1 >= CHAMP_CAL.length;
+    const final = season && season.round >= season.calendar.length;
     return `<section class="screen panel-screen full">
       <h2>${esc(trackName)} <span>results</span></h2>
       <div class="podium">${order.map((e) => `<div class="pod p${e.pos}" style="--c:${e.info.team.color}"><div class="hint">P${e.pos}</div><b>${esc(e.info.code)}</b><div>${esc(e.info.team.short)}</div><div class="hint">${fmt(e)}</div></div>`).join('')}</div>
@@ -503,6 +561,20 @@ export class Menu {
       <div class="footer"><button class="btn sm" data-act="main">Main menu</button><div class="hint">Moving teams starts car development again.</div></div></section>`;
   }
 
+  screen_season_end(data) {
+    const s = data.season;
+    const dr = driverStandings(s);
+    const cons = constructorStandings(s);
+    const pos = dr.findIndex((d) => d.name === 'You') + 1;
+    const hist = (this.save.honours || []).slice(-5).reverse();
+    return `<section class="screen panel-screen full">
+      <div class="row"><h2>${pos === 1 ? 'World <span>champion!</span>' : 'Season <span>complete</span>'}</h2></div>
+      <div class="grid2"><div class="panel"><h3>Drivers' championship</h3><table class="results">${dr.slice(0, 12).map((d, i) => `<tr class="${d.name === 'You' ? 'me' : ''}"><td class="pos">${i + 1}</td><td>${esc(d.name)}</td><td>${esc(d.team)}</td><td><b>${d.pts}</b></td></tr>`).join('')}</table></div>
+        <div class="panel"><h3>Constructors</h3><table class="results">${cons.map((d, i) => `<tr><td class="pos">${i + 1}</td><td>${esc(d.team)}</td><td><b>${d.pts}</b></td></tr>`).join('')}</table>
+        ${hist.length ? `<h3 style="margin-top:1rem">Your recent seasons</h3><div class="hint">${hist.map((h) => `P${h.pos} with ${esc(h.team)} (${h.points} pts)`).join(' · ')}</div>` : ''}</div></div>
+      <div class="footer"><button class="btn sm" data-act="main">Main menu</button><div class="hint">You finished P${pos} with ${(s.points.You || 0)} points.</div><button class="btn primary" data-act="endseason">Close the season</button></div></section>`;
+  }
+
   screen_quali(data) {
     const { q, player, trackName } = data;
     const pole = q.list[0] && Number.isFinite(q.list[0].best) ? q.list[0].best : null;
@@ -568,6 +640,7 @@ export class Menu {
       else if (k === 'quality') this.save.settings.quality = v;
       else if (k === 'units') this.save.settings.units = v;
       else if (k === 'camera') this.save.settings.camera = v;
+      else if (k === 'steerSpeed') this.save.settings.steerSpeed = +v;
       this.persist();
       H.applySettings && H.applySettings();
       return this.rerender();
@@ -631,6 +704,9 @@ export class Menu {
       }
       case 'main':
         return H.toMain();
+      case 'profile':
+        this.prev = this.current;
+        return this.show('profile');
       case 'controls':
         this.prev = this.current;
         return this.show('controls');
@@ -652,6 +728,7 @@ export class Menu {
         H.toast && H.toast('Saved records cleared');
         return;
       case 'resume': return H.resume();
+      case 'photo': return H.photo();
       case 'replay': return H.replay(this.current === 'pause' ? 'pause' : 'results');
       case 'restart': return H.restart();
       case 'quit': return H.toMain(true);
@@ -680,7 +757,10 @@ export class Menu {
     else if (k === 'frontWing') c.frontWing = v;
     else if (k === 'rearWing') c.rearWing = v;
     else if (k === 'brakeBias') c.brakeBias = v / 100;
-    else if (k === 's.volume') {
+    else if (k === 's.padDead') {
+      this.save.settings.padDead = v / 100;
+      this.hooks.applySettings && this.hooks.applySettings();
+    } else if (k === 's.volume') {
       this.save.settings.volume = v / 100;
       this.hooks.applySettings && this.hooks.applySettings();
     }
@@ -692,7 +772,7 @@ export class Menu {
       else if (k === 'level') lab.textContent = v + '%';
       else if (k === 'playerGrid') lab.textContent = 'P' + v;
       else if (k === 'brakeBias') lab.textContent = v + '%';
-      else if (k === 's.volume') lab.textContent = v + '%';
+      else if (k === 's.volume' || k === 's.padDead') lab.textContent = v + '%';
       else lab.textContent = v;
     }
     if (k === 'level') {

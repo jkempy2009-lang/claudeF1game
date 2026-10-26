@@ -20,6 +20,7 @@ import { AudioEngine } from './ui/audio.js';
 import { HUD } from './ui/hud.js';
 import { Menu, loadSave, persist, sanitizeConfig } from './ui/menu.js';
 import * as Career from './sim/career.js';
+import { recordSession, ACHIEVEMENTS } from './sim/achievements.js';
 import { clamp, formatTime, lerp } from './util/math.js';
 
 /** Frees everything a session put on the GPU: geometries, materials, their textures, instancing buffers and the environment map. */
@@ -40,6 +41,8 @@ function disposeScene(scene) {
   });
   if (scene.environment && scene.environment.dispose) scene.environment.dispose();
 }
+
+const smooth01 = (x) => { x = Math.min(1, Math.max(0, x)); return x * x * (3 - 2 * x); };
 
 const nextFrame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
 
@@ -118,6 +121,16 @@ class Game {
     document.addEventListener('visibilitychange', () => {
       if (document.hidden && this.state === 'race') this.pause();
     });
+    // anything that slips through: tell the player once in a while instead of failing silently
+    const report = (msg) => {
+      const t = performance.now();
+      if (t - (this._errT || -1e9) < 6000) return;
+      this._errT = t;
+      console.error(msg);
+      this.toast('Something went wrong, but the game is still running (details in the console)');
+    };
+    window.addEventListener('error', (ev) => report(ev.message));
+    window.addEventListener('unhandledrejection', (ev) => report(String(ev.reason)));
     this.setupTouch();
     document.getElementById('hud').addEventListener('click', (e) => {
       if (e.target.closest('#finish') && this.session && this.session.fin) this.session.finConfirm = true;
@@ -138,6 +151,7 @@ class Game {
       previewTeam: (i) => this.previewTeam(i),
       openSeason: () => this.openSeason(),
       replay: (from) => this.startReplay(from),
+      photo: () => this.startPhoto(),
       openCareer: () => this.openCareer(),
       careerStart: (o) => this.careerStart(o),
       careerRace: (q) => this.careerRace(q),
@@ -168,7 +182,7 @@ class Game {
   resize() {
     const q = this.save.settings.quality;
     const cap = q === 'high' ? 2 : q === 'medium' ? 1.5 : 1;
-    const pr = Math.min(window.devicePixelRatio || 1, cap);
+    const pr = Math.min(window.devicePixelRatio || 1, cap) * (this.resScale || 1);
     this.renderer.setPixelRatio(pr);
     this.renderer.setSize(window.innerWidth, window.innerHeight, false);
     this.camera.aspect = window.innerWidth / window.innerHeight;
@@ -179,6 +193,7 @@ class Game {
   applySettings() {
     persist(this.save);
     this.audio.setVolume(this.save.settings.volume);
+    Object.assign(this.input.opts, { steerSpeed: this.save.settings.steerSpeed, padDead: this.save.settings.padDead, rumble: this.save.settings.rumble !== false });
     this.hud.setUnits(this.save.settings.units);
     this.hud.el.minimap.classList.toggle('hidden', !this.save.settings.minimap);
     if (this.session && this.session.guide) this.session.guide.setVisible(this.save.settings.line !== false);
@@ -276,11 +291,15 @@ class Game {
     let s = this.save.season;
     const c = this.menu.config;
     if (!s) {
-      s = { round: 0, points: {}, cfg: null };
+      s = Career.newSeason(4);
       this.save.season = s;
+    } else if (!s.calendar) {
+      // a season saved by an older version: upgrade it in place
+      Object.assign(s, { ...Career.newSeason(4), ...s, calendar: Career.CHAMP_CAL.slice(), teamPoints: s.teamPoints || {}, teamOf: s.teamOf || {}, results: s.results || [] });
     }
+    if (Career.seasonDone(s)) return this.seasonFinale();
     c.mode = 'race';
-    c.trackId = Career.CHAMP_CAL[Math.min(s.round, Career.CHAMP_CAL.length - 1)];
+    c.trackId = s.calendar[Math.min(s.round, s.calendar.length - 1)];
     c.frontWing = c.rearWing = null;
     this.menu.tab = 'race';
     this.menu.show('setup', { season: true });
@@ -364,17 +383,28 @@ class Game {
   nextRound() {
     const s = this.save.season;
     if (!s) return this.toMain();
-    s.round++;
     persist(this.save);
-    this.openSeason();
+    this.openSeason(); // the round counter already moved on when the race was recorded
+  }
+
+  seasonFinale() {
+    const s = this.save.season;
+    this.state = 'menu';
+    this.hud.show(false);
+    this.menu.show('season_end', { season: s });
   }
 
   endSeason() {
     const s = this.save.season;
     if (s) {
-      const t = Object.entries(s.points).sort((a, b) => b[1] - a[1]);
-      const pos = t.findIndex(([n]) => n === 'You') + 1;
-      this.toast(`Season complete: you finished P${pos} in the championship`);
+      const d = Career.driverStandings(s);
+      const pos = d.findIndex((x) => x.name === 'You') + 1;
+      const cons = Career.constructorStandings(s);
+      const myTeam = TEAMS[this.save.config.team].short;
+      (this.save.honours || (this.save.honours = [])).push({ pos, points: s.points.You || 0, team: myTeam, constructorPos: cons.findIndex((c) => c.team === myTeam) + 1, rounds: s.calendar.length, at: Date.now() });
+      this.save.honours = this.save.honours.slice(-30);
+      this.recordStats({ kind: 'championship', pos });
+      this.toast(pos === 1 ? 'Champion! Season complete.' : `Season complete: P${pos} in the championship`);
     }
     this.save.season = null;
     persist(this.save);
@@ -460,6 +490,18 @@ class Game {
       scene.add(view.group);
       views.set(car, view);
     }
+    // the player's headlights: two spots on the nose, switched on as the light fades (the light count stays constant, so no shader recompiles)
+    const headlights = [];
+    if (cfg.timeOfDay !== 'day') {
+      const pv = views.get(race.player);
+      for (const z of [-0.32, 0.32]) {
+        const sl = new THREE.SpotLight(0xfff0d0, 0, 110, 0.34, 0.65, 1.4);
+        sl.position.set(2.6, 0.3, z);
+        sl.target.position.set(40, -0.5, z * 1.6);
+        pv.model.add(sl, sl.target);
+        headlights.push(sl);
+      }
+    }
     const effects = new Effects(scene);
     const rain = new Rain();
     scene.add(rain.mesh);
@@ -478,8 +520,9 @@ class Game {
       ghostView.group.visible = false;
       scene.add(ghostView.group);
     }
+    this.perf = null;
     this.session = {
-      cfg: { ...cfg, seed: race.opt.seed }, track, race, world, scene, views, effects, rain, camRig, ghostView, guide,
+      cfg: { ...cfg, seed: race.opt.seed }, track, race, world, scene, views, effects, rain, headlights, camRig, ghostView, guide,
       acc: 0, alpha: 0, intro: 4.2, introT: 0, paused: false, finishedShown: false, radioT: 0, fast: false,
       player: race.player, pin: null, sunDir: world.sunDir, stopTimer: 0, lastEventCar: null, seasonRound: this.save.season ? this.save.season.round : null,
       useSeason: cfg.__season,
@@ -504,6 +547,7 @@ class Game {
     if (s.rain) s.rain.dispose();
     if (s.rec) s.rec.data = null;
     if (this._replayUI) this._replayUI.classList.add('hidden');
+    if (this._photoUI) this._photoUI.classList.add('hidden');
     this.renderer.renderLists.dispose();
     this.session = null;
     this.audio.update({ rpm: 0, throttle: 0, speed: 0, slipVis: [0, 0, 0, 0], kerbShake: 0, gear: 1 }, [], { pos: new THREE.Vector3(), right: new THREE.Vector3(1, 0, 0), vel: new THREE.Vector3() }, 0.016, true);
@@ -609,6 +653,35 @@ class Game {
   }
 
   // ---- frame loop ---------------------------------------------------------------------------------------------------
+  /**
+   * Frame-rate watchdog: when the game cannot hold about 40 fps for several seconds it lowers the render resolution in
+   * steps, then drops shadows and motion blur, and tells the player once (Settings: Automatic quality).
+   */
+  watchPerf(realDt) {
+    if (this.save.settings.autoQuality === false || realDt > 0.5) return; // ignore pauses / tab switches
+    const p = this.perf || (this.perf = { acc: 0, n: 0, steps: 0, cool: 0 });
+    p.acc += realDt;
+    p.n++;
+    if (p.acc < 4) return;
+    const fps = p.n / p.acc;
+    p.acc = 0;
+    p.n = 0;
+    if (p.cool > 0) {
+      p.cool--;
+      return;
+    }
+    if (fps >= 40 || p.steps >= 4) return;
+    p.steps++;
+    p.cool = 1;
+    if (p.steps <= 3) this.resScale = [1, 0.85, 0.7, 0.55][p.steps];
+    else {
+      this.renderer.shadowMap.enabled = false;
+      this.save.settings.blur = false;
+    }
+    this.resize();
+    this.toast(p.steps <= 3 ? `Frame rate was ${fps.toFixed(0)} fps: lowered the render resolution (Settings > Automatic quality)` : 'Frame rate is still low: shadows and motion blur turned off');
+  }
+
   /** One frame, guarded: a bug in a single frame must not freeze the game; repeated failures show a recovery screen. */
   safeFrame() {
     try {
@@ -630,6 +703,7 @@ class Game {
   frame() {
     const now = performance.now();
     const dt = Math.min(0.05, (now - this.lastT) / 1000);
+    if (this.state === 'race') this.watchPerf((now - this.lastT) / 1000);
     this.lastT = now;
     const r = this.renderer;
     if (this.state === 'menu' || this.state === 'loading' || (this.state === 'paused' && !this.session)) {
@@ -648,6 +722,10 @@ class Game {
     }
     if (this.state === 'replay') {
       this.runReplay(s, dt);
+      return;
+    }
+    if (this.state === 'photo') {
+      this.runPhoto(s, dt);
       return;
     }
     if (this.state === 'race') this.runSession(s, dt);
@@ -712,6 +790,7 @@ class Game {
       this.toast('Racing line guide ' + (this.save.settings.line ? 'on' : 'off'));
     }
     camRig.lookBack = pin.lookBack;
+    this.input.rumble(player, camRig.impact, dt);
     if (s.fin) {
       s.fin.t += dt;
       if (((pin.confirm || s.finConfirm) && s.fin.t > 1.5) || s.fin.t > 40) {
@@ -753,12 +832,13 @@ class Game {
     const frameSteps = ff ? 40 : 1;
     let n = 0;
     s.acc += ff ? DT * 300 : dt; // fast-forward: about 1.2 s of racing per frame
-    const edges = { gearUp: pin.gearUp, gearDown: pin.gearDown, drsPress: pin.drsPress, pitToggle: pin.pitToggle, tyreCycle: pin.tyreCycle };
+    const edges = { gearUp: pin.gearUp, gearDown: pin.gearDown, drsPress: pin.drsPress, pitToggle: pin.pitToggle, tyreCycle: pin.tyreCycle, ersCycle: pin.ersCycle, fuelCycle: pin.fuelCycle, bbDelta: pin.bbDelta };
     const stepPin = { throttle: pin.throttle, brake: pin.brake, steer: pin.steer, boost: pin.boost, aiDriven: !!pin.aiDriven, ...edges };
     let lim = ff ? 300 : 14;
     while (s.acc >= DT && n < lim) {
       race.step(DT, stepPin);
-      stepPin.gearUp = stepPin.gearDown = stepPin.drsPress = stepPin.pitToggle = stepPin.tyreCycle = false;
+      stepPin.gearUp = stepPin.gearDown = stepPin.drsPress = stepPin.pitToggle = stepPin.tyreCycle = stepPin.ersCycle = stepPin.fuelCycle = false;
+      stepPin.bbDelta = 0;
       s.acc -= DT;
       n++;
     }
@@ -840,13 +920,16 @@ class Game {
     // time of day (midday -> dusk over the race) and weather
     const raceLen = race.totalLaps * s.track.length;
     const prog = race.opt.mode === 'race' && s.cfg.timeOfDay !== 'day' ? clamp((race.sorted[0] ? race.sorted[0].rs.maxDist : 0) / raceLen, 0, 1) : 0;
-    const dusk = 0.88 * Math.pow(prog, 1.1);
-    const atmo = world.setAtmosphere({ dusk, wet: race.wet, rain: race.rain });
+    const nightRace = s.cfg.timeOfDay === 'night';
+    const dusk = nightRace ? 0.9 : 0.88 * Math.pow(prog, 1.1);
+    const night = nightRace ? 1 : 0.55 * smooth01((prog - 0.72) / 0.28);
+    const atmo = world.setAtmosphere({ dusk, wet: race.wet, rain: race.rain, night });
     s.scene.fog.color.copy(atmo.fog);
     s.scene.fog.density = 1.1 / (s.track.theme.fogFar * atmo.fogMul);
     s.scene.background.copy(atmo.fog);
     s.scene.environmentIntensity = 0.75 * atmo.envMul;
-    this.renderer.toneMappingExposure = 1 + 0.18 * dusk;
+    this.renderer.toneMappingExposure = atmo.exposure;
+    for (const hl of s.headlights) hl.intensity = night * 120;
     effects.wet = race.wet;
     s.rain.update(dt, this.camera.position, race.rain);
     world.focusShadow(views.get(player).group.position);
@@ -919,6 +1002,13 @@ class Game {
             s._pgTip = true;
             hud.radio('Pit stop: press Space as each marker enters the green. Perfect timing on all four wheels is a 2.5 second stop.', 7);
           } else if (e.car === player) hud.radio('Box, box — hold position, tyres going on.', 3);
+          break;
+        case 'mode':
+          if (e.car === player) {
+            const t = e.what === 'ers' ? `ERS mode: ${['Harvest (recharge)', 'Balanced', 'Attack (deploy more)'][e.value]}` : e.what === 'fuel' ? `Fuel mix: ${['Lean (save fuel)', 'Standard', 'Rich (more power)'][e.value]}` : `Brake bias: ${Math.round(e.value * 100)}% front`;
+            hud.message(t, '', e.what === 'bias' ? 'Higher is more stable, lower turns in better' : '', 1.6);
+            this.audio.ui('click');
+          }
           break;
         case 'damageBox':
           if (e.car === player) {
@@ -1032,6 +1122,120 @@ class Game {
   }
 
   /** Qualifying is over for the player: cool-down lap on autopilot, then the grid. */
+  // ---- photo mode ------------------------------------------------------------------------------------------------
+  startPhoto() {
+    const s = this.session;
+    if (!s) return;
+    this.state = 'photo';
+    this.screens.innerHTML = '';
+    this.hud.show(false);
+    const cam = this.camera;
+    const e = new THREE.Euler().setFromQuaternion(cam.quaternion, 'YXZ');
+    s.photo = { yaw: e.y, pitch: e.x, pos: cam.position.clone(), speed: 6, fov: cam.fov, shot: false, flash: 0 };
+    s.guide.setVisible(false);
+    const ui = this.photoUI();
+    ui.classList.remove('hidden');
+    if (!this._photoBound) {
+      this._photoBound = true;
+      let drag = false;
+      this.canvas.addEventListener('pointerdown', (ev) => { if (this.state === 'photo') { drag = true; this.canvas.setPointerCapture(ev.pointerId); } });
+      this.canvas.addEventListener('pointerup', () => (drag = false));
+      this.canvas.addEventListener('pointermove', (ev) => {
+        const ph = this.session && this.session.photo;
+        if (!drag || !ph || this.state !== 'photo') return;
+        ph.yaw -= ev.movementX * 0.004;
+        ph.pitch = Math.max(-1.5, Math.min(1.5, ph.pitch - ev.movementY * 0.004));
+      });
+      this.canvas.addEventListener('wheel', (ev) => {
+        const ph = this.session && this.session.photo;
+        if (!ph || this.state !== 'photo') return;
+        ph.fov = Math.max(12, Math.min(95, ph.fov + ev.deltaY * 0.03));
+        ev.preventDefault();
+      }, { passive: false });
+    }
+  }
+
+  photoUI() {
+    if (this._photoUI) return this._photoUI;
+    const el = document.createElement('div');
+    el.id = 'photo';
+    el.className = 'hidden';
+    el.innerHTML = '<div class="pbar"><b>PHOTO MODE</b><span>WASD move · Q / E down / up · drag to look · wheel zoom · Shift fast</span><button data-p="shot">Capture (Space)</button><button data-p="exit" class="exit">Done (Esc)</button></div><div class="pflash"></div>';
+    document.body.appendChild(el);
+    el.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-p]');
+      if (!b) return;
+      if (b.dataset.p === 'shot') this.session.photo.shot = true;
+      else this.endPhoto();
+    });
+    this._photoUI = el;
+    return el;
+  }
+
+  endPhoto() {
+    const s = this.session;
+    if (this._photoUI) this._photoUI.classList.add('hidden');
+    if (!s) return;
+    s.photo = null;
+    s.guide.setVisible(this.save.settings.line !== false);
+    this.camera.fov = s.camRig.fov;
+    this.camera.updateProjectionMatrix();
+    this.state = 'paused';
+    this.menu.show('pause');
+    const el = document.getElementById('camname');
+    if (el) el.textContent = CAMERA_NAMES[s.camRig.mode];
+  }
+
+  runPhoto(s, dt) {
+    const ph = s.photo;
+    if (!ph) return;
+    const inp = this.input;
+    const fast = inp.down.has('ShiftLeft') || inp.down.has('ShiftRight');
+    const v = ph.speed * (fast ? 4 : 1) * dt;
+    const fwd = new THREE.Vector3(-Math.sin(ph.yaw) * Math.cos(ph.pitch), Math.sin(ph.pitch), -Math.cos(ph.yaw) * Math.cos(ph.pitch));
+    const right = new THREE.Vector3(Math.cos(ph.yaw), 0, -Math.sin(ph.yaw));
+    const d = (k) => (inp.down.has(k) ? 1 : 0);
+    ph.pos.addScaledVector(fwd, (d('KeyW') - d('KeyS')) * v).addScaledVector(right, (d('KeyD') - d('KeyA')) * v);
+    ph.pos.y += (d('KeyE') - d('KeyQ')) * v;
+    if (inp.pressed.has('Escape') || inp.pressed.has('KeyP')) {
+      inp.pressed.clear();
+      return this.endPhoto();
+    }
+    if (inp.pressed.has('Space')) ph.shot = true;
+    inp.pressed.clear();
+    const cam = this.camera;
+    cam.position.copy(ph.pos);
+    cam.rotation.set(ph.pitch, ph.yaw, 0, 'YXZ');
+    if (Math.abs(cam.fov - ph.fov) > 0.01) {
+      cam.fov = ph.fov;
+      cam.updateProjectionMatrix();
+    }
+    s.world.focusShadow(s.views.get(s.player).group.position);
+    s.world.update(dt, performance.now() / 1000);
+    this.audio.update(s.player, [], this.listener(), dt, true);
+    this.post.render(s.scene, cam, 0);
+    const fl = this._photoUI.querySelector('.pflash');
+    if (ph.shot) {
+      ph.shot = false;
+      this.canvas.toBlob((blob) => {
+        if (!blob) return;
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `apex-grand-prix-${s.track.id}-${Date.now()}.png`;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+      }, 'image/png');
+      fl.style.opacity = '0.85';
+      this.audio.ui('click');
+      ph.flash = 0.25;
+    }
+    if (ph.flash > 0) {
+      ph.flash -= dt;
+      if (ph.flash <= 0) fl.style.opacity = '0';
+    }
+  }
+
   // ---- replay ---------------------------------------------------------------------------------------------------
   startReplay(from) {
     const s = this.session;
@@ -1266,6 +1470,17 @@ class Game {
     }
   }
 
+  /** Folds a finished session into the lifetime stats and announces anything unlocked. */
+  recordStats(ctx) {
+    const unlocked = recordSession(this.save, ctx);
+    persist(this.save);
+    unlocked.forEach((id, k) => {
+      const a = ACHIEVEMENTS.find((x) => x.id === id);
+      if (a) setTimeout(() => this.toast(`Achievement unlocked: ${a.name}`), 700 + k * 2200);
+    });
+    if (unlocked.length) this.audio.fanfare();
+  }
+
   showResults() {
     const s = this.session;
     if (!s || this.state === 'menu') return;
@@ -1294,6 +1509,7 @@ class Game {
         if (!rec || me.best < rec.best) this.save.records[track.id] = { best: me.best };
         persist(this.save);
       }
+      this.recordStats({ kind: 'quali', pos: me ? me.pos : 99, km: Math.max(0, player.rs.maxDist) / 1000 });
       this.menu.show('quali', { q, player, trackName, cfg: s.cfg });
       return;
     }
@@ -1306,10 +1522,12 @@ class Game {
     }
     let season = null;
     const cfg = s.cfg;
-    if (this.save.season && Career.CHAMP_CAL[this.save.season.round] === track.id && !cfg.career) {
+    if (this.save.season && this.save.season.calendar && this.save.season.calendar[this.save.season.round] === track.id && !cfg.career) {
       season = this.save.season;
-      for (const e of cls) season.points[e.info.name] = (season.points[e.info.name] || 0) + e.points;
-      season.lastCls = cls.length;
+      if (!s.seasonRecorded) {
+        s.seasonRecorded = true;
+        Career.recordRound(season, cls); // moves the season on to the next round
+      }
     }
     let careerRes = null;
     if (cfg.career && this.save.career && !s.careerRecorded) {
@@ -1318,7 +1536,20 @@ class Game {
       const row = Career.recordRound(c.season, cls);
       careerRes = Career.settleRace(c, row, cls);
       careerRes.budget = c.budget;
-      if (Career.seasonDone(c.season)) Career.endSeason(c);
+      if (Career.seasonDone(c.season)) {
+        const rc = Career.endSeason(c);
+        this.recordStats({ kind: 'career', pos: rc.driverPos });
+      }
+    }
+    if (!s.statsRecorded) {
+      s.statsRecorded = true;
+      const rsP = player.rs;
+      this.recordStats({
+        kind: 'race', pos: me ? me.pos : 99, grid: rsP.gridPos || player.info.gridPos, cars: cls.length, laps: race.totalLaps,
+        finishedRace: !!(me && me.time != null), penalty: rsP.penalty, damaged: (rsP.maxDamage || 0) > 0.15, passes: rsP.passes || 0,
+        level: cfg.level, wet: (race.maxWet || 0) > 0.3, night: cfg.timeOfDay === 'night', km: Math.max(0, rsP.maxDist) / 1000,
+        stops: rsP.stops, perfectStops: rsP.perfectStops || 0, fastest: race.fastest.car === player, career: !!cfg.career, teamRank: Career.teamRank(cfg.team),
+      });
     }
     persist(this.save);
     this.menu.show('results', { cls, player, race, season, trackName, careerRes });

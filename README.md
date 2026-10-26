@@ -8,12 +8,15 @@ A 3D Formula-style racing game that runs in the browser. Twenty cars, four origi
 npm install
 npm run build        # bundles src/ -> docs/game.js and dist/apex-grand-prix.html
 npm run dev          # esbuild watch + local server on http://localhost:8080
-npm test             # physics validation + headless AI race
+npm test             # every headless suite: physics, AI, scoring, qualifying, career, safety car, weather, DRS, pit game
+npm run test:e2e     # browser: every menu and mode end to end (serve docs/ on :8099 first)
+npm run test:monkey  # browser: random clicking through the whole UI
+npm run test:leak    # browser: GPU resources across repeated sessions
 ```
 
 ## What's in it
 
-**Modes** – Race (1–30 laps, 2–20 cars), Time Trial with a persistent ghost of your best lap, and a 4-round Championship with points.
+**Modes** – Race (1-30 laps, 2-20 cars), *Qualify & race* (a 3-minute session with all 20 cars sets the grid), Time Trial with a persistent ghost of your best lap, a 4-round Championship with driver and constructor standings, and a **Career**: pick a team, earn prize money, buy car upgrades (power, aero, grip), earn contract offers and play seasons of 4 or 8 rounds with difficulty that creeps up each year.
 
 **Circuits** (generated procedurally from corner data, with elevation, kerbs, run-off, pit lane, DRS zones, brake boards)
 
@@ -23,10 +26,16 @@ npm test             # physics validation + headless AI race
 | Circuit de la Rade | 3.0 km | Street circuit, walls at the track edge, high downforce |
 | Northfield Grand Prix Circuit | 5.7 km | Flowing high-speed aero circuit |
 | Circuit des Hautes-Fagnes | 4.9 km | Spa-like: big elevation, hairpin, fast sweepers |
+| Autódromo Costa Azul | 4.6 km | Coastal rollercoaster, blind crests, plunging hairpin |
+| Monte Aurora Ring | 3.8 km | Alpine, wide open, fast and winding |
+| Mirage International Circuit | 5.1 km | Desert: two huge straights joined by hairpins |
+| Parc Lumière | 3.8 km | Tight city-park ribbon between barriers |
 
-**Racing** – standing start with lights, 10 fictional teams × 2 drivers, live timing tower with real time gaps, sector timing (purple/green), best-lap delta, DRS (detection line + <1 s rule), ERS deploy/harvest with a boost button, slipstream and dirty air, damage (wings, floor, punctures), tyre compounds with a temperature window and wear, mandatory-stop option, pit lane with speed limiter, garage boxes, a pit-stop service and an optional autopilot through the lane, track-limits warnings, pit speeding penalties (the car is held on the grid until the lights go out, so false starts can't happen), marshal recovery, fast-forward to the final classification.
+**Racing** – standing start with lights, 10 fictional teams x 2 drivers, live timing tower with real time gaps, sector timing (purple/green), best-lap delta, DRS (detection line + <1 s rule, painted lines and signs), ERS deploy/harvest with a boost button and three ERS modes, fuel mix, live brake bias, slipstream and dirty air, damage (wings, bendable and crumpling sidepods, floor, punctures), tyre compounds (including **Wet**) with a temperature window, wear and lock-up flat spots, mandatory-stop option, pit lane with speed limiter and an **interactive pit stop** (time your presses on the four wheel nuts: 2.5 s if perfect), track-limits warnings, collision penalties, pit speeding penalties, **safety car**, marshal recovery, fast-forward to the final classification.
 
-**Difficulty** – five presets (Rookie → Legend) plus a continuous 0–100 % slider. Difficulty changes how much of the *same* physical limit the AI uses, how often it makes mistakes, how early it brakes, how much of the track it uses, how aggressively it overtakes and its reaction time at the start. Optional adaptive pace nudges the AI ±3–5 % depending on the gap to you. Nothing is "cheated": AI cars run the identical car model.
+**Weather and light** – Dry, Light rain, Heavy rain or Changeable. Rain cuts slick grip by about 30 %, soaks the track, throws up spray; fit Wets in the pits. The light moves from midday to dusk over the race, or run a full **night race** with floodlights and headlights.
+
+**AI** – identical cars by default (only the drivers differ), five difficulty presets plus a continuous slider. The drivers draft, pull out to pass, choose the inside of the next corner, defend once, give room, use the wet-weather tyres, take a cheap stop under the safety car and pit for damage. Nothing is cheated: AI cars run the identical car model and Legend laps about as quickly as a strong human lap (Vettore 1:08.0, Rade 1:05.3, Hautes-Fagnes 1:17.8, Northfield 1:22.3).
 
 Reference clean-lap pace of the best car at each level (medium tyres, DRS on the straights):
 
@@ -37,15 +46,13 @@ Reference clean-lap pace of the best car at each level (medium tyres, DRS on the
 | Circuit des Hautes-Fagnes | 1:34.0 | 1:27.8 | 1:23.0 | 1:19.4 | 1:17.8 |
 | Northfield Grand Prix Circuit | 1:39.1 | 1:32.8 | 1:27.9 | 1:24.2 | 1:22.3 |
 
-Legend is calibrated to be about as quick as a strong human lap (Vettore 1:08.5, Rade 1:06.4, Hautes-Fagnes 1:19); in a race the field is spread a further ~3 % by car and driver ratings, tyres, fuel and traffic.
-
-**Finish** – take the flag and the game plays a finish scene: your car cools down on autopilot under a cinematic camera, with a Victory / Podium / Points banner (confetti and fanfare for the top three). Press Enter or click to see the full classification.
+**After the flag** – a finish scene with a Victory / Podium / Points banner, then the classification with **telemetry charts** (lap time, fuel, tyre wear, top speed against the winner), a 30-second **instant replay** from trackside cameras, and **photo mode** with PNG capture.
 
 **Racing line guide** – a ribbon on the road ahead, coloured from the braking envelope of the circuit: green keep going, yellow ease off, red brake now. Toggle with L or in Settings.
 
-**Driver aids** – ABS, traction control (4 levels), stability control, steering-lock assist, automatic/manual gearbox, pit autopilot; presets from Beginner to Simulator. Keyboard, gamepad and basic touch controls.
+**Driver aids** – ABS, traction control (4 levels), stability control, steering-lock assist, automatic/manual gearbox, pit autopilot, interactive pit stops; presets from Beginner to Simulator. Keyboard, gamepad (with vibration) and basic touch controls.
 
-**Presentation** – Three.js scene with procedural textures, sky shader with clouds, terrain following the track elevation, trees/stands/billboards/buildings, F1 car models with team liveries, tyre smoke, skid marks, sparks, camera shake, six cameras (chase, low chase, cockpit, T-cam, helicopter, TV), WebAudio synthesised engine (V6-style harmonics), tyre squeal, kerb rumble, wind and Doppler on nearby cars.
+**Presentation** – Three.js scene with procedural textures, sky shader with clouds and stars, terrain following the track elevation, trees/stands/billboards/buildings, F1 car models with team liveries, tyre smoke, persistent skid marks, sparks, rain, spray, speed blur and engine rumble, camera shake, six cameras (chase, low chase, cockpit, T-cam, helicopter, TV), WebAudio synthesised engine (V6-style harmonics, exhaust pops), tyre squeal, kerb rumble, wind, rain and Doppler on nearby cars. Automatic quality lowers the resolution if the frame rate drops.
 
 ## Controls
 
@@ -60,6 +67,7 @@ Legend is calibrated to be about as quick as a strong human lap (Vettore 1:08.5,
 | Camera · look back | C · V | Y · L3 |
 | Reset to track | R | Back |
 | Autopilot toggle | G | – |
+| ERS mode · fuel mix · brake bias | X · Z · [ ] | D-pad up / down |
 | Racing line guide on/off | L | – |
 | Pause | Esc / P | Start |
 

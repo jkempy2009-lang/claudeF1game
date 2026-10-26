@@ -296,3 +296,26 @@ table.results .tc { display: inline-block; width: 4px; height: 1em; vertical-ali
 #replay button { background: rgba(255,255,255,0.08); border: 1px solid var(--line); color: #fff; padding: 0.35rem 0.7rem; font-weight: 700; font-size: 0.85rem; }
 #replay button:hover { background: rgba(255,255,255,0.18); }
 #replay button.exit { background: var(--accent); border-color: transparent; }
+
+/* photo mode */
+#photo { position: fixed; inset: 0; z-index: 30; pointer-events: none; }
+#photo.hidden { display: none; }
+#photo .pbar { pointer-events: auto; position: absolute; left: 50%; bottom: max(14px, env(safe-area-inset-bottom)); transform: translateX(-50%); display: flex; gap: 0.7rem; align-items: center; background: rgba(8,10,14,0.78); border: 1px solid var(--line); padding: 0.5rem 0.9rem; backdrop-filter: blur(8px); flex-wrap: wrap; justify-content: center; max-width: 96vw; opacity: 0.55; transition: opacity 0.2s; }
+#photo .pbar:hover { opacity: 1; }
+#photo b { color: var(--accent); letter-spacing: 0.12em; font-style: italic; }
+#photo span { color: var(--dim); font-size: 0.8rem; }
+#photo button { background: rgba(255,255,255,0.08); border: 1px solid var(--line); color: #fff; padding: 0.35rem 0.7rem; font-weight: 700; font-size: 0.85rem; }
+#photo button.exit { background: var(--accent); border-color: transparent; }
+#photo .pflash { position: absolute; inset: 0; background: #fff; opacity: 0; transition: opacity 0.25s; pointer-events: none; }
+
+/* profile */
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr)); gap: 0.6rem; }
+.stat { background: rgba(255,255,255,0.04); border: 1px solid var(--line); padding: 0.6rem 0.8rem; }
+.stat small { display: block; color: var(--dim); text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.68rem; }
+.stat b { font-size: 1.5rem; font-style: italic; }
+.achs { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 0.45rem; }
+.ach { border: 1px solid var(--line); padding: 0.5rem 0.7rem; opacity: 0.45; }
+.ach b { display: block; font-size: 0.95rem; }
+.ach span { font-size: 0.78rem; color: var(--dim); }
+.ach.got { opacity: 1; border-color: #ffd24a; background: rgba(255,210,74,0.08); }
+.ach.got b::before { content: "★ "; color: #ffd24a; }

@@ -3,6 +3,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { SURF } from '../sim/track.js';
 import { clamp, lerp, mod, smoothstep, mulberry32, loopDelta } from '../util/math.js';
 import * as TX from './textures.js';
+import { softParticleTexture } from './textures.js';
 import { TEAMS } from '../sim/teams.js';
 
 /** Physics (x, y, height) -> three.js (x, height, -y). */
@@ -42,7 +43,7 @@ void main() {
 }`;
 const SKY_FRAG = /* glsl */ `
 varying vec3 vDir;
-uniform vec3 top; uniform vec3 horizon; uniform vec3 ground; uniform vec3 sunDir; uniform vec3 sunColor; uniform float time; uniform float cloud;
+uniform vec3 top; uniform vec3 horizon; uniform vec3 ground; uniform vec3 sunDir; uniform vec3 sunColor; uniform float time; uniform float cloud; uniform float night;
 float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float noise(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);
   return mix(mix(hash(i), hash(i+vec2(1,0)), f.x), mix(hash(i+vec2(0,1)), hash(i+vec2(1,1)), f.x), f.y); }
@@ -52,6 +53,11 @@ void main() {
   float h = clamp(d.y, -1.0, 1.0);
   vec3 col = mix(horizon, top, pow(clamp(h, 0.0, 1.0), 0.55));
   col = mix(col, ground, smoothstep(0.0, -0.25, h));
+  if (night > 0.02 && h > 0.0) {
+    vec3 sp = floor(d * 260.0);
+    float st = step(0.9975, fract(sin(dot(sp, vec3(12.9898, 78.233, 37.719))) * 43758.5453));
+    col += vec3(0.85, 0.9, 1.0) * st * smoothstep(0.02, 0.35, h) * night * (0.5 + 0.5 * hash(sp.xy + sp.z));
+  }
   float sd = max(dot(d, normalize(sunDir)), 0.0);
   col += sunColor * (pow(sd, 6000.0) * 3.0 + pow(sd, 22.0) * 0.22 + pow(sd, 4.0) * 0.07);
   if (h > 0.0) {
@@ -79,6 +85,7 @@ function makeSky(theme) {
       sunColor: { value: new THREE.Color(sky.sunColor) },
       time: { value: 0 },
       cloud: { value: theme.cloud ?? 0.8 },
+      night: { value: 0 },
     },
   });
   const mesh = new THREE.Mesh(new THREE.SphereGeometry(6000, 32, 16), mat);
@@ -96,6 +103,31 @@ function plainBack(mat, grey = 0.68) {
     else sh.fragmentShader = sh.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>' + inject);
   };
   mat.needsUpdate = true;
+  return mat;
+}
+
+
+/** At night the lit windows of a facade glow and many of the dark ones switch on too (uniform driven by World.setAtmosphere). */
+function nightWindows(mat) {
+  mat.userData.nightU = { value: 0 };
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.uNight = mat.userData.nightU;
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform float uNight;')
+      .replace(
+        '#include <emissivemap_fragment>',
+        `#include <emissivemap_fragment>
+        {
+          vec3 c = diffuseColor.rgb;
+          float lit = step(0.3, c.r - c.b) * step(0.88, c.r);
+          vec2 cell = floor(vec2(vMapUv.x * 5.33, vMapUv.y * 11.1));
+          float h = fract(sin(dot(cell, vec2(12.9898, 78.233))) * 43758.5453);
+          float dark = step(c.b, c.r + 0.1) * 0.0 + step(0.2, c.b - c.r) * step(c.b, 0.45);
+          float on = max(lit, dark * step(h, 0.38));
+          totalEmissiveRadiance += vec3(1.0, 0.82, 0.5) * on * uNight * 1.4;
+        }`
+      );
+  };
   return mat;
 }
 
@@ -151,6 +183,7 @@ export class World {
     this.buildScenery();
     if (opts.profile) this.buildBrakeBoards(opts.profile);
     this.buildDrsMarkers();
+    this.buildFloodlights();
     this.buildMountains();
   }
 
@@ -180,8 +213,8 @@ export class World {
    * Time of day and weather in one call. dusk: 0 midday .. 1 sunset; wet: water on the track; rain: sky/rain intensity.
    * Returns the fog settings the scene should use. Cheap to call every frame (quantised, skipped when unchanged).
    */
-  setAtmosphere({ dusk = 0, wet = 0, rain = 0 } = {}) {
-    const key = `${Math.round(dusk * 60)}/${Math.round(wet * 40)}/${Math.round(rain * 40)}`;
+  setAtmosphere({ dusk = 0, wet = 0, rain = 0, night = 0 } = {}) {
+    const key = `${Math.round(dusk * 60)}/${Math.round(wet * 40)}/${Math.round(rain * 40)}/${Math.round(night * 40)}`;
     if (key === this._atmoKey) return this.atmo;
     this._atmoKey = key;
     const th = this.theme;
@@ -192,7 +225,7 @@ export class World {
         ground: new THREE.Color(th.fog).multiplyScalar(0.75), cloud: th.cloud ?? 0.8,
       };
       this._tmpA = new THREE.Color();
-      this.atmo = { fog: new THREE.Color(th.fog), fogMul: 1, envMul: 1 };
+      this.atmo = { fog: new THREE.Color(th.fog), fogMul: 1, envMul: 1, exposure: 1 };
     }
     const b = this._base, u = this.sky.material.uniforms;
     const grey = (c, v) => c.lerp(this._tmpA.setRGB(v * 0.92, v * 0.95, v), clamp(rain * 0.85, 0, 1));
@@ -210,14 +243,30 @@ export class World {
     this.sunDir.set(hx * k, elev, hz * k).normalize();
     u.sunDir.value.copy(this.sunDir);
     u.cloud.value = clamp(b.cloud + 0.25 * rain, 0, 1.2);
+    // night: deep blue sky with stars, a pale moon, and the track lit by floodlights
+    const nTop = this._tmpF || (this._tmpF = new THREE.Color('#050a1e')), nHor = this._tmpG || (this._tmpG = new THREE.Color('#1b2a4e')), nMoon = this._tmpH || (this._tmpH = new THREE.Color('#9db8ff'));
+    u.top.value.lerp(nTop, night);
+    u.horizon.value.lerp(nHor, night);
+    u.sunColor.value.lerp(nMoon, night);
+    u.ground.value.multiplyScalar(1 - 0.7 * night);
+    u.night.value = night;
     this.sun.color.copy(u.sunColor.value);
-    this.sun.intensity = b.sunInt * (1 - 0.72 * dusk) * (1 - 0.78 * rain);
-    this.hemi.intensity = b.hemiInt * (1 - 0.5 * dusk) * (1 - 0.25 * rain);
+    this.sun.intensity = b.sunInt * (1 - 0.72 * dusk) * (1 - 0.78 * rain) * (1 - 0.88 * night);
+    this.hemi.intensity = b.hemiInt * (1 - 0.5 * dusk) * (1 - 0.25 * rain) * (1 - 0.52 * night);
+    this.hemi.color.copy(this._hemiSky || (this._hemiSky = this.hemi.color.clone())).lerp(nHor, night * 0.8);
+    if (this.nightMats) {
+      this.nightMats.glow.opacity = clamp(night * 1.15, 0, 1);
+      this.nightMats.pool.opacity = clamp(night * 0.3, 0, 0.3);
+      for (const m of this.facadeMats || []) m.userData.nightU.value = night;
+      for (const m of this.nightMats.visible) m.visible = night > 0.04;
+    }
     // fog
     const f = this.atmo.fog.copy(b.fog).lerp(duskFog, dusk * 0.75);
     grey(f, 0.6 * (1 - 0.5 * dusk));
-    this.atmo.fogMul = 1 - 0.5 * rain;
-    this.atmo.envMul = (1 - 0.55 * dusk) * (1 - 0.4 * rain);
+    f.lerp(nHor.clone().multiplyScalar(0.7), night * 0.85);
+    this.atmo.fogMul = (1 - 0.5 * rain) * (1 - 0.25 * night);
+    this.atmo.envMul = (1 - 0.55 * dusk) * (1 - 0.4 * rain) * (1 - 0.75 * night);
+    this.atmo.exposure = 1 + 0.18 * dusk + 0.3 * night;
     // wet asphalt: darker and glossy, reflecting the sky and the sun
     const wc = clamp(wet, 0, 1);
     for (const m of [this.roadMat, this.kerbMat, ...(this.pitMats || [])]) {
@@ -993,7 +1042,8 @@ export class World {
   buildBuildings() {
     const tr = this.track;
     const pt = {};
-    const facades = [3, 5, 8, 12, 15].map((sd, k) => new THREE.MeshStandardMaterial({ map: TX.facadeTexture(sd, ['#e8dcc6', '#d9c7a7', '#f1ece0', '#c9b8a0', '#e3d0cf'][k]), roughness: 0.85 }));
+    const facades = [3, 5, 8, 12, 15].map((sd, k) => nightWindows(new THREE.MeshStandardMaterial({ map: TX.facadeTexture(sd, ['#e8dcc6', '#d9c7a7', '#f1ece0', '#c9b8a0', '#e3d0cf'][k]), roughness: 0.85 })));
+    this.facadeMats = facades;
     const buckets = facades.map(() => []);
     const roofGeos = [];
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), pv = new THREE.Vector3(), sc = new THREE.Vector3();
@@ -1076,6 +1126,42 @@ export class World {
       this.group.add(im);
     }
     this.brakeZones = zones;
+  }
+
+  /** Floodlight masts along the circuit: glowing lamp heads and pools of light on the asphalt, shown at night. */
+  buildFloodlights() {
+    const tr = this.track;
+    const spacing = tr.def.runoff && tr.def.runoff.mode === 'street' ? 55 : 80;
+    const n = Math.floor(tr.length / spacing);
+    const pt = {}, pc = {};
+    const poles = [], heads = [], pools = [];
+    for (let k = 0; k < n; k++) {
+      const s = ((k + 0.5) * tr.length) / n;
+      const side = k % 2 ? 1 : -1;
+      this.outsidePoint(s, side, 3.4, pt);
+      if (!this.clearOfTrack(pt.x, pt.y, 1.5)) continue;
+      const gy = Math.max(this.groundHeight(pt.x, pt.y), tr.at(tr.z, s));
+      poles.push([pt.x, gy + 6, -pt.y]);
+      heads.push(pt.x, gy + 12.3, -pt.y);
+      tr.pointAt(s, side * -1.5, pc);
+      pools.push([pc.x, pc.h + 0.05, -pc.y]);
+    }
+    if (!poles.length) return;
+    const pm = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.1, 0.16, 12, 6), new THREE.MeshStandardMaterial({ color: 0x4a4f56, roughness: 0.6, metalness: 0.5 }), poles.length);
+    const m = new THREE.Matrix4();
+    poles.forEach((p, i) => { m.makeTranslation(p[0], p[1], p[2]); pm.setMatrixAt(i, m); });
+    const glow = new THREE.PointsMaterial({ size: 7, sizeAttenuation: true, map: softParticleTexture(), color: 0xfff0cf, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
+    const gp = new THREE.Points(new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(heads, 3)), glow);
+    gp.frustumCulled = false;
+    const poolMat = new THREE.MeshBasicMaterial({ map: softParticleTexture(), color: 0xfff0d6, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
+    const disc = new THREE.PlaneGeometry(spacing * 1.1, spacing * 1.1);
+    disc.rotateX(-Math.PI / 2);
+    const pl = new THREE.InstancedMesh(disc, poolMat, pools.length);
+    pools.forEach((p, i) => { m.makeTranslation(p[0], p[1], p[2]); pl.setMatrixAt(i, m); });
+    pl.frustumCulled = false;
+    pm.visible = gp.visible = pl.visible = false;
+    this.group.add(pm, gp, pl);
+    this.nightMats = { glow, pool: poolMat, visible: [pm, gp, pl] };
   }
 
   /** Painted detection / activation lines across the track and the trackside signs of every DRS zone. */

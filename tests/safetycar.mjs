@@ -25,7 +25,7 @@ while (race.phase !== 'finished' && n < 240 * 1400) {
   if (strand && !deployed && t < 140) for (const c of strand) { c.u = 0; c.v = 0; c.r = 0; c.omega.fill(0); }
   for (const e of race.events) { if (e.type === 'scDeploy') { deployed = true; orderAtDeploy = race.sorted.map((c) => c); events.push(['deploy', t]); } if (e.type === 'scEnd') { ended = true; events.push(['end', t]); } if (e.type === 'scEnding') events.push(['ending', t]); if (e.type === 'yellow') events.push(['yellow', t]); }
   race.events.length = 0;
-  if (race.sc.state === 'deployed') {
+  if (race.sc.state === 'deployed' && race.sc.t > 10) {
     for (const c of race.cars) if (!strand.includes(c)) maxSpeedUnder = Math.max(maxSpeedUnder, c.speed);
   }
   n++;

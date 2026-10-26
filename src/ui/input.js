@@ -19,6 +19,10 @@ export const DEFAULT_KEYS = {
   mute: ['KeyN'],
   auto: ['KeyG'],
   line: ['KeyL'],
+  ersMode: ['KeyX'],
+  fuelMode: ['KeyZ'],
+  bbUp: ['BracketRight', 'Equal'],
+  bbDown: ['BracketLeft', 'Minus'],
   confirm: ['Enter', 'Space'],
 };
 
@@ -37,6 +41,8 @@ export class Input {
     this.touchMode = false;
     this.padActive = false;
     this.padPrev = [];
+    this.opts = { steerSpeed: 1, padDead: 0.07, rumble: true };
+    this.rumbleT = 0;
     window.addEventListener('keydown', (e) => {
       if (e.repeat) return;
       if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.code)) e.preventDefault();
@@ -61,9 +67,26 @@ export class Input {
     return null;
   }
 
+  /** Gamepad vibration: kerbs and rough ground, tyres at the limit, impacts. Cheap: updates ten times a second. */
+  rumble(car, impact, dt) {
+    const p = this.pad();
+    if (!p || !this.opts.rumble || !this.padActive) return;
+    const act = p.vibrationActuator;
+    if (!act || !act.playEffect) return;
+    this.rumbleT -= dt;
+    if (this.rumbleT > 0) return;
+    this.rumbleT = 0.1;
+    let slip = 0;
+    for (let w = 0; w < 4; w++) slip = Math.max(slip, car.slipVis[w]);
+    const strong = clamp(slip * 0.5 + impact * 1.2, 0, 1);
+    const weak = clamp(car.kerbShake * 0.9 + (car.onGrass ? 0.3 : 0), 0, 1);
+    if (strong < 0.03 && weak < 0.03) return;
+    act.playEffect('dual-rumble', { duration: 120, strongMagnitude: strong, weakMagnitude: weak }).catch(() => {});
+  }
+
   /** Called once per rendered frame with the frame dt and the player's speed (m/s). */
   poll(dt, speed) {
-    const out = { throttle: 0, brake: 0, steer: 0, boost: false, gearUp: false, gearDown: false, drsPress: false, pitToggle: false, tyreCycle: false, camera: false, reset: false, pause: false, lookBack: false, map: false, mute: false, autoToggle: false, line: false, confirm: false };
+    const out = { throttle: 0, brake: 0, steer: 0, boost: false, gearUp: false, gearDown: false, drsPress: false, pitToggle: false, tyreCycle: false, camera: false, reset: false, pause: false, lookBack: false, map: false, mute: false, autoToggle: false, line: false, confirm: false, ersCycle: false, fuelCycle: false, bbDelta: 0 };
     // keyboard ramps
     const kThr = this.isDown('throttle') || this.touch.throttle;
     const kBrk = this.isDown('brake') || this.touch.brake;
@@ -74,8 +97,8 @@ export class Input {
     if (kBrk && this.brake < 0.28) this.brake = 0.28; // initial bite
     const target = (kL ? 1 : 0) - (kR ? 1 : 0);
     const sp = clamp(speed / 85, 0, 1);
-    const attack = 4.6 - 2.6 * sp; // slower build-up at speed: digital steering is a blunt tool
-    const release = 7.5 - 2.0 * sp;
+    const attack = (4.6 - 2.6 * sp) * this.opts.steerSpeed; // slower build-up at speed: digital steering is a blunt tool
+    const release = (7.5 - 2.0 * sp) * this.opts.steerSpeed;
     const rate = target !== 0 && Math.sign(target) === Math.sign(this.steer || target) ? attack : release;
     this.steer += clamp(target - this.steer, -dt * rate, dt * rate);
     out.throttle = this.throttle;
@@ -96,11 +119,14 @@ export class Input {
     out.autoToggle = this.wasPressed('auto');
     out.line = this.wasPressed('line');
     out.confirm = this.wasPressed('confirm');
+    out.ersCycle = this.wasPressed('ersMode');
+    out.fuelCycle = this.wasPressed('fuelMode');
+    out.bbDelta = (this.wasPressed('bbUp') ? 1 : 0) - (this.wasPressed('bbDown') ? 1 : 0);
 
     // gamepad overrides when it is being used
     const p = this.pad();
     if (p) {
-      const ax = dead(p.axes[0] || 0, 0.07);
+      const ax = dead(p.axes[0] || 0, this.opts.padDead);
       const rt = p.buttons[7] ? p.buttons[7].value : 0, lt = p.buttons[6] ? p.buttons[6].value : 0;
       const b = (i) => !!(p.buttons[i] && p.buttons[i].pressed);
       const edge = (i) => b(i) && !this.padPrev[i];
@@ -121,6 +147,8 @@ export class Input {
         out.pitToggle = out.pitToggle || edge(1);
         out.camera = out.camera || edge(3);
         out.tyreCycle = out.tyreCycle || edge(15);
+        out.fuelCycle = out.fuelCycle || edge(12);
+        out.ersCycle = out.ersCycle || edge(13);
         out.reset = out.reset || edge(8);
         out.pause = out.pause || edge(9);
         out.lookBack = out.lookBack || b(10);

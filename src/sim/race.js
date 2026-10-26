@@ -400,6 +400,18 @@ export class Race {
         rs.pitRequested = !rs.pitRequested;
         this.pushEvent({ type: 'pitRequest', car, on: rs.pitRequested });
       }
+      if (p.ersCycle && this.phase === 'racing') {
+        car.ersMode = (car.ersMode + 1) % 3;
+        this.pushEvent({ type: 'mode', car, what: 'ers', value: car.ersMode });
+      }
+      if (p.fuelCycle && this.phase === 'racing') {
+        car.fuelMode = (car.fuelMode + 1) % 3;
+        this.pushEvent({ type: 'mode', car, what: 'fuel', value: car.fuelMode });
+      }
+      if (p.bbDelta) {
+        car.spec.brakeBias = clamp(car.spec.brakeBias + p.bbDelta * 0.01, 0.5, 0.7);
+        this.pushEvent({ type: 'mode', car, what: 'bias', value: car.spec.brakeBias });
+      }
       if (p.tyreCycle) {
         const order = COMPOUND_IDS;
         const cur = rs.nextCompound || car.compound.id;
@@ -449,10 +461,25 @@ export class Race {
             b.applyDamage(r.energy, r.lb[0], r.lb[1]);
           }
           if (r.speed > 1.2) this.pushEvent({ type: 'impact', car: a, other: b, energy: r.energy, speed: r.speed, x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+          this.judgeCollision(a, b, r.la, r.speed);
+          this.judgeCollision(b, a, r.lb, r.speed);
           a.rs.lastImpact = b.rs.lastImpact = this.time;
         }
       }
     }
+  }
+
+  /** Stewards: a car that runs into the back of the car ahead at speed is to blame (`lp` = contact point on `car`, car frame). */
+  judgeCollision(car, other, lp, speed) {
+    if (this.opt.mode !== 'race' || this.phase !== 'racing' || this.time - this.t0 < 8 || speed < 3.5 || this.sc.state !== 'none') return;
+    const ds = loopDelta(other.s, car.s, this.track.length);
+    if (!(ds > 1.5 && lp[0] > 1.2 && Math.abs(lp[1]) < 1.1 && car.speed > other.speed + 2)) return;
+    const rs = car.rs;
+    if (this.time - (rs.lastFault || -99) < 8) return;
+    rs.lastFault = this.time;
+    rs.faults = (rs.faults || 0) + 1;
+    const secs = car.info.isPlayer ? (rs.faults === 1 ? 5 : rs.faults === 2 ? 10 : 20) : 5;
+    this.addPenalty(car, secs, rs.faults >= 3 && car.info.isPlayer ? 'Repeated collisions (drive-through equivalent)' : 'Causing a collision');
   }
 
   // ---- timing ---------------------------------------------------------------------------------------
@@ -593,6 +620,12 @@ export class Race {
     });
     const track = this.track;
     list.forEach((c, i) => {
+      const rsx = c.rs;
+      if (this.phase === 'racing' && this.time - this.t0 > 6 && rsx.pos > i + 1 && !rsx.inPitLane && !rsx.service && this.sc.state === 'none') {
+        const prev = rsx.lastRank != null ? rsx.lastRank : rsx.pos;
+        if (prev > i + 1) rsx.passes = (rsx.passes || 0) + (prev - (i + 1)); // net gain on track, not through other cars' pit stops (approximation)
+      }
+      rsx.lastRank = i + 1;
       c.rs.pos = i + 1;
       const ahead = i > 0 ? list[i - 1] : null;
       c.ahead = ahead;
@@ -701,7 +734,7 @@ export class Race {
         if (car.damageSummary().severity > 0.4 && lapsLeft > 2) drv.wantsPit = true;
         // weather: wets once the track is properly wet, slicks once it dries out
         if (this.track.pit && lapsLeft > 1) {
-          if (this.wet > 0.4 && !car.compound.wetTyre) {
+          if ((this.wet > 0.4 || (this.rain > 0.25 && this.wet > 0.12 + 0.1 * (car.info.number % 3))) && !car.compound.wetTyre) {
             drv.wantsPit = true;
             rs.nextCompound = 'wet';
           } else if (this.wet < 0.14 && this.rain < 0.05 && car.compound.wetTyre) {
@@ -752,6 +785,7 @@ export class Race {
         for (const r of stepPitGame(pg, rs.service.t, press)) this.pushEvent({ type: 'pitWheel', car, k: r.k, res: r.res });
         if (pg.done && rs.service.dur === Infinity) {
           rs.service.dur = pg.dur + (rs.service.repair || 0); // bodywork repairs run alongside the wheels but take longer than a clean stop
+          if (pg.perfects === 4) rs.perfectStops = (rs.perfectStops || 0) + 1;
           this.pushEvent({ type: 'pitGameDone', car, dur: pg.dur, perfects: pg.perfects, misses: pg.misses });
         }
       }
@@ -862,7 +896,10 @@ export class Race {
     if (this.rain > 0.04) this.wet = Math.min(1, this.wet + this.rain * 0.012 * dt);
     else this.wet = Math.max(0, this.wet - 0.0045 * dt);
     if (this.rain > 0.04 && this.wet > this.rain * 1.05 + 0.1) this.wet -= 0.004 * dt; // light rain only wets the track so much
+    this.maxWet = Math.max(this.maxWet || 0, this.wet);
     for (const c of this.cars) c.wetness = this.wet;
+    const pl = this.player;
+    if (pl) pl.rs.maxDamage = Math.max(pl.rs.maxDamage || 0, pl.damageSummary().worst);
   }
 
   // ---- safety car --------------------------------------------------------------------------------------------
