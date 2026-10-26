@@ -168,8 +168,8 @@ export class Race {
     grid.forEach((g, k) => {
       const { seat, player } = g;
       const team = seat.team;
-      // AI strategy: a first stint of at least ~45 % of the race (the softest tyre that lasts, with some variety)
-      const stintNeed = Math.max(1, this.totalLaps * 0.45);
+      // AI strategy: a first stint of at least ~half the race, with a margin (the softest tyre that lasts, with some variety)
+      const stintNeed = Math.max(1.5, this.totalLaps * 0.5) * 1.15;
       const okTyres = aiCompounds.filter((id) => this.tyreLife(id) >= stintNeed);
       const pick = rng();
       let compound = player ? opt.compound : okTyres.length ? okTyres[pick < 0.5 ? 0 : pick < 0.85 ? Math.min(1, okTyres.length - 1) : okTyres.length - 1] : 'hard';
@@ -869,9 +869,9 @@ export class Race {
   }
 
   // ---- weather -----------------------------------------------------------------------------------------------
-  /** Laps a set of this compound is good for at the chosen wear setting (about 0.55 of its nominal life: racing wears tyres faster than a clean lap). */
+  /** Laps a set of this compound is good for at the chosen wear setting (about 0.45 of its nominal life: racing wears tyres faster than a clean lap). */
   tyreLife(id) {
-    return (COMPOUNDS[id].wearLaps / Math.max(0.3, this.opt.tyreWear || 1)) * 0.55;
+    return (COMPOUNDS[id].wearLaps / Math.max(0.3, this.opt.tyreWear || 1)) * 0.45;
   }
 
   /**

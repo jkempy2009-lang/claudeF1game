@@ -221,7 +221,10 @@ export class AIDriver {
     let thr = 0, brk = 0;
     {
       const paceTot = vt / Math.max(1, prof.v[idx]);
-      const capBrake = Math.max(12, prof.env.brakeDecel(Math.max(V, 5), 0.92) * this.gripAdapt * this.gripAdapt);
+      // cold carbon bites less and cooked carbon fades: brake for what the discs can deliver right now
+      const bt = car.brakeTemp;
+      const brakeEff = bt ? (0.86 + 0.14 * smoothstep(120, 420, (bt[0] + bt[1] + bt[2] + bt[3]) / 4)) * (1 - 0.3 * smoothstep(880, 1150, Math.max(bt[0], bt[1], bt[2], bt[3]))) : 1;
+      const capBrake = Math.max(12, prof.env.brakeDecel(Math.max(V, 5), 0.92) * this.gripAdapt * this.gripAdapt * brakeEff);
       const maxDist = (V * V) / (2 * 0.4 * capBrake) + 40;
       let aReq = 0;
       const step = Math.max(1, Math.round(6 / prof.ds));

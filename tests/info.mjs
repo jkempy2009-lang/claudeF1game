@@ -12,6 +12,7 @@ for (const quality of ['low', 'medium', 'high']) {
   await page.click('[data-act=quick]');
   await page.waitForSelector('#hud:not(.hidden)', { timeout: 180000 });
   await page.evaluate(() => { const a = window.apex; a.session.introCancelled = true; a.debugSkip(12); });
+  await page.evaluate(() => { window.apex.post.enabled = false; });
   await page.waitForTimeout(2500);
   const info = await page.evaluate(() => { const r = window.apex.renderer; return { calls: r.info.render.calls, tris: r.info.render.triangles, geometries: r.info.memory.geometries, textures: r.info.memory.textures, programs: r.info.programs ? r.info.programs.length : 0 }; });
   console.log(quality.padEnd(7), JSON.stringify(info));
