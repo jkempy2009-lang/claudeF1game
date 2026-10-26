@@ -29,6 +29,7 @@ function disposeScene(scene) {
   const seen = new Set();
   const texKeys = ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap', 'alphaMap', 'bumpMap', 'envMap', 'lightMap'];
   scene.traverse((o) => {
+    if (o.isLight && o.shadow) o.shadow.dispose(); // the sun's shadow map is a large render target
     if (o.geometry) o.geometry.dispose();
     if (o.isInstancedMesh) o.dispose();
     const mats = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : [];
@@ -43,6 +44,7 @@ function disposeScene(scene) {
   if (scene.environment && scene.environment.dispose) scene.environment.dispose();
 }
 
+const escText = (t) => String(t ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 const smooth01 = (x) => { x = Math.min(1, Math.max(0, x)); return x * x * (3 - 2 * x); };
 
 const nextFrame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
@@ -253,7 +255,7 @@ class Game {
       this.renderer.setAnimationLoop(() => this.safeFrame());
     } catch (e) {
       console.error(e);
-      this.screens.innerHTML = `<section class="screen loading"><div class="logo">Error</div><div class="hint" style="max-width:40rem;white-space:pre-wrap">${String(e.stack || e)}</div></section>`;
+      this.screens.innerHTML = `<section class="screen loading"><div class="logo">Error</div><div class="hint" style="max-width:40rem;white-space:pre-wrap">${escText(e.stack || e)}</div></section>`;
     }
   }
 
@@ -470,11 +472,11 @@ class Game {
       ...base,
       mode: l.mode,
       trackId: l.track,
-      laps: l.laps || 99,
+      laps: l.laps || 30,
       level: l.level ?? 0.3,
       fieldSize: l.mode === 'race' ? l.fieldSize || 2 : 2,
       playerGrid: 2,
-      tyreWear: l.tyreWear ?? 2,
+      tyreWear: l.tyreWear ?? 3,
       compound: wet ? 'wet' : l.compound || 'medium',
       weather: l.weather || 'dry',
       timeOfDay: 'day',
@@ -502,7 +504,7 @@ class Game {
       await this.buildSession(cfg);
     } catch (e) {
       console.error(e);
-      this.screens.innerHTML = `<section class="screen loading"><div class="logo">Error</div><div class="hint" style="max-width:44rem;white-space:pre-wrap">${String(e.stack || e)}</div><button class="btn" data-act="quit">Back</button></section>`;
+      this.screens.innerHTML = `<section class="screen loading"><div class="logo">Error</div><div class="hint" style="max-width:44rem;white-space:pre-wrap">${escText(e.stack || e)}</div><button class="btn" data-act="quit">Back</button></section>`;
     }
   }
 
@@ -535,6 +537,7 @@ class Game {
     const quality = this.save.settings.quality;
     const profile = race.getProfile(race.player.spec, `${race.player.info.team.id}:${cfg.compound}`);
     const world = new World(track, { quality, profile });
+    this.renderer.shadowMap.enabled = quality !== 'low' && !this.perfNoFx; // the quality setting applies to this session
     await nextFrame();
     const scene = new THREE.Scene();
     scene.add(world.group);
@@ -637,7 +640,7 @@ class Game {
 
   toggleAutopilot() {
     const s = this.session;
-    if (!s || s.race.opt.mode === 'timetrial' && false) return;
+    if (!s) return;
     if (!s.pilot) {
       const prof = s.race.getProfile(s.player.spec, 'pilot');
       s.pilot = new AIDriver({ car: s.player, track: s.track, profile: prof, level: Math.max(0.6, s.cfg.level), seed: 4242 });
@@ -818,7 +821,7 @@ class Game {
     }
     const now = performance.now();
     const dt = Math.min(0.05, (now - this.lastT) / 1000);
-    if (this.state === 'race') this.watchPerf((now - this.lastT) / 1000);
+    if (this.state === 'race' && !(this.session && this.session.skipToResults)) this.watchPerf((now - this.lastT) / 1000); // the fast-forward to the results is slow on purpose
     this.lastT = now;
     const r = this.renderer;
     if (this.state === 'menu' || this.state === 'loading' || (this.state === 'paused' && !this.session)) {
@@ -844,6 +847,7 @@ class Game {
       return;
     }
     if (this.state === 'race') this.runSession(s, dt);
+    else if (this.state === 'results') this.audio.update(s.player, [], this.listener(), dt, true); // the engine and wind die away behind the results
     this.post.render(s.scene, this.camera, this.speedBlur(s), this.bloomFor(s));
   }
 
@@ -973,7 +977,7 @@ class Game {
     if (ff && race.phase !== 'finished') s.acc = 0;
 
     this.processEvents(s);
-    if (race.phase !== 'grid' && race.phase !== 'countdown') s.rec.tick(dt, race.cars, race, s.track);
+    if (!ff && race.phase !== 'grid' && race.phase !== 'countdown') s.rec.tick(dt, race.cars, race, s.track);
 
     this.updateSafetyCarView(s, dt);
     // views
@@ -1425,8 +1429,10 @@ class Game {
     if (!s || !s.replay) return;
     const r = s.replay;
     if (a === 'play') {
-      if (r.t >= s.rec.duration - 0.05) r.t = 0;
-      r.playing = !r.playing;
+      if (r.t >= s.rec.duration - 0.05) {
+        r.t = 0; // at the end, Space watches it again
+        r.playing = true;
+      } else r.playing = !r.playing;
     } else if (a === 'slow') r.speed = 0.25;
     else if (a === 'normal') r.speed = 1;
     else if (a === 'cam') {
@@ -1503,7 +1509,12 @@ class Game {
     if (s.scView) {
       const p = rec.scPose;
       s.scView.group.visible = !!p;
-      if (p) s.scView.setPose(p.x, p.y, p.theta, s.track.at(s.track.z, 0));
+      if (p) {
+        const pr = s._scPr || (s._scPr = { i: 0, t: 0, s: 0, d: 0, dist: 0 });
+        s.track.project(p.x, p.y, s._scHint ?? -1, pr);
+        s._scHint = pr.i;
+        s.scView.setPose(p.x, p.y, p.theta, s.track.z[pr.i]);
+      }
     }
     const fCar = s.replayCars[r.follow];
     r.rig.update(dt, s.views.get(cars[r.follow]), fCar, s.track);
