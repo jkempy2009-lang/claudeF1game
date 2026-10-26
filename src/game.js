@@ -645,9 +645,32 @@ class Game {
     const touch = document.getElementById('touch');
     if (!touch) return;
     const set = (k, v) => (this.input.touch[k] = v);
+    const inp = this.input;
+    const press = (action, hold) => {
+      const code = inp.keys[action] && inp.keys[action][0];
+      if (!code) return;
+      inp.pressed.add(code);
+      if (hold) inp.down.add(code);
+    };
     touch.querySelectorAll('button').forEach((b) => {
-      const k = b.dataset.k;
-      b.addEventListener('pointerdown', (e) => { e.preventDefault(); this.input.touchMode = true; set(k, true); });
+      const k = b.dataset.k, a = b.dataset.a;
+      if (a) {
+        // one-shot action buttons behave like the matching key; ERS boost is held
+        b.addEventListener('pointerdown', (e) => { e.preventDefault(); inp.touchMode = true; press(a, !!b.dataset.hold); });
+        const rel = () => { if (b.dataset.hold) { const code = inp.keys[a] && inp.keys[a][0]; if (code) inp.down.delete(code); } };
+        b.addEventListener('pointerup', rel);
+        b.addEventListener('pointercancel', rel);
+        b.addEventListener('pointerleave', rel);
+        return;
+      }
+      b.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        inp.touchMode = true;
+        set(k, true);
+        // on the grid the first tap on the pedal starts the lights
+        const rc = this.session && this.session.race;
+        if (rc && rc.phase === 'grid' && k === 'throttle') press('drs');
+      });
       const up = () => set(k, false);
       b.addEventListener('pointerup', up);
       b.addEventListener('pointercancel', up);

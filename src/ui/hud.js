@@ -75,7 +75,7 @@ export class HUD {
       <div id="keyhint" class="hud-box"></div>
       <canvas id="confetti"></canvas>
       <div id="finish" class="hidden"></div>
-      <div class="touch" id="touch"><button class="l" data-k="left">◀</button><button class="r" data-k="right">▶</button><button class="b" data-k="brake">BRK</button><button class="g" data-k="throttle">GAS</button></div>
+      <div class="touch" id="touch"><button class="l" data-k="left">◀</button><button class="r" data-k="right">▶</button><button class="b" data-k="brake">BRK</button><button class="g" data-k="throttle">GAS</button><button class="sm s1" data-a="pause">II</button><button class="sm s2" data-a="camera">CAM</button><button class="sm s3" data-a="line">LINE</button><button class="sm s4" data-a="drs">DRS</button><button class="sm s5" data-a="boost" data-hold="1">ERS</button><button class="sm s6" data-a="pit">PIT</button></div>
     `;
     this.el = {
       twRows: $('#tw-rows'), twLap: $('#tw-lap'), tbLap: $('#tb-lap'), tbClock: $('#tb-clock'), tbWx: $('#tb-wx'), pitgame: $('#pitgame'),

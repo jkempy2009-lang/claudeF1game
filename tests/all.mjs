@@ -9,6 +9,8 @@ const suites = [
   ['safety car', 'tests/safetycar.mjs'],
   ['weather', 'tests/weather.mjs'],
   ['DRS rules', 'tests/drs.mjs'],
+  ['pit-wall strategy', 'tests/strategy.mjs'],
+  ['racecraft scenarios', 'tests/racecraft.mjs'],
   ['interactive pit stop', 'tests/pitgame.mjs'],
   ['achievements + stats', 'tests/achievements.mjs'],
 ];

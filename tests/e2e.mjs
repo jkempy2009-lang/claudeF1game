@@ -212,6 +212,30 @@ for (const [name, bad] of [
   await page.context().close();
 }
 
+// 7. touch controls: overlay appears on touch devices and the action buttons work
+{
+  const ctx = await browser.newContext({ viewport: { width: 820, height: 400 }, hasTouch: true, isMobile: true });
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => errors.push('[pageerror] ' + e.message));
+  await page.addInitScript(([k, v]) => localStorage.setItem(k, v), [SAVE, JSON.stringify(fast)]);
+  await page.goto(URL);
+  await page.waitForSelector('[data-act=quick]', { timeout: 60000 });
+  await page.tap('[data-act=quick]');
+  await waitHud(page);
+  await page.evaluate(() => window.dispatchEvent(new Event('touchstart')));
+  await page.waitForTimeout(800);
+  step('touch overlay shows', await page.evaluate(() => document.getElementById('touch').classList.contains('show')));
+  await page.evaluate(() => { const a = window.apex; a.session.introCancelled = true; });
+  await page.dispatchEvent('#touch [data-k=throttle]', 'pointerdown', { pointerType: 'touch' });
+  await page.waitForFunction(() => window.apex.session.race.phase !== 'grid', null, { timeout: 60000 });
+  step('tapping the pedal starts the race', true);
+  await page.dispatchEvent('#touch [data-a=camera]', 'pointerdown', { pointerType: 'touch' });
+  await page.dispatchEvent('#touch [data-a=line]', 'pointerdown', { pointerType: 'touch' });
+  await page.waitForTimeout(1500);
+  step('action buttons are wired', await page.evaluate(() => window.apex.state === 'race'));
+  await ctx.close();
+}
+
 console.log(errors.length ? 'ERRORS:\n' + errors.join('\n') : 'no console errors');
 if (errors.length) failed++;
 await browser.close();
