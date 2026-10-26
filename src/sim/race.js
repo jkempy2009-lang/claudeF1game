@@ -168,7 +168,11 @@ export class Race {
     grid.forEach((g, k) => {
       const { seat, player } = g;
       const team = seat.team;
-      let compound = player ? opt.compound : aiCompounds[rng() < 0.45 ? 0 : rng() < 0.75 ? 1 : 2];
+      // AI strategy: a first stint of at least ~45 % of the race (the softest tyre that lasts, with some variety)
+      const stintNeed = Math.max(1, this.totalLaps * 0.45);
+      const okTyres = aiCompounds.filter((id) => this.tyreLife(id) >= stintNeed);
+      const pick = rng();
+      let compound = player ? opt.compound : okTyres.length ? okTyres[pick < 0.5 ? 0 : pick < 0.85 ? Math.min(1, okTyres.length - 1) : okTyres.length - 1] : 'hard';
       if (!player && this.wet > 0.4) compound = 'wet';
       const spec = this.makeCarSpec(team, compound, player);
       const car = new Car(spec, track);
@@ -730,8 +734,14 @@ export class Race {
       const lapsLeft = this.totalLaps - rs.laps;
       if (!drv.wantsPit && drv.pitState === 'none' && lapsLeft > 1) {
         if (rs.plannedStop != null && !done && rs.laps >= rs.plannedStop) drv.wantsPit = true;
-        if (ts.wear > 0.72 && !done) drv.wantsPit = true;
-        if (ts.wear > 0.88) drv.wantsPit = true;
+        // the pit wall reads the same wear projection it gives the player; deep into the tyre cliff is the last resort
+        rs.adviceT = (rs.adviceT || 0) + dt;
+        if (rs.adviceT > 1) {
+          rs.adviceT = 0;
+          const adv = this.strategyAdvice(car);
+          if (adv && adv.thisLap && adv.reason !== 'rules') { drv.wantsPit = true; if (!rs.nextCompound) rs.nextCompound = adv.compound; }
+        }
+        if (ts.wear > 0.8) drv.wantsPit = true;
         if (car.damageSummary().severity > 0.4 && lapsLeft > 2) drv.wantsPit = true;
         // weather: wets once the track is properly wet, slicks once it dries out
         if (this.track.pit && lapsLeft > 1) {
@@ -859,6 +869,11 @@ export class Race {
   }
 
   // ---- weather -----------------------------------------------------------------------------------------------
+  /** Laps a set of this compound is good for at the chosen wear setting (about 0.55 of its nominal life: racing wears tyres faster than a clean lap). */
+  tyreLife(id) {
+    return (COMPOUNDS[id].wearLaps / Math.max(0.3, this.opt.tyreWear || 1)) * 0.55;
+  }
+
   /**
    * Pit-wall advice for a car from the wear it has actually shown: the lap to box on and the tyre to fit.
    * Returns null when there is nothing to say (no pit lane, no data yet, or the tyres will last to the flag).
@@ -868,19 +883,20 @@ export class Race {
     if (!tr.pit || this.opt.mode !== 'race' || this.phase !== 'racing' || rs.finished) return null;
     const total = this.totalLaps;
     const lastStop = rs.stopLaps.length ? rs.stopLaps[rs.stopLaps.length - 1] : 0;
-    const done = rs.laps - lastStop;
-    const frac = clamp(car.s / tr.length, 0, 1);
-    const lapsOn = done + (done >= 1 ? 0 : frac);
     const left = total - rs.laps;
     if (left < 2) return null;
     const wearNow = car.tyreSummary().wear;
+    // wear per lap from the laps already run on this set; the first lap on a set includes launch / warm-up, so it counts for less
+    const stint = rs.tele.filter((t) => t.lap > lastStop);
+    let rate = 0;
+    if (stint.length >= 2) rate = Math.max(0, stint[stint.length - 1].wear - stint[stint.length - 2].wear);
+    else if (stint.length === 1) rate = stint[0].wear * 0.8;
     const wet = this.wet;
     let reason = 'wear', want = false;
     // weather beats everything
     let compound = null;
     if (wet > 0.35 && !car.compound.wetTyre) { want = true; reason = 'wet'; compound = 'wet'; }
     else if (wet < 0.14 && this.rain < 0.05 && car.compound.wetTyre) { want = true; reason = 'dry'; compound = DRY_COMPOUND_IDS[1]; }
-    const rate = lapsOn >= 0.6 ? wearNow / lapsOn : 0; // wear per lap measured so far
     let boxIn = Infinity; // laps from now (0 = this lap)
     if (rate > 0.004 && !car.compound.wetTyre) {
       boxIn = Math.max(0, Math.floor((0.7 - wearNow) / rate - 0.15));
@@ -895,10 +911,12 @@ export class Race {
     if (!want && boxIn === Infinity) return null;
     if (!want && boxIn > 0 && boxIn > left - 2) return null;
     if (!compound) {
+      // the softest tyre that is still good for the rest of the race at this wear setting
       const remaining = Math.max(1, left - boxIn);
-      const order = remaining <= 5 ? ['soft', 'medium', 'hard'] : remaining <= 10 ? ['medium', 'hard', 'soft'] : ['hard', 'medium', 'soft'];
-      const must = mandatoryOpen ? order.filter((c) => c !== car.compound.id) : order;
-      compound = (must.length ? must : order)[0];
+      const lasts = (id) => this.tyreLife(id);
+      const order = ['soft', 'medium', 'hard'];
+      const pool = mandatoryOpen ? order.filter((c) => c !== car.compound.id) : order;
+      compound = pool.find((id) => lasts(id) >= remaining) || pool[pool.length - 1];
     }
     const thisLap = want || boxIn === 0;
     return { lap: rs.laps + 1 + (thisLap ? 0 : boxIn), thisLap, nextLap: !thisLap && boxIn === 1, compound, reason };

@@ -2,6 +2,7 @@ import { wetGripFactor } from './carspec.js';
 import { clamp, lerp, loopDelta, mod, smoothstep, wrapAngle, mulberry32 } from '../util/math.js';
 
 const CAR_LEN = 5.5;
+const RACE_MARGIN = 0.02; // share of the hot-lap pace a top driver leaves in hand in a race
 const PIT_LIMIT = 22.2;
 
 /** Maps a 0..1 difficulty slider to driver behaviour. */
@@ -63,6 +64,7 @@ export class AIDriver {
 
   setLevel(level) {
     this.level = level;
+    this.raceK = 1;
     this.dp = difficultyParams(level);
     this.dp.pace *= this.track.def?.aiPace ?? 1; // per-circuit calibration (see trackdefs)
     this.react = this.dp.reaction * (0.7 + 0.6 * this.rng());
@@ -99,6 +101,8 @@ export class AIDriver {
     const prof = this.profile;
     const V = car.speed;
     this.t += dt;
+    // racing is not qualifying: the very top drivers keep a little in hand when there are other cars around (about 1.5 % at full level)
+    this.raceK = race.opt && race.opt.mode === 'race' ? 1 - RACE_MARGIN * smoothstep(0.75, 1.0, this.level) : 1;
 
     // --- pre-race: sit on the grid, launch after lights out + reaction
     if (race.phase === 'grid' || race.phase === 'countdown') {
@@ -175,7 +179,7 @@ export class AIDriver {
     const idx = tr.idx(s + look);
     const idx1 = (idx + 1) % tr.N;
     const air = 1 - 0.06 * (car.dirtyAir || 0); // following closely costs front downforce: take the corners a touch slower
-    let vt = prof.v[idx] * this.dp.pace * this.skill * this.paceAdapt * this.gripAdapt * air * (this.mistake && this.mistake.active ? this.mistake.factor : 1);
+    let vt = prof.v[idx] * this.dp.pace * this.skill * this.raceK * this.paceAdapt * this.gripAdapt * air * (this.mistake && this.mistake.active ? this.mistake.factor : 1);
     // slope of the profile: are we expected to accelerate / brake?
         // off-track: slow down and return
     const surfNow = car.surf[0] + car.surf[1] + car.surf[2] + car.surf[3];
@@ -224,7 +228,7 @@ export class AIDriver {
       const base = tr.idx(s);
       for (let k = 1, dist = 0; dist < maxDist; k += step) {
         dist = k * prof.ds;
-        const vj = prof.v[(base + k) % tr.N] * this.dp.pace * this.skill * this.paceAdapt * this.gripAdapt * air;
+        const vj = prof.v[(base + k) % tr.N] * this.dp.pace * this.skill * this.raceK * this.paceAdapt * this.gripAdapt * air;
         if (V > vj) {
           const a = (V * V - vj * vj) / (2 * Math.max(dist - 2, 1));
           if (a > aReq) aReq = a;

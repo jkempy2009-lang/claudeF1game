@@ -237,6 +237,8 @@ table.results .tc { display: inline-block; width: 4px; height: 1em; vertical-ali
 #hud.cine #dash, #hud.cine #tyres, #hud.cine #gmeter, #hud.cine #minimap, #hud.cine #msgs, #hud.cine #radio, #hud.cine #keyhint, #hud.cine #pit { display: none; }
 #toast { position: absolute; top: 2vh; left: 50%; transform: translateX(-50%); background: #000d; padding: 0.6rem 1.2rem; border: 1px solid var(--line); opacity: 0; transition: opacity 0.3s; font-weight: 600; }
 #toast.show { opacity: 1; }
+/* over the menus and results the heading owns the top of the screen: the toast sits at the bottom instead */
+body.in-menu #toast { top: auto; bottom: 3vh; }
 
 @media (max-width: 900px) {
   #tower { width: calc(var(--u) * 22); }

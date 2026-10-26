@@ -24,6 +24,7 @@ for (const def of TRACK_DEFS) {
   const car = new Car(spec, track);
   car.assist = { abs: true, tc: 2, steer: 0, autoGear: true, stability: 1 };
   car.wetness = +(process.env.WET || 0);
+  car.wearMult = +(process.env.WEAR || 1);
   const slot = track.gridSlot(0);
   const p = track.pointAt(slot.s, slot.d);
   car.reset(p.x, p.y, p.heading, 0);

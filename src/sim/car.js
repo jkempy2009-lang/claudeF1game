@@ -489,7 +489,9 @@ export class Car {
     else if (this.theta < -Math.PI) this.theta += 2 * Math.PI;
 
     // ---------------------------------------------------------------- energy / fuel / ERS
-    const burn = 0.0185 * (0.25 + 0.75 * thr) * (this.fuelRate ?? 1) * [0.85, 1, 1.2][this.fuelMode];
+    // fuel is burnt per distance driven (about 0.2 kg/km at full race pace) plus a small idle flow: a slow driver or a car waiting
+    // for the marshals uses no more than a quick one, so the tank loaded for the race distance always lasts
+    const burn = (0.0015 + 0.0002 * Math.abs(this.u) * (0.5 + 0.75 * thr)) * (this.fuelRate ?? 1) * [0.85, 1, 1.2][this.fuelMode];
     this.fuel = Math.max(0, this.fuel - burn * dt);
     let harvest = 0;
     const hMul = [1.6, 1, 0.7][this.ersMode];

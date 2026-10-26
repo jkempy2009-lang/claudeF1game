@@ -1,0 +1,26 @@
+// Results screen. Usage: node tests/shot17.mjs outdir
+import { createRequire } from 'node:module';
+import fs from 'node:fs';
+const require = createRequire(import.meta.url);
+const { chromium } = require('playwright');
+const [out] = process.argv.slice(2);
+fs.mkdirSync(out, { recursive: true });
+const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--enable-webgl'] });
+const page = await browser.newPage({ viewport: { width: 1120, height: 630 } });
+const logs = [];
+page.on('console', (m) => { if (m.type() === 'error') logs.push(m.text()); });
+page.on('pageerror', (e) => logs.push('[pageerror] ' + e.message));
+await page.addInitScript(() => localStorage.setItem('apex-grand-prix.v1', JSON.stringify({ config: { trackId: 'rade', laps: 2, level: 0.5, fieldSize: 10, playerGrid: 5, team: 1, mode: 'race' }, settings: { quality: 'low' } })));
+await page.goto('http://localhost:8099/index.html');
+await page.waitForSelector('[data-act=quick]', { timeout: 60000 });
+await page.click('[data-act=quick]');
+await page.waitForSelector('#hud:not(.hidden)', { timeout: 180000 });
+await page.evaluate(() => { const a = window.apex; a.session.introCancelled = true; a.debugUntil(() => a.session.player.rs.finished, 600); });
+await page.waitForFunction(() => window.apex.session.fin && window.apex.session.fin.t > 2, null, { timeout: 120000 });
+await page.screenshot({ path: `${out}/finish.png`, timeout: 180000 });
+await page.keyboard.press('Enter');
+await page.waitForSelector('table.results', { timeout: 180000 });
+await page.waitForTimeout(800);
+await page.screenshot({ path: `${out}/results.png`, timeout: 180000 });
+console.log(logs.join('\n') || 'no errors');
+await browser.close();

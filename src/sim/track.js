@@ -736,17 +736,23 @@ export class Track {
     const L = this.length;
     const i0 = this.idx(0);
     const offset = this.wr[i0] + this.kr[i0] + PIT_ISLAND + PIT_WIDTH / 2 + 1;
+    // the ramps must be long enough for a car at the pit limit to make the sideways move without the tyres giving up:
+    // peak lateral acceleration of the smoothstep shift is 6 * offset * v^2 / ramp^2, kept under ~0.75 g at 80 km/h
+    const rampMin = Math.sqrt((6 * offset * 22.2 * 22.2) / 7.4);
+    const rampIn = Math.max(p.rampIn ?? 90, rampMin);
+    const rampOut = Math.max(p.rampOut ?? 90, rampMin * 0.95);
+    const boxStart = p.boxStart ?? 60, boxSpacing = p.boxSpacing ?? 15;
     this.pit = {
       start: mod(p.in, L), // arc length of the entry ramp start
-      len: p.out - p.in,
-      rampIn: p.rampIn ?? 90,
-      rampOut: p.rampOut ?? 90,
+      len: Math.max(p.out - p.in, rampIn + boxStart + 9 * boxSpacing + 30 + rampOut),
+      rampIn,
+      rampOut,
       offset,
       width: PIT_WIDTH,
       island: PIT_ISLAND,
       limit: 22.2, // 80 km/h
-      boxStart: p.boxStart ?? 60,
-      boxSpacing: p.boxSpacing ?? 15,
+      boxStart,
+      boxSpacing,
       boxCount: 10,
     };
     this.pit.limitStart = mod(this.pit.start + this.pit.rampIn * 0.35, L);

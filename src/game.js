@@ -230,6 +230,7 @@ class Game {
 
   toast(text) {
     const t = document.getElementById('toast');
+    document.body.classList.toggle('in-menu', this.screens.childElementCount > 0);
     t.textContent = text;
     t.classList.add('show');
     clearTimeout(this._toastT);
