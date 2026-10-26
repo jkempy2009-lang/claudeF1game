@@ -981,9 +981,9 @@ class Game {
       v.group.visible = near || car === player || (dx * dx + dy * dy < 1200 * 1200);
       v.setLod(!near && car !== player);
       v.setShadow(near && this.save.settings.quality !== 'low');
-      if (car !== player && near) effects.car(car, v, dt, camPos, true);
+      if (car !== player && near) effects.car(car, dt);
     }
-    effects.car(player, views.get(player), dt, camPos, true);
+    effects.car(player, dt);
     // pit crews appear around any car being serviced
     s.crews = s.crews || new Map();
     for (const car of race.cars) {
@@ -1053,6 +1053,7 @@ class Game {
     this.renderer.toneMappingExposure = atmo.exposure;
     for (const hl of s.headlights) hl.intensity = night * 120;
     effects.wet = race.wet;
+    effects.setLight(clamp(1 - 0.5 * dusk - 0.4 * night - 0.18 * race.rain, 0.3, 1));
     s.rain.update(dt, this.camera.position, race.rain);
     world.focusShadow(views.get(player).group.position);
     world.update(dt, performance.now() / 1000);
