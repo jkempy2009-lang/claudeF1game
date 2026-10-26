@@ -51,6 +51,7 @@ Everything below was added or fixed in this release, grouped by area.
 - The main menu no longer overlaps on short windows (scrolls and compacts), Escape in the pause-menu settings returns to the pause menu.
 
 ### Robustness
+- A player who is parked (or has walked away) no longer holds the session open: once the chequered flag has been out for 240 s with the player stationary (or 420 s whatever happens) the race or qualifying session ends and the player is classified on distance covered. `tests/idle.mjs`.
 - Saved data is validated and repaired on load (types, ranges, circuit and compound ids, season and career structures); a corrupt or hostile save can no longer stop the game from booting.
 - A failure in the frame loop is caught: single errors are ignored, repeated ones show a recovery screen instead of a frozen page.
 - Session disposal frees geometries, materials, textures, instancing buffers, the environment map and the rain system; per-frame allocations in the audio / camera paths removed.

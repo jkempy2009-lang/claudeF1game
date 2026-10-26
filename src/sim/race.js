@@ -1097,7 +1097,10 @@ export class Race {
     if (this.chequered) {
       const open = this.cars.filter((c) => !c.rs.finished && !c.rs.dnf);
       const pl = this.player && this.player.rs.finished;
-      if (!open.length || (this.time - this.chequeredAt > 240 && pl)) {
+      const since = this.time - this.chequeredAt;
+      // everyone still out there gets until the flag has had time to reach them; a parked or absent player does not hold the session open
+      const parked = this.player && !pl && this.player.speed < 3;
+      if (!open.length || (since > 240 && (pl || parked)) || since > 420) {
         this.endRace();
       }
     }
