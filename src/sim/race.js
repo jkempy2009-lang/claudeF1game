@@ -323,6 +323,7 @@ export class Race {
       inp.gearUp = !!p.gearUp;
       inp.gearDown = !!p.gearDown;
       inp.pitLimit = 0;
+      inp.aiDriven = !!p.aiDriven;
       inp.allowReverse = this.phase === 'racing' && !this.opt.noReverse;
       // autopilot through the pit lane
       if (rs.pilot && rs.pilot.pitState !== 'none') {
@@ -332,6 +333,7 @@ export class Race {
         inp.steer = pi.steer;
         inp.pitLimit = pi.pitLimit;
         inp.boost = false;
+        inp.aiDriven = true;
       }
       if (!racing) {
         inp.brake = Math.max(inp.brake, 0);
@@ -599,7 +601,7 @@ export class Race {
       }
       if (zone !== k && rs.drsEligible[k] && loopDelta(car.s, z.end, tr.length) > 10 && loopDelta(car.s, z.end, tr.length) < 200) rs.drsEligible[k] = false;
     }
-    car.drsAllowed = enabled && zone >= 0 && !!rs.drsEligible[zone] && !rs.inPitLane && !rs.service;
+    car.drsAllowed = enabled && zone >= 0 && !!rs.drsEligible[zone] && !rs.inPitLane && !rs.service && Math.abs(car.latG) < 1.4;
     car.drsZone = zone;
     car.drsEligible = rs.drsEligible.some(Boolean);
   }

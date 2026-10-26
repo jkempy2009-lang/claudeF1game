@@ -219,7 +219,7 @@ export class Car {
     // ---------------------------------------------------------------- steering
     const maxSteer = sp.maxSteer / (1 + (V / 46) * (V / 46));
     let lim = maxSteer;
-    if (this.assist.steer) {
+    if (this.assist.steer && !inp.aiDriven) {
       // never ask for more front slip than the tyres can use: delta ~ L*ay/V^2 + alpha_peak
       let ayLim = 0;
       for (let w = 0; w < 4; w++) ayLim += (sp.mu0 - sp.loadSens * (fz[w] - sp.fz0)) * fz[w];

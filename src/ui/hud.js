@@ -4,6 +4,28 @@ const $ = (sel, root = document) => root.querySelector(sel);
 
 const REV_LEDS = 15;
 
+/** DOM write helpers that skip no-op updates (cheaper than letting the browser diff them). */
+const txt = (el, v) => {
+  v = String(v);
+  if (el._t !== v) {
+    el._t = v;
+    el.textContent = v;
+  }
+};
+const cls = (el, v) => {
+  if (el._c !== v) {
+    el._c = v;
+    el.className = v;
+  }
+};
+const sty = (el, prop, v) => {
+  const k = '_s' + prop;
+  if (el[k] !== v) {
+    el[k] = v;
+    el.style[prop] = v;
+  }
+};
+
 export class HUD {
   constructor(root) {
     this.root = root;
@@ -43,6 +65,7 @@ export class HUD {
       </div>
       <div id="gmeter" class="hud-box"><canvas width="200" height="200"></canvas></div>
       <div id="flag"></div>
+      <div id="keyhint" class="hud-box"></div>
       <div class="touch" id="touch"><button class="l" data-k="left">◀</button><button class="r" data-k="right">▶</button><button class="b" data-k="brake">BRK</button><button class="g" data-k="throttle">GAS</button></div>
     `;
     this.el = {
@@ -52,7 +75,7 @@ export class HUD {
       revs: $('#revs'), soc: $('#d-soc'), socb: $('#d-socb'), drs: $('#d-drs'), boost: $('#d-boost'), gap: $('#d-gap'),
       gear: $('#d-gear'), spd: $('#d-spd'), unit: $('#d-unit'), thr: $('#p-thr'), brk: $('#p-brk'), rpm: $('#d-rpm'),
       tyreBoxes: [...root.querySelectorAll('#tyres .tyre')], tyB: $('#ty-b'), tyN: $('#ty-n'), tyW: $('#ty-w'), tyT: $('#ty-t'), tyF: $('#ty-f'), tyD: $('#ty-d'),
-      g: $('#gmeter canvas'), flag: $('#flag'), tower: $('#tower'), minimap: $('#minimap'), touch: $('#touch'),
+      g: $('#gmeter canvas'), flag: $('#flag'), keyhint: $('#keyhint'), tower: $('#tower'), minimap: $('#minimap'), touch: $('#touch'),
     };
     this.rev = [...this.el.revs.children];
     this.rev.forEach((el, i) => el.classList.add(i < 5 ? 'g' : i < 10 ? 'r' : 'b'));
@@ -132,6 +155,18 @@ export class HUD {
     this.mapPy = py;
   }
 
+  showKeyHint(ms = 9000) {
+    const k = (t) => `<kbd>${t}</kbd>`;
+    this.el.keyhint.innerHTML = `<div><b>${k('W')}${k('S')}</b> throttle / brake &nbsp; <b>${k('A')}${k('D')}</b> steer &nbsp; <b>${k('Space')}</b> DRS &nbsp; <b>${k('Shift')}</b> ERS boost &nbsp; <b>${k('B')}</b> pit &nbsp; <b>${k('C')}</b> camera &nbsp; <b>${k('R')}</b> reset &nbsp; <b>${k('Esc')}</b> pause</div><div class="hint">Press <kbd>Space</kbd> to start the lights · hold the brake at a standstill to reverse · <kbd>G</kbd> hands the car to the autopilot</div>`;
+    this.el.keyhint.classList.remove('hidden');
+    this.el.keyhint.style.opacity = 1;
+    clearTimeout(this._khT);
+    this._khT = setTimeout(() => {
+      this.el.keyhint.style.opacity = 0;
+      setTimeout(() => this.el.keyhint.classList.add('hidden'), 600);
+    }, ms);
+  }
+
   show(on) {
     this.root.classList.toggle('hidden', !on);
   }
@@ -173,58 +208,68 @@ export class HUD {
     const rs = p.rs;
     const mph = this.units === 'mph';
     const speed = p.speed * (mph ? 2.23694 : 3.6);
-    el.spd.textContent = Math.round(speed);
+    txt(el.spd, Math.round(speed));
     const gear = p.gear < 0 ? 'R' : p.speed < 0.5 && p.throttle < 0.05 && p.gear === 1 ? 'N' : p.gear;
-    el.gear.textContent = gear;
+    txt(el.gear, gear);
     // rev lights
     const lo = 9500, hi = 14400;
     const frac = clamp((p.rpm - lo) / (hi - lo), 0, 1);
     const lit = Math.round(frac * REV_LEDS);
     const flash = p.rpm > 14700;
-    el.revs.classList.toggle('flash', flash && Math.floor(now / 70) % 2 === 0);
-    for (let i = 0; i < REV_LEDS; i++) this.rev[i].classList.toggle('on', i < lit);
-    el.soc.textContent = Math.round(p.soc * 100) + '%';
-    el.socb.style.width = p.soc * 100 + '%';
-    el.thr.style.height = p.throttle * 100 + '%';
-    el.brk.style.height = p.brake * 100 + '%';
-    el.rpm.textContent = Math.round(p.rpm / 100) * 100 + ' rpm';
-    el.drs.className = 'pill' + (p.drsPos > 0.5 ? ' on' : p.drsAllowed ? ' avail' : '');
-    el.boost.className = 'pill boost' + (pin.boost && p.soc > 0.01 ? ' on' : '');
+    cls(el.revs, 'revs' + (flash && Math.floor(now / 70) % 2 === 0 ? ' flash' : ''));
+    if (this._lit !== lit) {
+      this._lit = lit;
+      for (let i = 0; i < REV_LEDS; i++) this.rev[i].classList.toggle('on', i < lit);
+    }
+    txt(el.soc, Math.round(p.soc * 100) + '%');
+    sty(el.socb, 'width', Math.round(p.soc * 100) + '%');
+    sty(el.thr, 'height', Math.round(p.throttle * 100) + '%');
+    sty(el.brk, 'height', Math.round(p.brake * 100) + '%');
+    txt(el.rpm, Math.round(p.rpm / 100) * 100 + ' rpm');
+    cls(el.drs, 'pill' + (p.drsPos > 0.5 ? ' on' : p.drsAllowed ? ' avail' : ''));
+    cls(el.boost, 'pill boost' + (pin.boost && p.soc > 0.01 ? ' on' : ''));
 
     // timing
     if (race.phase === 'racing' || race.phase === 'finished') {
       const t = Math.max(0, race.time - rs.lapStart);
-      el.cur.textContent = rs.finished ? formatTime(rs.last) : formatTime(t);
-    } else el.cur.textContent = '0:00.000';
-    el.last.textContent = formatTime(rs.last);
-    el.best.textContent = formatTime(rs.best);
-    el.fast.textContent = race.fastest.car ? `${race.fastest.car.info.code} ${formatTime(race.fastest.time)}` : '--:--.---';
+      txt(el.cur, rs.finished ? formatTime(rs.last) : formatTime(t));
+    } else txt(el.cur, '0:00.000');
+    txt(el.last, formatTime(rs.last));
+    txt(el.best, formatTime(rs.best));
+    txt(el.fast, race.fastest.car ? `${race.fastest.car.info.code} ${formatTime(race.fastest.time)}` : '--:--.---');
     if (rs.delta != null && rs.lapCpBest) {
-      el.delta.textContent = (rs.delta >= 0 ? '+' : '-') + Math.abs(rs.delta).toFixed(2);
-      el.delta.className = 'delta ' + (rs.delta < 0 ? 'neg' : 'pos');
-    } else el.delta.textContent = '';
+      txt(el.delta, (rs.delta >= 0 ? '+' : '-') + Math.abs(rs.delta).toFixed(2));
+      cls(el.delta, 'delta ' + (rs.delta < 0 ? 'neg' : 'pos'));
+    } else txt(el.delta, '');
     const secEls = el.sec.children;
     for (let k = 0; k < 3; k++) {
       const flagOn = rs.sectorFlag && rs.sectorFlag.idx === k ? rs.sectorFlag.kind : '';
       const done = rs.sectors[k] != null && (k < rs.sectorIdx || (k === 2 && rs.sectorIdx === 0 && false));
-      let cls = '';
-      if (rs.sectors[k] != null) cls = rs.sectors[k] <= race.bestSectors[k] + 1e-6 ? 'purple' : rs.sectors[k] <= rs.bestSectors[k] + 1e-6 ? 'green' : 'yellow';
-      secEls[k].className = (k < rs.sectorIdx || (rs.sectorIdx === 0 && k === 2 && rs.sectors[2] != null && rs.laps > 0) ? cls : '') + (k === rs.sectorIdx ? ' cur' : '');
+      let cls_ = '';
+      if (rs.sectors[k] != null) cls_ = rs.sectors[k] <= race.bestSectors[k] + 1e-6 ? 'purple' : rs.sectors[k] <= rs.bestSectors[k] + 1e-6 ? 'green' : 'yellow';
+      cls(secEls[k], (k < rs.sectorIdx || (rs.sectorIdx === 0 && k === 2 && rs.sectors[2] != null && rs.laps > 0) ? cls_ : '') + (k === rs.sectorIdx ? ' cur' : ''));
     }
 
     // top bar
     const total = race.totalLaps;
     const lap = Math.min(total, Math.max(1, rs.laps + 1 - (rs.finished ? 1 : 0) + (rs.maxDist < 0 ? 0 : 0)));
-    el.tbLap.innerHTML = race.opt.mode === 'timetrial' ? `<small>Lap</small>${Math.max(1, rs.laps + 1)}` : `<small>Lap</small>${rs.finished ? total : lap}/${total}`;
-    const rt = race.t0 != null ? race.time - race.t0 : 0;
-    el.tbClock.textContent = race.phase === 'grid' || race.phase === 'countdown' ? (race.opt.mode === 'timetrial' ? 'Time trial' : 'Formation') : formatTime(Math.max(0, rt), 1);
-    if (race.opt.mode === 'timetrial') {
-      el.tbClock.textContent = rs.laps < 2 ? (rs.laps === 0 ? 'Out lap' : 'Push lap') : 'Flying lap';
+    const lapHtml = race.opt.mode === 'timetrial' ? `<small>Lap</small>${Math.max(1, rs.laps + 1)}` : `<small>Lap</small>${rs.finished ? total : lap}/${total}`;
+    if (this._lapHtml !== lapHtml) {
+      this._lapHtml = lapHtml;
+      el.tbLap.innerHTML = lapHtml;
     }
+    const rt = race.t0 != null ? race.time - race.t0 : 0;
+    let clockTxt = race.phase === 'grid' || race.phase === 'countdown' ? (race.opt.mode === 'timetrial' ? 'Time trial' : 'Formation') : formatTime(Math.max(0, rt), 1);
+    if (race.opt.mode === 'timetrial') clockTxt = rs.laps < 2 ? (rs.laps === 0 ? 'Out lap' : 'Push lap') : 'Flying lap';
+    txt(el.tbClock, clockTxt);
 
     // gaps
     const ahead = p.ahead, behind = p.behind;
-    el.gap.innerHTML = race.opt.mode === 'timetrial' ? '' : `${ahead ? `▲ ${ahead.info.code} <b>+${(p.gapAhead ?? 0).toFixed(1)}</b>` : 'Leading'}<br>${behind ? `▼ ${behind.info.code} <b>-${(behind.gapAhead ?? 0).toFixed(1)}</b>` : ''}`;
+    const gapHtml = race.opt.mode === 'timetrial' ? '' : `${ahead ? `▲ ${ahead.info.code} <b>+${(p.gapAhead ?? 0).toFixed(1)}</b>` : 'Leading'}<br>${behind ? `▼ ${behind.info.code} <b>-${(behind.gapAhead ?? 0).toFixed(1)}</b>` : ''}`;
+    if (this._gapHtml !== gapHtml) {
+      this._gapHtml = gapHtml;
+      el.gap.innerHTML = gapHtml;
+    }
 
     // tyres
     const ts = p.tyreSummary();

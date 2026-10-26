@@ -425,6 +425,14 @@ export class CarView {
     this.rearWing.rotation.z = dr * 0.12;
   }
 
+  setShadow(on) {
+    if (this.shadowOn === on) return;
+    this.shadowOn = on;
+    this.group.traverse((o) => {
+      if (o.isMesh) o.castShadow = on;
+    });
+  }
+
   setLod(far) {
     if (far === this.lodFar) return;
     this.lodFar = far;

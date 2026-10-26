@@ -785,16 +785,37 @@ export class Track {
   // ---- markers / zones -------------------------------------------------------------------
   _buildMarkers() {
     const L = this.length;
-    this.drs = (this.def.drs || []).map((z) => ({
-      detect: mod(z.detect, L),
-      start: mod(z.start, L),
-      end: mod(z.end, L),
-    }));
+    this.drs = this.autoDrsZones();
     const third = L / 3;
     this.sectors = this.def.sectors || [third, 2 * third];
     // Checkpoints every ~100 m for timing gaps.
     this.cpSpacing = L / Math.round(L / 100);
     this.cpCount = Math.round(L / this.cpSpacing);
+  }
+
+  /** DRS zones from the geometry: every straight longer than ~450 m opens 25 m after the corner exit and closes 150 m before the next corner. */
+  autoDrsZones() {
+    const N = this.N, ds = this.ds, L = this.length;
+    const straight = (i) => Math.abs(this.curv[i % N]) < 1 / 1200;
+    const zones = [];
+    let first = -1;
+    for (let i = 0; i < N; i++) if (!straight(i)) { first = i; break; }
+    if (first < 0) return zones;
+    let n = 0;
+    while (n < N) {
+      const i = (first + n) % N;
+      if (!straight(i)) { n++; continue; }
+      let m = 0;
+      while (n + m < N && straight(first + n + m)) m++;
+      const len = m * ds;
+      if (len > 480) {
+        const s0 = ((first + n) % N) * ds;
+        const start = mod(s0 + 25, L), end = mod(s0 + len - 160, L);
+        zones.push({ detect: mod(start - 140, L), start, end });
+      }
+      n += m;
+    }
+    return zones;
   }
 
   inDrsZone(s) {

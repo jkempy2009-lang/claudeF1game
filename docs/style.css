@@ -212,6 +212,8 @@ table.results .tc { display: inline-block; width: 4px; height: 1em; vertical-ali
 .touch button { position: absolute; bottom: 5vh; width: 18vmin; height: 18vmin; border-radius: 50%; background: rgba(255,255,255,0.14); border: 2px solid rgba(255,255,255,0.35); font-size: 4vmin; font-weight: 900; pointer-events: auto; touch-action: none; }
 .touch .l { left: 4vw; } .touch .r { left: calc(4vw + 21vmin); }
 .touch .g { right: 4vw; background: rgba(60,220,120,0.25); } .touch .b { right: calc(4vw + 21vmin); background: rgba(255,60,60,0.25); }
+#keyhint { left: 50%; bottom: calc(var(--u) * 15); transform: translateX(-50%); padding: 0.7em 1.3em; text-align: center; font-size: 1em; line-height: 1.7; transition: opacity 0.6s; white-space: nowrap; }
+#keyhint kbd { font-size: 0.85em; }
 #toast { position: absolute; top: 2vh; left: 50%; transform: translateX(-50%); background: #000d; padding: 0.6rem 1.2rem; border: 1px solid var(--line); opacity: 0; transition: opacity 0.3s; font-weight: 600; }
 #toast.show { opacity: 1; }
 

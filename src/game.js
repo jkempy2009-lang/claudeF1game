@@ -8,6 +8,7 @@ import { TEAMS } from './sim/teams.js';
 import { COMPOUNDS } from './sim/carspec.js';
 import { World } from './render/world.js';
 import { CarView } from './render/carmodel.js';
+import { PitCrew } from './render/crew.js';
 import { Effects } from './render/effects.js';
 import { CameraRig, CAMERA_MODES, CAMERA_NAMES } from './render/camera.js';
 import { Input } from './ui/input.js';
@@ -154,21 +155,22 @@ class Game {
     const pm = new THREE.PMREMGenerator(this.renderer);
     scene.environment = pm.fromScene(new RoomEnvironment(), 0.04).texture;
     scene.environmentIntensity = 0.9;
-    const floor = new THREE.Mesh(new THREE.CircleGeometry(40, 64), new THREE.MeshStandardMaterial({ color: 0x0d1015, roughness: 0.28, metalness: 0.7 }));
+    const floor = new THREE.Mesh(new THREE.CircleGeometry(40, 64), new THREE.MeshStandardMaterial({ color: 0x14181f, roughness: 0.38, metalness: 0.55 }));
     floor.rotation.x = -Math.PI / 2;
     scene.add(floor);
     const ring = new THREE.Mesh(new THREE.RingGeometry(3.6, 3.75, 96), new THREE.MeshBasicMaterial({ color: 0xff2a2a }));
     ring.rotation.x = -Math.PI / 2;
     ring.position.y = 0.01;
     scene.add(ring);
-    const key = new THREE.SpotLight(0xffffff, 900, 60, 0.5, 0.6, 1.4);
+    const key = new THREE.SpotLight(0xffffff, 520, 60, 0.7, 1.0, 1.4);
     key.position.set(-9, 12, 8);
     key.target.position.set(0, 0.5, 0);
     key.castShadow = true;
     key.shadow.mapSize.set(1024, 1024);
-    const rim = new THREE.SpotLight(0xff3030, 700, 60, 0.6, 0.7, 1.4);
+    const rim = new THREE.SpotLight(0xff4a3a, 260, 70, 0.8, 1.0, 1.4);
     rim.position.set(10, 6, -9);
-    const rim2 = new THREE.SpotLight(0x3070ff, 500, 60, 0.6, 0.7, 1.4);
+    const rim2 = new THREE.SpotLight(0x4a80ff, 220, 70, 0.8, 1.0, 1.4);
+    scene.add(new THREE.HemisphereLight(0x8fa0c0, 0x10131a, 0.55));
     rim2.position.set(-10, 5, -8);
     scene.add(key, key.target, rim, rim2);
     this.showroom = { scene, view: null, angle: 0, cam: new THREE.PerspectiveCamera(36, 1, 0.1, 200) };
@@ -338,6 +340,7 @@ class Game {
     this.state = 'race';
     document.getElementById('touch') && this.updateTouchVisibility();
     this.hud.message(cfg.mode === 'timetrial' ? 'Time trial' : `${track.name}`, '', cfg.mode === 'timetrial' ? 'Set your best lap — your ghost follows' : `${cfg.laps} laps · P${race.player.info.gridPos} on the grid`, 4);
+    this.hud.showKeyHint(10000);
     if (cfg.mode === 'race') this.hud.radio('Welcome to ' + track.name + '. Lights out when you are ready — good luck.', 6);
   }
 
@@ -364,6 +367,29 @@ class Game {
     this.toast(s.auto ? 'Autopilot on (G to take over)' : 'You have control');
   }
 
+  /** Test helper: fast-forward until pred() is true (or maxSec simulated seconds pass). */
+  debugUntil(pred, maxSec = 300) {
+    const s = this.session;
+    if (!s) return false;
+    if (!s.pilot) this.toggleAutopilot();
+    s.auto = true;
+    const { race } = s;
+    const pin = { throttle: 0, brake: 0, steer: 0, boost: false, aiDriven: true };
+    if (race.phase === 'grid') race.start();
+    for (let i = 0; i < maxSec / DT; i++) {
+      if (race.phase === 'racing') {
+        const ai = s.pilot.update(DT, race);
+        pin.throttle = ai.throttle; pin.brake = ai.brake; pin.steer = ai.steer; pin.boost = ai.boost;
+        pin.drsPress = ai.drs && !s.player.rs.drsLatch;
+      } else { pin.throttle = 0; pin.brake = 1; pin.steer = 0; pin.drsPress = false; }
+      race.step(DT, pin);
+      if (pred()) break;
+    }
+    race.events.length = 0;
+    s.introT = 99;
+    return pred();
+  }
+
   /** Test helper: fast-forward the session with the autopilot driving. */
   debugSkip(sec) {
     const s = this.session;
@@ -371,7 +397,7 @@ class Game {
     if (!s.pilot) this.toggleAutopilot();
     s.auto = true;
     const { race } = s;
-    const pin = { throttle: 0, brake: 0, steer: 0, boost: false };
+    const pin = { throttle: 0, brake: 0, steer: 0, boost: false, aiDriven: true };
     if (race.phase === 'grid') race.start();
     const n = Math.round(sec / DT);
     for (let i = 0; i < n; i++) {
@@ -494,6 +520,7 @@ class Game {
       pin.steer = ai.steer;
       pin.boost = ai.boost;
       pin.drsPress = ai.drs && !player.rs.drsLatch;
+      pin.aiDriven = true;
       if (player.rs.pilot && player.rs.pilot.pitState !== 'none') s.pilot.pitState = 'none';
       s.pilot.wantsPit = player.rs.pitRequested;
     }
@@ -517,7 +544,7 @@ class Game {
     let n = 0;
     s.acc += dt;
     const edges = { gearUp: pin.gearUp, gearDown: pin.gearDown, drsPress: pin.drsPress, pitToggle: pin.pitToggle, tyreCycle: pin.tyreCycle };
-    const stepPin = { throttle: pin.throttle, brake: pin.brake, steer: pin.steer, boost: pin.boost, ...edges };
+    const stepPin = { throttle: pin.throttle, brake: pin.brake, steer: pin.steer, boost: pin.boost, aiDriven: !!pin.aiDriven, ...edges };
     let lim = ff ? 400 : 14;
     while (s.acc >= DT && n < lim) {
       race.step(DT, stepPin);
@@ -541,10 +568,31 @@ class Game {
       const near = dx * dx + dy * dy < 160 * 160;
       v.group.visible = near || car === player || (dx * dx + dy * dy < 1200 * 1200);
       v.setLod(!near && car !== player);
-      v.group.traverse((o) => { if (o.isMesh) o.castShadow = near && this.save.settings.quality !== 'low'; });
+      v.setShadow(near && this.save.settings.quality !== 'low');
       if (car !== player && near) effects.car(car, v, dt, camPos, true);
     }
     effects.car(player, views.get(player), dt, camPos, true);
+    // pit crews appear around any car being serviced
+    s.crews = s.crews || new Map();
+    for (const car of race.cars) {
+      const sv = car.rs.service;
+      let crew = s.crews.get(car);
+      if (sv && !crew) {
+        crew = new PitCrew(car.info.team);
+        s.scene.add(crew.group);
+        s.crews.set(car, crew);
+      } else if (!sv && crew) {
+        s.scene.remove(crew.group);
+        s.crews.delete(car);
+        crew = null;
+      }
+      if (crew) {
+        const g = views.get(car).group;
+        crew.group.position.copy(g.position);
+        crew.group.rotation.y = g.rotation.y;
+        crew.update(performance.now() / 1000, sv.t / sv.dur);
+      }
+    }
     effects.update(dt, this.pointScale);
     // ghost
     if (s.ghostView) {
