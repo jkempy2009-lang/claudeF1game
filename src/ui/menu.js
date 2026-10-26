@@ -757,7 +757,7 @@ export class Menu {
       case 'quick':
         c.mode = 'race';
         this.persist();
-        return H.startRace({ ...c });
+        return H.startRace({ ...c, __season: false });
       case 'setup':
         c.mode = t.dataset.mode;
         if (t.dataset.qualify != null) c.qualify = t.dataset.qualify === '1';
@@ -779,8 +779,9 @@ export class Menu {
         return H.careerAbandon();
       case 'go':
         this.persist();
-        if (c.mode === 'race' && c.qualify) return H.startRace({ ...c, mode: 'qualifying', qualiTimes: null, seed: undefined });
-        return H.startRace({ ...c });
+        const inSeason = !!(this.lastData && this.lastData.season); // only a round started from the championship screen counts for it
+        if (c.mode === 'race' && c.qualify) return H.startRace({ ...c, mode: 'qualifying', qualiTimes: null, seed: undefined, __season: inSeason });
+        return H.startRace({ ...c, __season: inSeason });
       case 'qualirace': {
         const d = this.lastData;
         if (d && d.q) {

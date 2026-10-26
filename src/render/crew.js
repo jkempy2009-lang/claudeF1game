@@ -47,6 +47,14 @@ export class PitCrew {
     this.lollipop = lol;
   }
 
+  /** Frees the GPU buffers of the whole crew (called when the stop is over). */
+  dispose() {
+    this.group.traverse((o) => {
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => m.dispose());
+    });
+  }
+
   update(t, progress) {
     for (const p of this.people) {
       const work = progress < 0.82;

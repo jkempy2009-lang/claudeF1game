@@ -580,7 +580,16 @@ class Game {
     let ghostView = null;
     if (cfg.mode === 'timetrial') {
       const g = this.save.ghosts[track.id];
-      if (g) race.ghostBest = { time: g.time, frames: floatsFromB64(g.data), track: track.id };
+      if (g) {
+        try {
+          const frames = floatsFromB64(g.data);
+          if (!(frames.length >= 12) || !Number.isFinite(g.time)) throw new Error('bad ghost');
+          race.ghostBest = { time: g.time, frames, track: track.id };
+        } catch (e) {
+          delete this.save.ghosts[track.id]; // a damaged ghost is dropped instead of blocking the time trial
+          persist(this.save);
+        }
+      }
       ghostView = new CarView(TEAMS[cfg.team], { number: 0, isPlayer: false, code: 'GST' }, { ghost: true, detail: 'low' });
       ghostView.group.visible = false;
       scene.add(ghostView.group);
@@ -591,6 +600,7 @@ class Game {
       acc: 0, alpha: 0, intro: 4.2, introT: 0, paused: false, finishedShown: false, radioT: 0, fast: false,
       player: race.player, pin: null, sunDir: world.sunDir, stopTimer: 0, lastEventCar: null, seasonRound: this.save.season ? this.save.season.round : null,
       useSeason: cfg.__season,
+      prevBest: this.save.records[track.id] ? this.save.records[track.id].best : Infinity,
       rec: new ReplayBuffer(race.cars.length, 30, 30), replayCars: makeReplayCars(race.cars),
       school: cfg.lesson && lessonById(cfg.lesson) ? new SchoolTracker(lessonById(cfg.lesson)) : null,
     };
@@ -794,6 +804,12 @@ class Game {
   }
 
   frame() {
+    const touchOn = this.input.touchMode && this.state === 'race';
+    if (touchOn !== this._touchShown) {
+      this._touchShown = touchOn;
+      const tz = document.getElementById('touch');
+      if (tz) tz.classList.toggle('show', touchOn);
+    }
     const now = performance.now();
     const dt = Math.min(0.05, (now - this.lastT) / 1000);
     if (this.state === 'race') this.watchPerf((now - this.lastT) / 1000);
@@ -847,6 +863,7 @@ class Game {
   renderShowroom(dt) {
     const sr = this.showroom;
     if (!sr) return;
+    this.renderer.toneMappingExposure = 1; // the last race may have left a dusk or night exposure behind
     sr.angle += dt * 0.28;
     const c = sr.cam;
     c.aspect = window.innerWidth / window.innerHeight;
@@ -903,17 +920,8 @@ class Game {
       }
     }
     if (pin.autoToggle) this.toggleAutopilot();
-    if (s.auto && (race.phase === 'racing' || (s.fin && race.phase === 'finished'))) {
-      const ai = s.pilot.update(DT, race);
-      pin.throttle = ai.throttle;
-      pin.brake = ai.brake;
-      pin.steer = ai.steer;
-      pin.boost = ai.boost;
-      pin.drsPress = ai.drs && !player.rs.drsLatch;
-      pin.aiDriven = true;
-      if (player.rs.pilot && player.rs.pilot.pitState !== 'none') s.pilot.pitState = 'none';
-      s.pilot.wantsPit = player.rs.pitRequested;
-    }
+    const autoDrive = () => s.auto && (race.phase === 'racing' || (s.fin && race.phase === 'finished'));
+    if (autoDrive()) pin.aiDriven = true;
 
     // intro orbit, then lights
     if (race.phase === 'grid') {
@@ -924,19 +932,30 @@ class Game {
       }
     }
     if (pin.reset && (race.phase === 'racing' || race.phase === 'countdown')) {
-      race.resetToTrack(player, race.opt.mode === 'race' ? 0 : 0);
+      race.resetToTrack(player);
       if (race.phase === 'racing') this.hud.message('Car recovered', '', 'Back on the racing line', 2);
     }
 
     // fixed-step physics
     const ff = !!s.skipToResults && race.phase !== 'finished';
-    const frameSteps = ff ? 40 : 1;
     let n = 0;
     s.acc += ff ? DT * 300 : dt; // fast-forward: about 1.2 s of racing per frame
     const edges = { gearUp: pin.gearUp, gearDown: pin.gearDown, drsPress: pin.drsPress, pitToggle: pin.pitToggle, tyreCycle: pin.tyreCycle, ersCycle: pin.ersCycle, fuelCycle: pin.fuelCycle, bbDelta: pin.bbDelta };
     const stepPin = { throttle: pin.throttle, brake: pin.brake, steer: pin.steer, boost: pin.boost, aiDriven: !!pin.aiDriven, ...edges };
     let lim = ff ? 300 : 14;
     while (s.acc >= DT && n < lim) {
+      if (autoDrive()) {
+        // the autopilot thinks at the physics rate, exactly like the AI cars (its timers and smoothing assume DT)
+        const ai = s.pilot.update(DT, race);
+        stepPin.throttle = ai.throttle;
+        stepPin.brake = ai.brake;
+        stepPin.steer = ai.steer;
+        stepPin.boost = ai.boost;
+        stepPin.aiDriven = true;
+        if (ai.drs && !player.rs.drsLatch) stepPin.drsPress = true;
+        if (player.rs.pilot && player.rs.pilot.pitState !== 'none') s.pilot.pitState = 'none';
+        s.pilot.wantsPit = player.rs.pitRequested;
+      }
       race.step(DT, stepPin);
       stepPin.gearUp = stepPin.gearDown = stepPin.drsPress = stepPin.pitToggle = stepPin.tyreCycle = stepPin.ersCycle = stepPin.fuelCycle = false;
       stepPin.bbDelta = 0;
@@ -976,6 +995,7 @@ class Game {
         s.crews.set(car, crew);
       } else if (!sv && crew) {
         s.scene.remove(crew.group);
+        crew.dispose();
         s.crews.delete(car);
         crew = null;
       }
@@ -994,9 +1014,8 @@ class Game {
       const pose = race.phase === 'racing' ? race.ghostPose(race.time - player.rs.lapStart) : null;
       if (pose && player.rs.laps >= 1) {
         s.ghostView.group.visible = true;
-        s.ghostView.setPose(pose.x, pose.y, pose.theta, this.track ? 0 : 0, pose.steer);
-        const i = s.track.idx(0);
-        const pr = s.track.project(pose.x, pose.y, -1, {});
+        s.ghostView.setPose(pose.x, pose.y, pose.theta, 0, pose.steer);
+        const pr = s.track.project(pose.x, pose.y, -1, this._ghostProj || (this._ghostProj = {}));
         s.ghostView.group.position.y = s.track.at(s.track.z, pr.s);
         race.ghostPos = pose;
       } else {
@@ -1064,7 +1083,7 @@ class Game {
     // results
     if (race.phase === 'finished' && !s.finishedShown && (!s.fin || s.skipToResults)) {
       s.finishedShown = true;
-      setTimeout(() => this.showResults(), race.opt.mode === 'timetrial' ? 0 : 600);
+      setTimeout(() => { if (this.session === s) this.showResults(); }, race.opt.mode === 'timetrial' ? 0 : 600); // not if the session was left in the meantime
     }
   }
 
@@ -1125,7 +1144,7 @@ class Game {
           break;
         case 'damageBox':
           if (e.car === player) {
-            hud.message('Box for repairs', 'bad', 'Heavy damage: pit request set (B to cancel)', 4);
+            hud.message('Box for repairs', 'bad', `Heavy damage: pit request set (${this.kn('pit')} to cancel)`, 4);
             hud.radio('Box, box. You have heavy damage: we need to repair the car. Pit this lap.', 6);
             this.audio.ui('bad');
           }
@@ -1169,10 +1188,10 @@ class Game {
           if (e.kind === 'purple') hud.message('Purple sector', 'purple', '', 1.4);
           break;
         case 'pitRequest':
-          if (e.car === player) hud.message(e.on ? 'Box this lap' : 'Pit request cancelled', e.on ? '' : 'bad', e.on ? 'Press T to pick the next compound' : '', 2.5);
+          if (e.car === player) hud.message(e.on ? 'Box this lap' : 'Pit request cancelled', e.on ? '' : 'bad', e.on ? `Press ${this.kn('tyre')} to pick the next compound` : '', 2.5);
           break;
         case 'pitEntry':
-          if (e.car === player) hud.message('Pit lane', '', '80 km/h limit', 2.5);
+          if (e.car === player) hud.message('Pit lane', '', this.save.settings.units === 'mph' ? '50 mph limit' : '80 km/h limit', 2.5);
           break;
         case 'pitStopEnd':
           if (e.car === player) {
@@ -1591,15 +1610,21 @@ class Game {
       s._dryCalled = true;
       this.hud.radio('The track is drying. Box for slicks when you are ready.', 6);
     } else if (rc.wet > 0.35) s._dryCalled = false;
+    // one call per tick at most; each reminder keeps its own latch
+    let said = false;
     if (ts.wear > 0.7 && !rs.pitRequested && rs.stops === 0 && left > 1 && s.track.pit && !s._wearCalled) {
       s._wearCalled = true;
+      said = true;
       this.hud.radio(`Tyres are going off. Press ${this.kn('pit')} when you want to box.`, 6);
-    } else if (p.drsAllowed && !s._drsCalled) {
+    }
+    if (p.drsAllowed && !s._drsCalled && !said) {
       s._drsCalled = true;
+      said = true;
       this.hud.radio(`DRS enabled. Press ${this.kn('drs')} on the straight.`, 4);
     } else if (!p.drsAllowed) s._drsCalled = false;
-    else if (p.behind && (p.behind.gapAhead ?? 9) < 0.8 && !s._behindCalled) {
+    if (p.behind && (p.behind.gapAhead ?? 9) < 0.8 && !s._behindCalled && !said) {
       s._behindCalled = true;
+      said = true;
       this.hud.radio(`${p.behind.info.code} is right behind, ${(p.behind.gapAhead).toFixed(1)} seconds. Defend.`, 4);
     } else if (!p.behind || (p.behind.gapAhead ?? 9) > 2) s._behindCalled = false;
     const bmax = Math.max(p.brakeTemp[0], p.brakeTemp[1], p.brakeTemp[2], p.brakeTemp[3]);
@@ -1636,10 +1661,8 @@ class Game {
       const rec = this.save.records[track.id];
       const best = player.rs.best;
       let newBest = false;
-      if (!s.cfg.lesson && best < Infinity && (!rec || best < rec.best)) {
-        this.save.records[track.id] = { best };
-        newBest = true;
-      }
+      if (!s.cfg.lesson && best < Infinity && best < s.prevBest) newBest = true; // judged against the record held when the session began
+      if (!s.cfg.lesson && best < Infinity && (!rec || best < rec.best)) this.save.records[track.id] = { best };
       persist(this.save);
       this.menu.show('timetrial', { player, race, trackName, best, newBest });
       return;
@@ -1669,7 +1692,7 @@ class Game {
     }
     let season = null;
     const cfg = s.cfg;
-    if (this.save.season && this.save.season.calendar && !cfg.career && !cfg.lesson && (s.seasonRecorded || this.save.season.calendar[this.save.season.round] === track.id)) {
+    if (this.save.season && this.save.season.calendar && !cfg.career && !cfg.lesson && (s.seasonRecorded || (s.useSeason && this.save.season.calendar[this.save.season.round] === track.id))) {
       season = this.save.season;
       if (!s.seasonRecorded) {
         s.seasonRecorded = true;

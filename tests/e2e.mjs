@@ -201,6 +201,19 @@ for (const [name, bad] of [
   await page.context().close();
 }
 
+// 5b. a quick race on the circuit of the current championship round is not a championship round
+{
+  const page = await open({ ...fast, season: { calendar: ['rade', 'vettore', 'northfield', 'ardennes'], round: 0, points: {}, teamPoints: {}, teamOf: {}, results: [] } });
+  await page.click('[data-act=quick]');
+  await waitHud(page);
+  await page.evaluate(() => { const a = window.apex; return a.debugUntil(() => a.session.player.rs.finished, 400); });
+  await page.waitForFunction(() => window.apex.session.fin && window.apex.session.fin.t > 2, null, { timeout: 120000 });
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('table.results', { timeout: 180000 });
+  step('a quick race does not advance the championship', await page.evaluate(() => window.apex.save.season.round === 0 && Object.keys(window.apex.save.season.points).length === 0));
+  await page.context().close();
+}
+
 // 6. career: new career, race, prize money, upgrade, next round
 {
   const page = await open({ ...fast, settings: { quality: 'low' } });
