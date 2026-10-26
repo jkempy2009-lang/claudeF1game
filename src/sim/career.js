@@ -193,6 +193,45 @@ export function nextSeason(career, teamIdx = career.team) {
   return career;
 }
 
+const cleanInt = (v, lo = 0, hi = 9999) => Math.max(lo, Math.min(hi, Math.round(Number.isFinite(+v) ? +v : 0)));
+const cleanStr = (v, n = 40) => String(v ?? '').replace(/[<>&"'`]/g, '').slice(0, n);
+
+/** { name: points } with plain-string keys and whole-number values. */
+export function cleanNumMap(m) {
+  const out = {};
+  if (m && typeof m === 'object' && !Array.isArray(m)) for (const [k, v] of Object.entries(m).slice(0, 80)) if (Number.isFinite(+v)) out[cleanStr(k, 40)] = cleanInt(v, 0, 9999);
+  return out;
+}
+export function cleanStrMap(m) {
+  const out = {};
+  if (m && typeof m === 'object' && !Array.isArray(m)) for (const [k, v] of Object.entries(m).slice(0, 80)) out[cleanStr(k, 40)] = cleanStr(v, 40);
+  return out;
+}
+
+/** Round results saved in a season: only known fields, numbers as numbers, short plain strings. */
+export function cleanResults(arr) {
+  if (!Array.isArray(arr)) return [];
+  const ids = TRACK_DEFS.map((d) => d.id);
+  return arr.slice(0, 40).filter((r) => r && typeof r === 'object').map((r) => ({
+    round: cleanInt(r.round, 0, 99),
+    trackId: ids.includes(r.trackId) ? r.trackId : ids[0],
+    order: (Array.isArray(r.order) ? r.order : []).slice(0, 24).filter((o) => o && typeof o === 'object').map((o) => ({ name: cleanStr(o.name, 28), team: cleanStr(o.team, 12), pos: cleanInt(o.pos, 1, 99), pts: cleanInt(o.pts, 0, 99), grid: cleanInt(o.grid, 0, 99) })),
+  }));
+}
+
+/** One finished season in the career history. */
+export function cleanHistoryEntry(h) {
+  if (!h || typeof h !== 'object') return null;
+  return { seasonNo: cleanInt(h.seasonNo, 1, 99), team: cleanInt(h.team, 0, TEAMS.length - 1), driverPos: cleanInt(h.driverPos, 0, 99), teamPos: cleanInt(h.teamPos, 0, 99), points: cleanInt(h.points, 0, 9999), champion: !!h.champion, constructorObjective: cleanInt(h.constructorObjective, 0, 99), metConstructor: !!h.metConstructor, wins: cleanInt(h.wins, 0, 99), podiums: cleanInt(h.podiums, 0, 99) };
+}
+
+/** The end-of-season recap (with contract offers). */
+export function cleanRecap(r) {
+  const base = cleanHistoryEntry(r);
+  if (!base) return null;
+  return { ...base, offers: (Array.isArray(r.offers) ? r.offers : []).map((i) => cleanInt(i, 0, TEAMS.length - 1)).slice(0, 3) };
+}
+
 /** Defensive copy for anything read from storage: returns null if it is not a usable career. */
 export function sanitizeCareer(raw) {
   try {
@@ -204,8 +243,10 @@ export function sanitizeCareer(raw) {
     season.calendar = season.calendar.filter((id) => ids.includes(id));
     if (!season.calendar.length) return null;
     season.round = Math.round(n(season.round, 0, season.calendar.length, 0));
-    for (const k of ['points', 'teamPoints', 'teamOf']) if (!season[k] || typeof season[k] !== 'object') season[k] = {};
-    if (!Array.isArray(season.results)) season.results = [];
+    season.points = cleanNumMap(season.points);
+    season.teamPoints = cleanNumMap(season.teamPoints);
+    season.teamOf = cleanStrMap(season.teamOf);
+    season.results = cleanResults(season.results);
     if (!Array.isArray(season.weather) || season.weather.length < season.calendar.length) season.weather = rollWeather(season.calendar.length);
     season.weather = season.weather.map((w) => (WEATHER_IDS.includes(w) ? w : 'dry'));
     const up = raw.upgrades || {};
@@ -219,8 +260,8 @@ export function sanitizeCareer(raw) {
       budget: Math.round(n(raw.budget, 0, 9999, 0)),
       upgrades: { power: Math.round(n(up.power, 0, UPGRADE_MAX, 0)), aero: Math.round(n(up.aero, 0, UPGRADE_MAX, 0)), grip: Math.round(n(up.grip, 0, UPGRADE_MAX, 0)) },
       season,
-      history: Array.isArray(raw.history) ? raw.history.slice(-40) : [],
-      seasonRecap: raw.seasonRecap && typeof raw.seasonRecap === 'object' ? raw.seasonRecap : null,
+      history: (Array.isArray(raw.history) ? raw.history.slice(-40) : []).map(cleanHistoryEntry).filter(Boolean),
+      seasonRecap: cleanRecap(raw.seasonRecap),
     };
   } catch (e) {
     return null;

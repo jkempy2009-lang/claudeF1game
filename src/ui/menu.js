@@ -7,7 +7,7 @@ import { drawLineChart } from './charts.js';
 import { ACHIEVEMENTS, DEFAULT_STATS } from '../sim/achievements.js';
 import { LESSONS, sanitizeSchool } from '../sim/school.js';
 import { KEY_ACTIONS, keyLabel, mergeKeys, sanitizeKeys } from './input.js';
-import { CHAMP_CAL, sanitizeCareer, UPGRADE_KEYS, UPGRADE_INFO, UPGRADE_MAX, upgradeCost, objectiveFor, DISTANCES, seasonDone, driverStandings, constructorStandings, lapsFor, teamRank, weatherFor, WEATHER_NAMES } from '../sim/career.js';
+import { CHAMP_CAL, sanitizeCareer, UPGRADE_KEYS, UPGRADE_INFO, UPGRADE_MAX, upgradeCost, objectiveFor, DISTANCES, driverStandings, constructorStandings, lapsFor, weatherFor, WEATHER_NAMES, WEATHER_IDS, cleanNumMap, cleanStrMap, cleanResults } from '../sim/career.js';
 
 export const SAVE_KEY = 'apex-grand-prix.v1';
 
@@ -56,7 +56,7 @@ export function sanitizeConfig(raw) {
   const D = DEFAULT_CONFIG;
   const ra = isObj(r.assists) ? r.assists : {};
   const fieldSize = Math.round(num(r.fieldSize, 2, 20, D.fieldSize));
-  const wing = (v) => (v === null || v === undefined ? null : Math.round(num(v, 0, 10, 5)));
+  const wing = (v) => (v === null || v === undefined ? null : Number.isFinite(+v) ? Math.round(num(v, 0, 10, 5)) : null);
   return {
     mode: oneOf(r.mode, ['race', 'timetrial', 'qualifying'], D.mode),
     trackId: oneOf(r.trackId, TRACK_DEFS.map((t) => t.id), D.trackId),
@@ -117,12 +117,17 @@ export function sanitizeSettings(raw) {
   };
 }
 
+/** The preset closest to a level (for the chip highlight and the summary text). */
+function nearestDifficulty(level) {
+  return DIFFICULTIES.reduce((a, b) => (Math.abs(b.level - level) < Math.abs(a.level - level) ? b : a));
+}
+
 function sanitizeRecords(raw) {
   const out = {};
   if (!isObj(raw)) return out;
   for (const t of TRACK_DEFS) {
     const r = raw[t.id];
-    if (isObj(r) && Number.isFinite(r.best) && r.best > 5 && r.best < 1000) out[t.id] = { ...r, best: +r.best };
+    if (isObj(r) && Number.isFinite(r.best) && r.best > 5 && r.best < 1000) out[t.id] = { best: +r.best };
   }
   return out;
 }
@@ -133,17 +138,7 @@ function sanitizeSeason(raw) {
   const calendar = Array.isArray(raw.calendar) ? raw.calendar.filter((id) => ids.includes(id)) : CHAMP_CAL.slice();
   if (!calendar.length) return null;
   const round = Math.round(num(raw.round, 0, calendar.length, 0));
-  const numMap = (m) => {
-    const out = {};
-    if (isObj(m)) for (const [k, v] of Object.entries(m)) if (Number.isFinite(+v)) out[String(k).slice(0, 40)] = Math.max(0, Math.round(+v));
-    return out;
-  };
-  const strMap = (m) => {
-    const out = {};
-    if (isObj(m)) for (const [k, v] of Object.entries(m)) out[String(k).slice(0, 40)] = String(v).slice(0, 40);
-    return out;
-  };
-  return { calendar, round, points: numMap(raw.points), teamPoints: numMap(raw.teamPoints), teamOf: strMap(raw.teamOf), results: Array.isArray(raw.results) ? raw.results.slice(0, 40) : [] };
+  return { calendar, round, points: cleanNumMap(raw.points), teamPoints: cleanNumMap(raw.teamPoints), teamOf: cleanStrMap(raw.teamOf), results: cleanResults(raw.results), weather: Array.isArray(raw.weather) ? raw.weather.filter((w) => WEATHER_IDS.includes(w)).slice(0, calendar.length) : undefined };
 }
 
 function sanitizeStats(raw) {
@@ -156,7 +151,13 @@ function sanitizeStats(raw) {
 export function sanitizeSave(raw) {
   if (!isObj(raw)) raw = {};
   const ghosts = {};
-  if (isObj(raw.ghosts)) for (const t of TRACK_DEFS) if (isObj(raw.ghosts[t.id])) ghosts[t.id] = raw.ghosts[t.id];
+  if (isObj(raw.ghosts)) {
+    for (const t of TRACK_DEFS) {
+      const g = raw.ghosts[t.id];
+      // a ghost is a lap time and a base64 blob of float frames; anything else (or anything huge) is dropped
+      if (isObj(g) && Number.isFinite(+g.time) && +g.time > 5 && +g.time < 1000 && typeof g.data === 'string' && g.data.length < 600000 && /^[A-Za-z0-9+/=]*$/.test(g.data)) ghosts[t.id] = { time: +g.time, data: g.data };
+    }
+  }
   return {
     settings: sanitizeSettings(raw.settings),
     config: sanitizeConfig(raw.config),
@@ -164,10 +165,10 @@ export function sanitizeSave(raw) {
     ghosts,
     season: sanitizeSeason(raw.season),
     career: sanitizeCareer(raw.career),
-    honours: Array.isArray(raw.honours) ? raw.honours.filter((h) => isObj(h)).slice(-30) : [],
+    honours: Array.isArray(raw.honours) ? raw.honours.filter((h) => isObj(h)).slice(-30).map((h) => ({ pos: Math.max(0, Math.min(99, Math.round(+h.pos) || 0)), team: String(h.team ?? '').replace(/[<>&"'`]/g, '').slice(0, 24), points: Math.max(0, Math.min(9999, Math.round(+h.points) || 0)) })) : [],
     stats: sanitizeStats(raw.stats),
     school: sanitizeSchool(raw.school),
-    achievements: isObj(raw.achievements) ? Object.fromEntries(Object.entries(raw.achievements).filter(([k, v]) => ACHIEVEMENTS.some((a) => a.id === k) && Number.isFinite(+v))) : {},
+    achievements: isObj(raw.achievements) ? Object.fromEntries(Object.entries(raw.achievements).filter(([k, v]) => ACHIEVEMENTS.some((a) => a.id === k) && Number.isFinite(+v) && +v > 0)) : {},
   };
 }
 
@@ -192,8 +193,12 @@ export function importSave(text) {
     const j = JSON.parse(String(text).trim());
     if (!isObj(j)) return null;
     const raw = isObj(j.save) ? j.save : j;
-    if (!['settings', 'config', 'records', 'career', 'stats', 'achievements', 'season', 'school'].some((k) => k in raw)) return null;
-    return sanitizeSave(raw);
+    const SECTIONS = ['settings', 'config', 'records', 'ghosts', 'career', 'stats', 'achievements', 'season', 'school', 'honours'];
+    const present = SECTIONS.filter((k) => k in raw);
+    if (!present.length) return null;
+    const out = sanitizeSave(raw);
+    Object.defineProperty(out, 'present', { value: present, enumerable: false }); // which sections the text really had
+    return out;
   } catch (e) {
     return null;
   }
@@ -348,7 +353,7 @@ export class Menu {
     const c = this.config;
     const t = TRACK_DEFS.find((d) => d.id === c.trackId);
     const team = TEAMS[c.team];
-    const d = DIFFICULTIES.reduce((a, b) => (Math.abs(b.level - c.level) < Math.abs(a.level - c.level) ? b : a));
+    const d = nearestDifficulty(c.level);
     return c.mode === 'timetrial' ? `${esc(t.name)} · ${esc(team.short)}` : `${esc(t.name)} · ${c.laps} laps · ${esc(d.name)} · ${esc(team.short)}`;
   }
 
@@ -367,13 +372,13 @@ export class Menu {
     const c = this.config;
     const track = this.hooks.tracks[c.trackId];
     const est = track ? Math.round((c.laps * track.length) / 1000 * 0.5) : 0;
-    const diff = DIFFICULTIES.reduce((a, b) => (Math.abs(b.level - c.level) < Math.abs(a.level - c.level) ? b : a));
+    const diff = nearestDifficulty(c.level);
     const timetrial = c.mode === 'timetrial';
     return `<div class="grid2">
       ${timetrial ? '' : `<div class="panel"><h3>Race</h3>
         ${this.slider('laps', 'Laps', c.laps, 1, 30, 1, `${c.laps} · about ${Math.max(1, est)} min`)}
         <div class="field"><label>AI difficulty<b>${Math.round(c.level * 100)}%</b></label>${this.chips('diff', DIFFICULTIES.map((d) => ({ value: d.level, label: d.name })), diff.level)}
-        <input type="range" data-slider="level" min="0" max="100" step="1" value="${Math.round(c.level * 100)}"><div class="hint">${esc(diff.blurb)} — drag for any value in between. Rookie leaves you room to learn; Legend runs every car at the physical limit.</div></div>
+        <input type="range" data-slider="level" min="0" max="100" step="1" value="${Math.round(c.level * 100)}"><div class="hint" id="diff-blurb">${esc(diff.blurb)} — drag for any value in between. Rookie leaves you room to learn; Legend runs every car at the physical limit.</div></div>
         ${this.slider('fieldSize', 'Cars on the grid', c.fieldSize, 2, 20, 1, c.fieldSize)}
         ${this.slider('playerGrid', 'Your starting position', Math.min(c.playerGrid, c.fieldSize), 1, c.fieldSize, 1, 'P' + Math.min(c.playerGrid, c.fieldSize))}
       </div>`}
@@ -471,7 +476,7 @@ export class Menu {
   screen_profile() {
     const st = { ...DEFAULT_STATS, ...(this.save.stats || {}) };
     const have = this.save.achievements || {};
-    const n = Object.keys(have).length;
+    const n = ACHIEVEMENTS.filter((a) => have[a.id]).length;
     const tile = (k, v) => `<div class="stat"><small>${k}</small><b>${v}</b></div>`;
     const recs = TRACK_DEFS.map((d) => ({ d, r: this.save.records[d.id] })).filter((x) => x.r);
     const hon = (this.save.honours || []).slice(-6).reverse();
@@ -533,15 +538,15 @@ export class Menu {
     const top3 = cls.slice(0, 3);
     const order = [top3[1], top3[0], top3[2]].filter(Boolean);
     const fmt = (e) => (e.time != null ? formatTime(e.time) : 'DNF');
-    const bestLap = Math.min(...cls.map((e) => e.best));
+    const bestLap = Math.min(...cls.map((e) => e.best)); // Infinity when nobody set a lap: then nobody gets the marker
     const me = cls.find((e) => e.car === player);
     const rows = cls
       .map((e, i) => {
         const lead = cls[0];
         let gap = '';
-        if (e.time != null && i > 0) gap = e.laps < lead.laps ? `+${lead.laps - e.laps} lap` : '+' + (e.time - lead.time).toFixed(3);
+        if (e.time != null && i > 0) gap = e.laps < lead.laps ? `+${lead.laps - e.laps} lap${lead.laps - e.laps > 1 ? 's' : ''}` : '+' + (e.time - lead.time).toFixed(3);
         const grid = e.gridPos - e.pos;
-        return `<tr class="${e.car === player ? 'me' : ''}"><td class="pos">${e.pos}</td><td><span class="tc" style="--c:${e.info.team.color}"></span>${esc(e.info.name)}</td><td>${esc(e.info.team.short)}</td><td>${fmt(e)}</td><td>${gap}</td><td>${e.penalty ? '+' + e.penalty + 's' : ''}</td><td>${e.best < Infinity ? formatTime(e.best) : ''}${e.best === bestLap ? ' ◆' : ''}</td><td>${e.stops}</td><td>${grid > 0 ? '▲' + grid : grid < 0 ? '▼' + -grid : '–'}</td><td><b>${e.points}</b></td></tr>`;
+        return `<tr class="${e.car === player ? 'me' : ''}"><td class="pos">${e.pos}</td><td><span class="tc" style="--c:${e.info.team.color}"></span>${esc(e.info.name)}</td><td>${esc(e.info.team.short)}</td><td>${fmt(e)}</td><td>${gap}</td><td>${e.penalty ? '+' + e.penalty + 's' : ''}</td><td>${e.best < Infinity ? formatTime(e.best) : ''}${e.best === bestLap && bestLap < Infinity ? ' ◆' : ''}</td><td>${e.stops}</td><td>${grid > 0 ? '▲' + grid : grid < 0 ? '▼' + -grid : '–'}</td><td><b>${e.points}</b></td></tr>`;
       })
       .join('');
     let seasonHtml = '';
@@ -569,7 +574,7 @@ export class Menu {
   // ---- career ------------------------------------------------------------------------------------
   screen_career_new() {
     const n = this.cnew || (this.cnew = { team: 6, level: 0.55, rounds: 4, distance: 'standard' });
-    const diff = DIFFICULTIES.reduce((a, b) => (Math.abs(b.level - n.level) < Math.abs(a.level - n.level) ? b : a));
+    const diff = nearestDifficulty(n.level);
     return `<section class="screen panel-screen full">
       <div class="row"><h2>New <span>career</span></h2><div class="grow"></div></div>
       <div class="panel"><h3>Choose your team</h3><div class="teams">${TEAMS.map((t, i) => {
@@ -777,11 +782,12 @@ export class Menu {
           return;
         }
         return H.careerAbandon();
-      case 'go':
+      case 'go': {
         this.persist();
         const inSeason = !!(this.lastData && this.lastData.season); // only a round started from the championship screen counts for it
         if (c.mode === 'race' && c.qualify) return H.startRace({ ...c, mode: 'qualifying', qualiTimes: null, seed: undefined, __season: inSeason });
         return H.startRace({ ...c, __season: inSeason });
+      }
       case 'qualirace': {
         const d = this.lastData;
         if (d && d.q) {
@@ -838,20 +844,34 @@ export class Menu {
         const box = this.root.querySelector('#save-io');
         const next = importSave(box ? box.value : '');
         if (!next) { H.toast && H.toast('That is not a valid backup'); return; }
-        Object.assign(this.save, next);
+        // only the sections the backup actually contains are replaced: a partial text never wipes the rest of the save
+        for (const key of next.present) this.save[key] = next[key];
         this.config = { ...this.save.config, assists: { ...this.save.config.assists } };
         this.save.config = this.config;
+        this.cnew = null;
+        this.dryCompound = null;
         H.applySettings();
-        H.toast && H.toast('Save restored');
+        H.toast && H.toast(`Restored: ${next.present.join(', ')}`);
         return this.rerender();
       }
-      case 'wipe':
+      case 'wipe': {
+        // two clicks within five seconds: this deletes records, ghosts and the running championship
+        const now = Date.now();
+        if (!this._wipeAt || now - this._wipeAt > 5000) {
+          this._wipeAt = now;
+          const b = this.root.querySelector('[data-act=wipe]');
+          if (b) b.textContent = 'Click again to confirm';
+          H.toast && H.toast('This clears lap records, ghosts and the current championship. Click again to confirm.');
+          return;
+        }
+        this._wipeAt = 0;
         this.save.records = {};
         this.save.ghosts = {};
         this.save.season = null;
         persist(this.save);
         H.toast && H.toast('Saved records cleared');
-        return;
+        return this.rerender();
+      }
       case 'resume': return H.resume();
       case 'photo': return H.photo();
       case 'replay': return H.replay(this.current === 'pause' ? 'pause' : 'results');
@@ -878,7 +898,14 @@ export class Menu {
     else if (k === 'fieldSize') {
       c.fieldSize = v;
       c.playerGrid = Math.min(c.playerGrid, v);
-    } else if (k === 'playerGrid') c.playerGrid = v;
+      const pg = this.root.querySelector('[data-slider=playerGrid]'); // keep the start-position slider inside the new field
+      if (pg) {
+        pg.max = v;
+        pg.value = c.playerGrid;
+        const pl = pg.closest('.field').querySelector('label b');
+        if (pl) pl.textContent = 'P' + c.playerGrid;
+      }
+    } else if (k === 'playerGrid') c.playerGrid = Math.min(v, c.fieldSize);
     else if (k === 'frontWing') c.frontWing = v;
     else if (k === 'rearWing') c.rearWing = v;
     else if (k === 'brakeBias') c.brakeBias = v / 100;
@@ -890,7 +917,8 @@ export class Menu {
       this.save.settings.volume = v / 100;
       this.hooks.applySettings && this.hooks.applySettings();
     }
-    this.persist();
+    clearTimeout(this._persistT);
+    this._persistT = setTimeout(() => this.persist(), 300); // a drag fires many events: write the save once it settles
     // update the label next to the slider without rebuilding (keeps drag alive)
     const lab = t.closest('.field').querySelector('label b');
     if (lab) {
@@ -898,13 +926,18 @@ export class Menu {
       else if (k === 'level') lab.textContent = v + '%';
       else if (k === 'playerGrid') lab.textContent = 'P' + v;
       else if (k === 'brakeBias') lab.textContent = v + '%';
-      else if (k === 'pressure') lab.textContent = v === 0 ? 'Standard' : (v > 0 ? '+' : '') + v;
+      else if (k === 'frontWing' || k === 'rearWing') {
+        const rec = (TRACK_DEFS.find((d) => d.id === c.trackId) || {}).setup || { front: 5, rear: 5 };
+        lab.textContent = `${v}  (recommended ${k === 'frontWing' ? rec.front : rec.rear})`;
+      } else if (k === 'pressure') lab.textContent = v === 0 ? 'Standard' : (v > 0 ? '+' : '') + v;
       else if (k === 's.volume' || k === 's.padDead') lab.textContent = v + '%';
       else lab.textContent = v;
     }
     if (k === 'level') {
-      const d = DIFFICULTIES.reduce((a, b) => (Math.abs(b.level - c.level) < Math.abs(a.level - c.level) ? b : a));
+      const d = nearestDifficulty(c.level);
       t.closest('.field').querySelectorAll('.chip').forEach((ch) => ch.classList.toggle('on', +ch.dataset.value === d.level));
+      const bl = this.root.querySelector('#diff-blurb');
+      if (bl) bl.textContent = d.blurb + ' — drag for any value in between. Rookie leaves you room to learn; Legend runs every car at the physical limit.';
     }
   }
 
