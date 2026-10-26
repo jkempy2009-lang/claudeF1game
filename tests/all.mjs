@@ -20,6 +20,7 @@ const suites = [
   ['interactive pit stop', 'tests/pitgame.mjs'],
   ['achievements + stats', 'tests/achievements.mjs'],
   ['driver identity', 'tests/driver.mjs'],
+  ['ghost sharing', 'tests/ghost.mjs'],
 ];
 let failed = 0;
 for (const [name, file] of suites) {

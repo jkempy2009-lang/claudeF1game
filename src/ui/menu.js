@@ -190,6 +190,35 @@ export function loadSave() {
 }
 
 /** The text a player can copy as a backup of their progress. */
+const GHOST_PREFIX = 'AGP-GHOST';
+/** A ghost as a line of text others can paste: AGP-GHOST|circuit|lap time|base64 frames. */
+export function ghostCode(trackId, g) {
+  return g ? `${GHOST_PREFIX}|${trackId}|${(+g.time).toFixed(3)}|${g.data}` : '';
+}
+/** Parses and verifies a pasted ghost (a real circuit, a plausible lap time, finite float frames of about one lap at 20 Hz). Returns { trackId, ghost } or null. */
+export function parseGhostCode(text) {
+  if (typeof text !== 'string' || text.length > 700000) return null;
+  const [tag, trackId, time, data, ...rest] = text.trim().split('|');
+  if (tag !== GHOST_PREFIX || rest.length || !TRACK_DEFS.some((t) => t.id === trackId)) return null;
+  const t = +time;
+  if (!(t > 5 && t < 1000) || typeof data !== 'string' || !/^[A-Za-z0-9+/]+={0,2}$/.test(data) || data.length > 600000) return null;
+  let bytes;
+  try {
+    bytes = atob(data);
+  } catch {
+    return null;
+  }
+  const n = bytes.length / 4;
+  if (!Number.isInteger(n) || n < 12 || n % 4 !== 0) return null;
+  const frames = n / 4;
+  if (Math.abs(frames - t * 20) > t * 20 * 0.15 + 4) return null; // one sample every 12 physics steps: 20 per second
+  const u8 = new Uint8Array(bytes.length);
+  for (let i = 0; i < bytes.length; i++) u8[i] = bytes.charCodeAt(i);
+  const f = new Float32Array(u8.buffer);
+  for (let i = 0; i < f.length; i++) if (!Number.isFinite(f[i]) || Math.abs(f[i]) > 20000) return null;
+  return { trackId, ghost: { time: t, data } };
+}
+
 export function exportSave(save) {
   return JSON.stringify({ app: 'apex-grand-prix', v: 1, save });
 }
@@ -381,6 +410,15 @@ export class Menu {
     }).join('')}</div>`;
   }
 
+  ghostPanel() {
+    const id = this.config.trackId, g = this.save.ghosts[id];
+    const name = (TRACK_DEFS.find((d) => d.id === id) || {}).name || id;
+    return `<div class="panel"><h3>Ghost · ${esc(name)}</h3>
+      <div class="hint">${g ? `Your ghost on this circuit: <b>${formatTime(g.time)}</b>. Copy it to send a rival your lap, or paste one they sent you (it replaces yours, so keep a copy if you want it).` : 'Set a lap to record a ghost, or paste one a friend sent you.'}</div>
+      <textarea id="ghost-io" class="saveio" rows="2" spellcheck="false" placeholder="Paste a ghost here and press Use pasted ghost"></textarea>
+      <div class="row" style="margin-top:.5rem"><button class="btn sm" data-act="ghostcopy" ${g ? '' : 'disabled'}>Copy my ghost</button><button class="btn sm" data-act="ghostuse">Use pasted ghost</button></div></div>`;
+  }
+
   tab_race() {
     const c = this.config;
     const track = this.hooks.tracks[c.trackId];
@@ -388,7 +426,7 @@ export class Menu {
     const diff = nearestDifficulty(c.level);
     const timetrial = c.mode === 'timetrial';
     return `<div class="grid2">
-      ${timetrial ? '' : `<div class="panel"><h3>Race</h3>
+      ${timetrial ? this.ghostPanel() : `<div class="panel"><h3>Race</h3>
         ${this.slider('laps', 'Laps', c.laps, 1, 30, 1, `${c.laps} · about ${Math.max(1, est)} min`)}
         <div class="field"><label>AI difficulty<b>${Math.round(c.level * 100)}%</b></label>${this.chips('diff', DIFFICULTIES.map((d) => ({ value: d.level, label: d.name })), diff.level)}
         <input type="range" data-slider="level" min="0" max="100" step="1" value="${Math.round(c.level * 100)}"><div class="hint" id="diff-blurb">${esc(diff.blurb)} — drag for any value in between. Rookie leaves you room to learn; Legend runs every car at the physical limit.</div></div>
@@ -855,6 +893,25 @@ export class Menu {
         if (box) { box.value = text; box.focus(); box.select(); }
         try { navigator.clipboard.writeText(text).then(() => H.toast && H.toast('Save copied'), () => H.toast && H.toast('Copy it from the box (Ctrl+C)')); } catch (e) { H.toast && H.toast('Copy it from the box (Ctrl+C)'); }
         return;
+      }
+      case 'ghostcopy': {
+        const g = this.save.ghosts[c.trackId];
+        if (!g) return;
+        const box = this.root.querySelector('#ghost-io');
+        const text = ghostCode(c.trackId, g);
+        if (box) { box.value = text; box.focus(); box.select(); }
+        try { navigator.clipboard.writeText(text).then(() => H.toast && H.toast('Ghost copied'), () => H.toast && H.toast('Copy it from the box (Ctrl+C)')); } catch (e) { H.toast && H.toast('Copy it from the box (Ctrl+C)'); }
+        return;
+      }
+      case 'ghostuse': {
+        const box = this.root.querySelector('#ghost-io');
+        const r = parseGhostCode(box ? box.value : '');
+        if (!r) { H.toast && H.toast('That is not a valid ghost'); return; }
+        this.save.ghosts[r.trackId] = r.ghost;
+        c.trackId = r.trackId; // go to the circuit the ghost belongs to
+        this.persist();
+        H.toast && H.toast(`Ghost loaded: ${formatTime(r.ghost.time)}`);
+        return this.rerender();
       }
       case 'saverestore': {
         const box = this.root.querySelector('#save-io');

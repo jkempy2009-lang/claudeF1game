@@ -1,0 +1,22 @@
+// Ghost sharing: a copied ghost round-trips; anything malformed or implausible is refused.
+import { ghostCode, parseGhostCode } from '../src/ui/menu.js';
+let bad = 0;
+const ok = (n, c, x = '') => { console.log(`${c ? 'PASS' : 'FAIL'}  ${n} ${x}`); if (!c) bad++; };
+const b64 = (f) => Buffer.from(new Uint8Array(f.buffer)).toString('base64');
+const lap = (t, mk = (i) => [i, i * 0.5, 0.1, 0]) => { const n = Math.round(t * 20); const f = new Float32Array(n * 4); for (let i = 0; i < n; i++) f.set(mk(i), i * 4); return f; };
+const good = { time: 80, data: b64(lap(80)) };
+const code = ghostCode('rade', good);
+const back = parseGhostCode(code);
+ok('a copied ghost parses back', back && back.trackId === 'rade' && back.ghost.time === 80 && back.ghost.data === good.data);
+ok('surrounding whitespace is fine', !!parseGhostCode('  ' + code + '\n'));
+ok('no ghost, no code', ghostCode('rade', null) === '');
+ok('wrong prefix refused', parseGhostCode(code.replace('AGP-GHOST', 'NOPE')) === null);
+ok('unknown circuit refused', parseGhostCode(code.replace('|rade|', '|nowhere|')) === null);
+ok('absurd lap time refused', parseGhostCode(code.replace('|80.000|', '|2.000|')) === null && parseGhostCode(code.replace('|80.000|', '|5000.000|')) === null);
+ok('time that does not match the recording refused', parseGhostCode(code.replace('|80.000|', '|40.000|')) === null);
+ok('non-finite frames refused', parseGhostCode(ghostCode('rade', { time: 80, data: b64(lap(80, (i) => [i === 5 ? NaN : i, 0, 0, 0])) })) === null);
+ok('huge coordinates refused', parseGhostCode(ghostCode('rade', { time: 80, data: b64(lap(80, () => [1e9, 0, 0, 0])) })) === null);
+ok('bad base64 refused', parseGhostCode('AGP-GHOST|rade|80.000|@@@@') === null);
+ok('extra fields refused', parseGhostCode(code + '|x') === null);
+ok('non-text refused', parseGhostCode(null) === null && parseGhostCode(12) === null);
+process.exit(bad ? 1 : 0);
