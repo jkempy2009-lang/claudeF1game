@@ -87,6 +87,9 @@ const STALE_MS = 3000;
 
 /** Keys pressed since the last poll. A press nobody polled for three seconds is stale and no longer counts (a session start also clears the set). */
 class Pressed extends Map {
+  add(code) {
+    return this.set(code, performance.now());
+  }
   has(code) {
     const t = super.get(code);
     return t !== undefined && performance.now() - t < STALE_MS;
