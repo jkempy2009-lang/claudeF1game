@@ -52,6 +52,7 @@ export class AIDriver {
     this.lastMistakeLap = -1;
     this.mistakeRoll = 0;
     this.stuckT = 0;
+    this.lastMistakeCorner = '';
     // pit
     this.wantsPit = false;
     this.pitState = 'none'; // none | in | stopped | out
@@ -162,13 +163,13 @@ export class AIDriver {
     const DD = (this.pathD(s + 4) - 2 * this.pathD(s) + this.pathD(s - 4)) / 16;
     const kt = tr.at(tr.curv, sf);
     const kPath = kt / Math.max(0.3, 1 - kt * Df) + DD;
-    const slope = (this.pathD(s + 3) - this.pathD(s - 1)) / 4;
+    const slope = (this.pathD(s + 2) - this.pathD(s - 2)) / 4; // symmetric around s, matching the heading it is added to
     const pathHeading = tr.hdgAt(s) + Math.atan(slope);
     const beta = Math.atan2(car.v, Math.max(car.u, 2));
     const psi = wrapAngle(car.theta + beta - pathHeading);
     const e = car.d - D0;
     const L = car.spec.wheelbase;
-    let delta = Math.atan(L * kPath) * (1 + 0.0004 * V * V * Math.abs(kPath) * 0.0);
+    let delta = Math.atan(L * kPath);
     delta += 0.0016 * V * V * kPath; // understeer gradient
     delta -= 1.15 * psi + Math.atan((1.9 * e) / (V + 3));
     const maxSteer = car.spec.maxSteer / (1 + (V / 46) ** 2);
@@ -177,13 +178,13 @@ export class AIDriver {
     // --- speed target
     const look = clamp(V * 0.09, 2, 14);
     const idx = tr.idx(s + look);
-    const idx1 = (idx + 1) % tr.N;
     const air = 1 - 0.06 * (car.dirtyAir || 0); // following closely costs front downforce: take the corners a touch slower
-    let vt = prof.v[idx] * this.dp.pace * this.skill * this.raceK * this.paceAdapt * this.gripAdapt * air * (this.mistake && this.mistake.active ? this.mistake.factor : 1);
-    // slope of the profile: are we expected to accelerate / brake?
-        // off-track: slow down and return
-    const surfNow = car.surf[0] + car.surf[1] + car.surf[2] + car.surf[3];
-    if (car.onGrass || Math.abs(car.d) > tr.wl[car.i] + 1.5) vt = Math.min(vt, 28);
+    // every speed target is the same physical profile times this driver's pace, skill, grip feel and traffic effects
+    const paceK = this.dp.pace * this.skill * this.raceK * this.paceAdapt * this.gripAdapt * air;
+    let vt = prof.v[idx] * paceK * (this.mistake && this.mistake.active ? this.mistake.factor : 1);
+    // off the road (either side; the pit lane is not off the road): slow down and return
+    const inPitArea = this.pitState !== 'none' && tr._pitBlend(s) > 0.01;
+    if (car.onGrass || (!inPitArea && (car.d > tr.wl[car.i] + 1.5 || -car.d > tr.wr[car.i] + 1.5))) vt = Math.min(vt, 28);
     // traffic cap
     vt = Math.min(vt, this.trafficCap(vt, race));
     if (race.sc && race.sc.state !== 'none' && (this.pitState === 'none' || !tr.inPitRange(car.s))) {
@@ -220,7 +221,6 @@ export class AIDriver {
     // target speed from our *actual* speed; brake for the worst one. Otherwise follow the target with a P term.
     let thr = 0, brk = 0;
     {
-      const paceTot = vt / Math.max(1, prof.v[idx]);
       // cold carbon bites less and cooked carbon fades: brake for what the discs can deliver right now
       const bt = car.brakeTemp;
       const brakeEff = bt ? (0.86 + 0.14 * smoothstep(120, 420, (bt[0] + bt[1] + bt[2] + bt[3]) / 4)) * (1 - 0.3 * smoothstep(880, 1150, Math.max(bt[0], bt[1], bt[2], bt[3]))) : 1;
@@ -231,7 +231,7 @@ export class AIDriver {
       const base = tr.idx(s);
       for (let k = 1, dist = 0; dist < maxDist; k += step) {
         dist = k * prof.ds;
-        const vj = prof.v[(base + k) % tr.N] * this.dp.pace * this.skill * this.raceK * this.paceAdapt * this.gripAdapt * air;
+        const vj = prof.v[(base + k) % tr.N] * paceK;
         if (V > vj) {
           const a = (V * V - vj * vj) / (2 * Math.max(dist - 2, 1));
           if (a > aReq) aReq = a;
@@ -272,7 +272,7 @@ export class AIDriver {
         brk = clamp(aBrake / capBrake, 0, 1);
       } else {
         const aMax = Math.max(6, prof.env.accel(Math.max(V, 5), 1));
-        const want = 1.8 * errNow + (paceTot * paceTot - 1) * 0;
+        const want = 1.8 * errNow + 0;
         thr = clamp(0.16 + (want + aDrag) / (aMax + aDrag), 0, 1);
         if (errNow > 3) thr = 1;
         // friction circle: the more lateral grip we are using, the less throttle the rears can take
@@ -291,8 +291,8 @@ export class AIDriver {
     if (race.time < this.goTime) {
       thr = 0;
       brk = 1;
-    } else if (V < 15 && race.time - this.goTime < 4 && this.pitState === 'none') {
-      thr = Math.max(thr, 1);
+    } else if (V < 15 && race.time - this.goTime < 4 && this.pitState === 'none' && !this.neigh.some((n) => n.ds > 0 && n.ds < 12 && Math.abs(n.dd) < 2.6 && n.v < V + 3)) {
+      thr = Math.max(thr, 1); // the launch: full power, unless a slow starter is right in front
       brk = 0;
     }
     inp.throttle = thr;
@@ -474,8 +474,8 @@ export class AIDriver {
     // look for the next corner approach
     for (const c of tr.corners) {
       const ds = loopDelta(c.sApex, car.s, tr.length);
-      if (ds > 60 && ds < 140 && this.lastMistakeCorner !== c.id + ':' + car.lap) {
-        this.lastMistakeCorner = c.id + ':' + car.lap;
+      if (ds > 60 && ds < 140 && this.lastMistakeCorner !== c.id + ':' + (car.rs ? car.rs.laps : 0)) {
+        this.lastMistakeCorner = c.id + ':' + (car.rs ? car.rs.laps : 0);
         const p = (this.dp.mistakesPerLap / Math.max(6, tr.corners.length)) * (1.5 - this.skill + 0.5);
         if (this.rng() < p) {
           this.mistake = { active: true, from: car.s, to: c.sApex + 30, factor: 1.06 + 0.1 * this.rng() + 0.05 * (1 - this.level) };
@@ -493,12 +493,16 @@ export class AIDriver {
     if (st === 'none') {
       // commit when we pass the decision point shortly before the entry
       const toEntry = mod(tr.pit.start - s, tr.length);
-      if (this.wantsPit && toEntry < 340 && toEntry > 30 && race.phase === 'racing') this.pitState = 'in';
+      if (this.wantsPit && this.box.s != null && toEntry < 340 && toEntry > 30 && race.phase === 'racing') this.pitState = 'in';
     } else if (st === 'in') {
       // missed the entry (spun, ran wide, or the car behind was in the way): give up and call again next lap
       if (!tr.inPitRange(s) && mod(tr.pit.start - s, tr.length) > 380) { this.pitState = 'none'; return; }
       if (this.box.s != null) {
         const toBox = loopDelta(this.box.s, s, tr.length);
+        if (toBox < -4 && tr.inPitLimiter(s) && car.speed > 3) {
+          this.pitState = 'out'; // went past the box: carry on out of the lane and try again next lap (wantsPit stays set)
+          return;
+        }
         if (Math.abs(toBox) < 1.4 && car.speed < 1.0 && tr.inPitLimiter(s)) {
           this.pitState = 'stopped';
           car.pitStopped = true;

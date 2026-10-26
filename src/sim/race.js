@@ -1231,6 +1231,7 @@ export class Race {
     car.dirtyAir = 0;
     if (car.driver) {
       car.driver.offset = 0;
+      car.driver.offTarget = 0;
       car.driver.mistake = null;
     }
     car.rs.drsLatch = false;
