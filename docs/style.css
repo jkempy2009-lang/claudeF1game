@@ -25,7 +25,7 @@ button { font-family: inherit; color: inherit; cursor: pointer; }
 #screens { position: absolute; inset: 0; }
 .screen { position: absolute; inset: 0; display: flex; pointer-events: auto; animation: fade 0.35s ease; }
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
-.screen.dim { background: linear-gradient(90deg, rgba(5,7,10,0.92) 0%, rgba(5,7,10,0.7) 45%, rgba(5,7,10,0.25) 100%); }
+.screen.dim { overflow-y: auto; background: linear-gradient(90deg, rgba(5,7,10,0.92) 0%, rgba(5,7,10,0.7) 45%, rgba(5,7,10,0.25) 100%); }
 .screen.full { background: rgba(5,7,10,0.94); backdrop-filter: blur(12px); }
 .menu-col { width: min(34rem, 92vw); padding: 7vh 4vw; display: flex; flex-direction: column; justify-content: center; gap: 0.6rem; }
 .logo { font-weight: 900; font-style: italic; font-size: clamp(2.6rem, 6vw, 4.6rem); line-height: 0.9; letter-spacing: -0.02em; text-transform: uppercase; }
@@ -240,4 +240,26 @@ table.results .tc { display: inline-block; width: 4px; height: 1em; vertical-ali
   #timing { width: calc(var(--u) * 24); }
   #dash { width: calc(var(--u) * 46); }
 }
+@media (max-height: 800px) {
+  .menu-col { padding-top: 3vh; padding-bottom: 3vh; gap: 0.35rem; justify-content: flex-start; min-height: min-content; }
+  .menu-col .logo { font-size: 2.2rem; margin-bottom: 0; }
+  .menu-col .tagline { display: none; }
+  .btn { padding: 0.5rem 1rem; font-size: 1.02rem; }
+  .btn small { font-size: 0.7rem; margin-top: 0; }
+  .version { display: none; }
+}
+@media (max-height: 560px) { .btn small { display: none; } }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+/* career */
+.upg { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.5rem 0; border-bottom: 1px solid var(--line); }
+.upg:last-child { border-bottom: 0; }
+.pips { display: flex; gap: 4px; margin-top: 6px; }
+.pips i { width: 1.2rem; height: 0.42rem; background: rgba(255,255,255,0.14); border-radius: 1px; }
+.pips i.on { background: var(--accent2, #ffd24a); }
+.hubtrack { display: flex; gap: 1rem; align-items: center; }
+.hubtrack svg { width: 9rem; height: 6rem; flex: none; }
+.bigstats { display: flex; gap: 1.4rem; flex-wrap: wrap; }
+.bigstats div { display: flex; flex-direction: column; }
+.bigstats small { color: var(--dim); text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.7rem; }
+.bigstats b { font-size: 2rem; font-style: italic; }

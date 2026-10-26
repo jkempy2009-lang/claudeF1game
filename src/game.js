@@ -10,12 +10,14 @@ import { World } from './render/world.js';
 import { CarView } from './render/carmodel.js';
 import { PitCrew } from './render/crew.js';
 import { Guideline } from './render/guideline.js';
+import { PostFX } from './render/postfx.js';
 import { Effects } from './render/effects.js';
 import { CameraRig, CAMERA_MODES, CAMERA_NAMES } from './render/camera.js';
 import { Input } from './ui/input.js';
 import { AudioEngine } from './ui/audio.js';
 import { HUD } from './ui/hud.js';
-import { Menu, loadSave, persist } from './ui/menu.js';
+import { Menu, loadSave, persist, sanitizeConfig } from './ui/menu.js';
+import * as Career from './sim/career.js';
 import { clamp, formatTime, lerp } from './util/math.js';
 
 const nextFrame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
@@ -62,6 +64,13 @@ class Game {
     window.addEventListener('keydown', (e) => {
       this.audio.start();
       this.audio.resume();
+      if (this.state === 'paused' && e.code === 'Escape' && this.menu.current === 'settings') {
+        this.input.pressed.delete('Escape'); // back to the pause menu, not out of it
+        this.menu.show('pause');
+        const el = document.getElementById('camname');
+        if (el && this.session) el.textContent = CAMERA_NAMES[this.session.camRig.mode];
+        return;
+      }
       if (this.state === 'menu' && e.code === 'Escape' && this.menu.current && this.menu.current !== 'main') {
         if (this.menu.current === 'settings' && this.session) this.menu.show('pause');
         else this.toMain();
@@ -90,12 +99,19 @@ class Game {
       tracks: this.tracks,
       sfx: (k) => this.audio.ui(k),
       startRace: (cfg) => this.startRace(cfg),
+      raceFromQuali: (qr) => this.startRace({ ...qr.cfg, mode: 'race', qualiTimes: qr.times, playerGrid: qr.grid }),
       toMain: (fromRace) => this.toMain(fromRace),
       resume: () => this.resume(),
       restart: () => this.restart(),
       applySettings: () => this.applySettings(),
       previewTeam: (i) => this.previewTeam(i),
       openSeason: () => this.openSeason(),
+      openCareer: () => this.openCareer(),
+      careerStart: (o) => this.careerStart(o),
+      careerRace: (q) => this.careerRace(q),
+      careerBuy: (k) => this.careerBuy(k),
+      careerNext: (t) => this.careerNext(t),
+      careerAbandon: () => this.careerAbandon(),
       nextRound: () => this.nextRound(),
       endSeason: () => this.endSeason(),
       cycleCamera: () => this.cycleCamera(),
@@ -113,6 +129,7 @@ class Game {
     r.shadowMap.enabled = q !== 'low';
     r.shadowMap.type = THREE.PCFShadowMap;
     this.camera = new THREE.PerspectiveCamera(62, 1, 0.25, 9000);
+    this.post = new PostFX(r);
     this.resize();
   }
 
@@ -151,7 +168,7 @@ class Game {
       this.buildShowroom();
       this.applySettings();
       this.toMain();
-      this.renderer.setAnimationLoop(() => this.frame());
+      this.renderer.setAnimationLoop(() => this.safeFrame());
     } catch (e) {
       console.error(e);
       this.screens.innerHTML = `<section class="screen loading"><div class="logo">Error</div><div class="hint" style="max-width:40rem;white-space:pre-wrap">${String(e.stack || e)}</div></section>`;
@@ -231,10 +248,85 @@ class Game {
       this.save.season = s;
     }
     c.mode = 'race';
-    c.trackId = TRACK_DEFS[Math.min(s.round, TRACK_DEFS.length - 1)].id;
+    c.trackId = Career.CHAMP_CAL[Math.min(s.round, Career.CHAMP_CAL.length - 1)];
     c.frontWing = c.rearWing = null;
     this.menu.tab = 'race';
     this.menu.show('setup', { season: true });
+  }
+
+  // ---- career ----------------------------------------------------------------------------------------------------
+  openCareer() {
+    const c = this.save.career;
+    if (this.session) this.endSession();
+    this.state = 'menu';
+    this.hud.show(false);
+    if (!c) return this.menu.show('career_new');
+    if (Career.seasonDone(c.season)) {
+      if (!c.seasonRecap) Career.endSeason(c);
+      persist(this.save);
+      return this.menu.show('career_end');
+    }
+    this.menu.show('career_hub');
+  }
+
+  careerStart(o) {
+    this.save.career = Career.newCareer(o);
+    this.menu.config.team = this.save.career.team;
+    persist(this.save);
+    this.openCareer();
+  }
+
+  careerBuy(key) {
+    const c = this.save.career;
+    if (!c) return;
+    const r = Career.buyUpgrade(c, key);
+    if (r.ok) {
+      this.audio.ui('good');
+      persist(this.save);
+    } else this.toast(r.reason === 'budget' ? 'Not enough budget' : 'Already at maximum');
+    this.menu.show('career_hub');
+  }
+
+  careerNext(teamIdx) {
+    const c = this.save.career;
+    if (!c) return this.toMain();
+    Career.nextSeason(c, teamIdx);
+    persist(this.save);
+    this.openCareer();
+  }
+
+  careerAbandon() {
+    this.save.career = null;
+    persist(this.save);
+    this.toMain();
+  }
+
+  careerRace(qualify) {
+    const c = this.save.career;
+    if (!c) return;
+    const s = c.season;
+    const trackId = s.calendar[s.round];
+    const track = this.tracks[trackId];
+    const base = this.menu.config;
+    const cfg = {
+      ...base,
+      mode: qualify ? 'qualifying' : 'race',
+      trackId,
+      laps: Career.lapsFor(track.length, c.distance),
+      level: c.level,
+      fieldSize: 20,
+      playerGrid: 12,
+      team: c.team,
+      frontWing: null,
+      rearWing: null,
+      mandatoryStop: false,
+      adaptive: false,
+      qualiTimes: null,
+      seed: undefined,
+      upgrades: { ...c.upgrades },
+      career: true,
+    };
+    this.startRace(cfg);
   }
 
   nextRound() {
@@ -271,6 +363,7 @@ class Game {
   async startRace(cfg) {
     this.audio.start();
     this.audio.resume();
+    cfg = { ...cfg, ...sanitizeConfig(cfg) };
     this.lastConfig = cfg;
     if (this.session) this.endSession();
     this.state = 'loading';
@@ -302,7 +395,10 @@ class Game {
       compound: cfg.compound,
       setup: { frontWing: cfg.frontWing, rearWing: cfg.rearWing, brakeBias: cfg.brakeBias },
       assists: { ...cfg.assists, stability: cfg.assists.stability, tc: cfg.assists.tc, steer: cfg.assists.steer },
-      seed: (Math.random() * 1e6) | 0,
+      seed: cfg.seed ?? ((Math.random() * 1e6) | 0),
+      qualiTimes: cfg.mode === 'race' ? cfg.qualiTimes || null : null,
+      upgrades: cfg.upgrades || null,
+      equalCars: cfg.career ? false : cfg.equalCars !== false,
     });
     await nextFrame();
     const quality = this.save.settings.quality;
@@ -348,7 +444,7 @@ class Game {
       scene.add(ghostView.group);
     }
     this.session = {
-      cfg, track, race, world, scene, views, effects, camRig, ghostView, guide,
+      cfg: { ...cfg, seed: race.opt.seed }, track, race, world, scene, views, effects, camRig, ghostView, guide,
       acc: 0, alpha: 0, intro: 4.2, introT: 0, paused: false, finishedShown: false, radioT: 0, fast: false,
       player: race.player, pin: null, sunDir: world.sunDir, stopTimer: 0, lastEventCar: null, seasonRound: this.save.season ? this.save.season.round : null,
       useSeason: cfg.__season,
@@ -360,7 +456,7 @@ class Game {
     this.screens.innerHTML = '';
     this.state = 'race';
     document.getElementById('touch') && this.updateTouchVisibility();
-    this.hud.message(cfg.mode === 'timetrial' ? 'Time trial' : `${track.name}`, '', cfg.mode === 'timetrial' ? 'Set your best lap — your ghost follows' : `${cfg.laps} laps · P${race.player.info.gridPos} on the grid`, 4);
+    this.hud.message(cfg.mode === 'qualifying' ? 'Qualifying' : cfg.mode === 'timetrial' ? 'Time trial' : `${track.name}`, '', cfg.mode === 'qualifying' ? '3 minutes · best lap sets your grid slot · all 20 cars on track' : cfg.mode === 'timetrial' ? 'Set your best lap — your ghost follows' : `${cfg.laps} laps · P${race.player.info.gridPos} on the grid${cfg.qualiTimes ? ' (qualified)' : ''}`, 4);
     this.hud.showKeyHint(10000);
     if (cfg.mode === 'race') this.hud.radio('Welcome to ' + track.name + '. Lights out when you are ready — good luck.', 6);
   }
@@ -475,6 +571,24 @@ class Game {
   }
 
   // ---- frame loop ---------------------------------------------------------------------------------------------------
+  /** One frame, guarded: a bug in a single frame must not freeze the game; repeated failures show a recovery screen. */
+  safeFrame() {
+    try {
+      this.frame();
+      this.frameErrors = 0;
+    } catch (e) {
+      this.frameErrors = (this.frameErrors || 0) + 1;
+      console.error(e);
+      if (this.frameErrors === 5) this.fatal(e);
+    }
+  }
+
+  fatal(e) {
+    this.state = 'menu';
+    this.hud.show(false);
+    this.screens.innerHTML = `<section class="screen loading"><div class="logo">Apex <span>GP</span></div><div class="hint" style="max-width:40rem;text-align:center;line-height:1.5">Something went wrong in the game loop and the session was stopped. Your settings and records are safe.<br><small style="opacity:.6">${String((e && e.message) || e).replace(/[<>&]/g, '')}</small></div><button class="btn primary" data-act="quit">Back to menu</button></section>`;
+  }
+
   frame() {
     const now = performance.now();
     const dt = Math.min(0.05, (now - this.lastT) / 1000);
@@ -491,11 +605,23 @@ class Game {
       const pp = this.input.poll(dt, 0);
       if (pp.pause) return this.resume();
       this.audio.update(s.player, [], this.listener(), dt, true);
-      r.render(s.scene, this.camera);
+      this.post.render(s.scene, this.camera, 0);
       return;
     }
     if (this.state === 'race') this.runSession(s, dt);
-    r.render(s.scene, this.camera);
+    this.post.render(s.scene, this.camera, this.speedBlur(s));
+  }
+
+  /** Motion blur strength 0..1: grows exponentially with speed, a little more with DRS / ERS boost. */
+  speedBlur(s) {
+    const set = this.save.settings;
+    if (!set.blur || set.quality === 'low' || s.camRig.mode === 'tv' || s.paused) return 0;
+    const p = s.player;
+    const x = clamp((p.speed * 3.6 - 140) / 200, 0, 1);
+    let k = (Math.exp(3 * x) - 1) / (Math.exp(3) - 1);
+    if (p.drsPos > 0.5) k += 0.1;
+    if (p.boosting) k += 0.08;
+    return clamp(k, 0, 1) * (s.camRig.mode === 'cockpit' ? 1.15 : 1);
   }
 
   renderShowroom(dt) {
@@ -582,10 +708,10 @@ class Game {
     const ff = !!s.skipToResults && race.phase !== 'finished';
     const frameSteps = ff ? 40 : 1;
     let n = 0;
-    s.acc += dt;
+    s.acc += ff ? DT * 300 : dt; // fast-forward: about 1.2 s of racing per frame
     const edges = { gearUp: pin.gearUp, gearDown: pin.gearDown, drsPress: pin.drsPress, pitToggle: pin.pitToggle, tyreCycle: pin.tyreCycle };
     const stepPin = { throttle: pin.throttle, brake: pin.brake, steer: pin.steer, boost: pin.boost, aiDriven: !!pin.aiDriven, ...edges };
-    let lim = ff ? 400 : 14;
+    let lim = ff ? 300 : 14;
     while (s.acc >= DT && n < lim) {
       race.step(DT, stepPin);
       stepPin.gearUp = stepPin.gearDown = stepPin.drsPress = stepPin.pitToggle = stepPin.tyreCycle = false;
@@ -768,6 +894,7 @@ class Game {
           break;
         case 'finish':
           if (e.car === player && race.opt.mode === 'race') this.startFinishScene(s, e);
+          else if (e.car === player && race.isQuali) this.startQualiEnd(s);
           break;
         case 'ghost':
           this.saveGhost(s);
@@ -801,6 +928,25 @@ class Game {
     this.audio.cheer(rs.pos <= 3 ? 1 : 0.5);
     if (rs.pos <= 3) this.audio.fanfare();
     else this.audio.ui('good');
+  }
+
+  /** Qualifying is over for the player: cool-down lap on autopilot, then the grid. */
+  startQualiEnd(s) {
+    const { race, player, camRig } = s;
+    if (s.fin) return;
+    s.fin = { t: 0 };
+    if (!s.pilot) {
+      const prof = race.getProfile(player.spec, 'pilot');
+      s.pilot = new AIDriver({ car: player, track: s.track, profile: prof, level: 0.6, seed: 4242 });
+      s.pilot.goTime = 0;
+    }
+    s.pilot.paceAdapt = 0.32;
+    s.pilot.offset = 0;
+    s.auto = true;
+    camRig.setMode('finish');
+    const b = player.rs.best;
+    this.hud.message('Qualifying complete', '', Number.isFinite(b) ? `Best lap ${formatTime(b)} · P${player.rs.pos}` : 'No timed lap set', 6);
+    this.audio.ui('good');
   }
 
   saveGhost(s) {
@@ -859,6 +1005,17 @@ class Game {
       this.menu.show('timetrial', { player, race, trackName, best, newBest });
       return;
     }
+    if (race.isQuali) {
+      const q = race.qualifying();
+      const me = q.list.find((e) => e.car === player);
+      if (me && Number.isFinite(me.best)) {
+        const rec = this.save.records[track.id];
+        if (!rec || me.best < rec.best) this.save.records[track.id] = { best: me.best };
+        persist(this.save);
+      }
+      this.menu.show('quali', { q, player, trackName, cfg: s.cfg });
+      return;
+    }
     const cls = race.classification();
     // records + season
     const me = cls.find((e) => e.car === player);
@@ -868,13 +1025,22 @@ class Game {
     }
     let season = null;
     const cfg = s.cfg;
-    if (this.save.season && TRACK_DEFS[this.save.season.round] && TRACK_DEFS[this.save.season.round].id === track.id) {
+    if (this.save.season && Career.CHAMP_CAL[this.save.season.round] === track.id && !cfg.career) {
       season = this.save.season;
       for (const e of cls) season.points[e.info.name] = (season.points[e.info.name] || 0) + e.points;
       season.lastCls = cls.length;
     }
+    let careerRes = null;
+    if (cfg.career && this.save.career && !s.careerRecorded) {
+      s.careerRecorded = true;
+      const c = this.save.career;
+      const row = Career.recordRound(c.season, cls);
+      careerRes = Career.settleRace(c, row, cls);
+      careerRes.budget = c.budget;
+      if (Career.seasonDone(c.season)) Career.endSeason(c);
+    }
     persist(this.save);
-    this.menu.show('results', { cls, player, race, season, trackName });
+    this.menu.show('results', { cls, player, race, season, trackName, careerRes });
   }
 }
 

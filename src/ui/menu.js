@@ -3,10 +3,11 @@ import { TEAMS } from '../sim/teams.js';
 import { DIFFICULTIES } from '../sim/race.js';
 import { COMPOUNDS, COMPOUND_IDS } from '../sim/carspec.js';
 import { formatTime } from '../util/math.js';
+import { CHAMP_CAL, sanitizeCareer, UPGRADE_KEYS, UPGRADE_INFO, UPGRADE_MAX, upgradeCost, objectiveFor, DISTANCES, seasonDone, driverStandings, constructorStandings, lapsFor, teamRank } from '../sim/career.js';
 
 export const SAVE_KEY = 'apex-grand-prix.v1';
 
-export const DEFAULT_SETTINGS = { quality: 'high', volume: 0.55, units: 'kmh', line: true, minimap: true, shake: true, camera: 'chase', tower: true };
+export const DEFAULT_SETTINGS = { quality: 'high', volume: 0.55, units: 'kmh', line: true, minimap: true, shake: true, camera: 'chase', tower: true, blur: true };
 export const DEFAULT_CONFIG = {
   mode: 'race',
   trackId: 'northfield',
@@ -21,6 +22,8 @@ export const DEFAULT_CONFIG = {
   collisions: true,
   mandatoryStop: false,
   adaptive: false,
+  qualify: false,
+  equalCars: true,
   frontWing: null,
   rearWing: null,
   brakeBias: 0.58,
@@ -34,19 +37,100 @@ const ASSIST_PRESETS = {
 };
 const TC_NAMES = ['Off', 'Low', 'Medium', 'High'];
 
-export function loadSave() {
-  try {
-    const raw = JSON.parse(localStorage.getItem(SAVE_KEY) || '{}');
-    return {
-      settings: { ...DEFAULT_SETTINGS, ...(raw.settings || {}) },
-      config: { ...DEFAULT_CONFIG, ...(raw.config || {}), assists: { ...DEFAULT_CONFIG.assists, ...((raw.config || {}).assists || {}) } },
-      records: raw.records || {},
-      ghosts: raw.ghosts || {},
-      season: raw.season || null,
-    };
-  } catch (e) {
-    return { settings: { ...DEFAULT_SETTINGS }, config: { ...DEFAULT_CONFIG }, records: {}, ghosts: {}, season: null };
+const isObj = (o) => o && typeof o === 'object' && !Array.isArray(o);
+const num = (v, lo, hi, d) => (Number.isFinite(+v) && v !== null && v !== '' ? Math.min(hi, Math.max(lo, +v)) : d);
+const oneOf = (v, list, d) => (list.includes(v) ? v : d);
+const bool = (v, d) => (typeof v === 'boolean' ? v : d);
+
+/** Makes any stored/foreign config safe to run: right types, in range, existing ids. */
+export function sanitizeConfig(raw) {
+  const r = isObj(raw) ? raw : {};
+  const D = DEFAULT_CONFIG;
+  const ra = isObj(r.assists) ? r.assists : {};
+  const fieldSize = Math.round(num(r.fieldSize, 2, 20, D.fieldSize));
+  const wing = (v) => (v === null || v === undefined ? null : Math.round(num(v, 0, 10, 5)));
+  return {
+    mode: oneOf(r.mode, ['race', 'timetrial', 'qualifying'], D.mode),
+    trackId: oneOf(r.trackId, TRACK_DEFS.map((t) => t.id), D.trackId),
+    laps: Math.round(num(r.laps, 1, 30, D.laps)),
+    level: num(r.level, 0, 1, D.level),
+    fieldSize,
+    playerGrid: Math.round(num(r.playerGrid, 1, fieldSize, Math.min(D.playerGrid, fieldSize))),
+    team: Math.round(num(r.team, 0, TEAMS.length - 1, D.team)),
+    compound: oneOf(r.compound, COMPOUND_IDS, D.compound),
+    tyreWear: oneOf(+r.tyreWear, [0, 1.5, 3, 6], D.tyreWear),
+    damage: bool(r.damage, D.damage),
+    collisions: bool(r.collisions, D.collisions),
+    mandatoryStop: bool(r.mandatoryStop, D.mandatoryStop),
+    adaptive: bool(r.adaptive, D.adaptive),
+    qualify: bool(r.qualify, D.qualify),
+    equalCars: bool(r.equalCars, D.equalCars),
+    frontWing: wing(r.frontWing),
+    rearWing: wing(r.rearWing),
+    brakeBias: num(r.brakeBias, 0.5, 0.7, D.brakeBias),
+    assists: {
+      abs: bool(ra.abs, D.assists.abs),
+      tc: Math.round(num(ra.tc, 0, 3, D.assists.tc)),
+      steer: bool(ra.steer, D.assists.steer),
+      stability: Math.round(num(ra.stability, 0, 3, D.assists.stability)),
+      autoGear: bool(ra.autoGear, D.assists.autoGear),
+      pitAuto: bool(ra.pitAuto, D.assists.pitAuto),
+    },
+  };
+}
+
+export function sanitizeSettings(raw) {
+  const r = isObj(raw) ? raw : {};
+  const D = DEFAULT_SETTINGS;
+  return {
+    quality: oneOf(r.quality, ['low', 'medium', 'high'], D.quality),
+    volume: num(r.volume, 0, 1, D.volume),
+    units: oneOf(r.units, ['kmh', 'mph'], D.units),
+    line: bool(r.line, D.line),
+    minimap: bool(r.minimap, D.minimap),
+    shake: bool(r.shake, D.shake),
+    camera: oneOf(r.camera, ['chase', 'close', 'cockpit', 'tcam', 'heli', 'tv'], D.camera),
+    tower: bool(r.tower, D.tower),
+    blur: bool(r.blur, D.blur),
+  };
+}
+
+function sanitizeRecords(raw) {
+  const out = {};
+  if (!isObj(raw)) return out;
+  for (const t of TRACK_DEFS) {
+    const r = raw[t.id];
+    if (isObj(r) && Number.isFinite(r.best) && r.best > 5 && r.best < 1000) out[t.id] = { ...r, best: +r.best };
   }
+  return out;
+}
+
+function sanitizeSeason(raw) {
+  if (!isObj(raw)) return null;
+  const round = Math.round(num(raw.round, 0, CHAMP_CAL.length, 0));
+  const points = {};
+  if (isObj(raw.points)) for (const [k, v] of Object.entries(raw.points)) if (Number.isFinite(+v)) points[String(k).slice(0, 40)] = Math.max(0, Math.round(+v));
+  return { ...raw, round, points };
+}
+
+export function loadSave() {
+  let raw = {};
+  try {
+    raw = JSON.parse(localStorage.getItem(SAVE_KEY) || '{}');
+  } catch (e) {
+    raw = {};
+  }
+  if (!isObj(raw)) raw = {};
+  const ghosts = {};
+  if (isObj(raw.ghosts)) for (const t of TRACK_DEFS) if (isObj(raw.ghosts[t.id])) ghosts[t.id] = raw.ghosts[t.id];
+  return {
+    settings: sanitizeSettings(raw.settings),
+    config: sanitizeConfig(raw.config),
+    records: sanitizeRecords(raw.records),
+    ghosts,
+    season: sanitizeSeason(raw.season),
+    career: sanitizeCareer(raw.career),
+  };
 }
 export function persist(save) {
   try {
@@ -123,9 +207,11 @@ export class Menu {
         <div class="logo">Apex<br><span>Grand Prix</span></div>
         <div class="tagline">20-CAR GRID · REAL TYRE, AERO &amp; HYBRID POWERTRAIN PHYSICS · ADJUSTABLE AI</div>
         <button class="btn primary" data-act="quick">Quick race<small>Jump straight in with your last settings</small></button>
-        <button class="btn" data-act="setup" data-mode="race">Custom race<small>Circuit, laps, difficulty, team, setup, assists</small></button>
+        <button class="btn" data-act="setup" data-mode="race" data-qualify="0">Custom race<small>Circuit, laps, difficulty, team, setup, assists</small></button>
+        <button class="btn" data-act="setup" data-mode="race" data-qualify="1">Qualify &amp; race<small>3-minute qualifying with all 20 cars sets your grid slot</small></button>
         <button class="btn" data-act="setup" data-mode="timetrial">Time trial<small>Chase your ghost, alone on the circuit</small></button>
-        <button class="btn" data-act="season">Championship<small>${s ? `Round ${Math.min(s.round + 1, TRACK_DEFS.length)} of ${TRACK_DEFS.length} in progress` : '4 rounds, points, a title to win'}</small></button>
+        <button class="btn" data-act="career">Career<small>${this.save.career ? `Season ${this.save.career.seasonNo} · ${TEAMS[this.save.career.team].short} · round ${Math.min(this.save.career.season.round + 1, this.save.career.season.calendar.length)} of ${this.save.career.season.calendar.length}` : 'Pick a team, develop the car, climb the grid across seasons'}</small></button>
+        <button class="btn" data-act="season">Championship<small>${s ? `Round ${Math.min(s.round + 1, CHAMP_CAL.length)} of ${CHAMP_CAL.length} in progress` : '4 rounds, points, a title to win'}</small></button>
         <div class="row"><button class="btn sm grow" data-act="controls">Controls</button><button class="btn sm grow" data-act="settings">Settings</button></div>
       </div>
       <div class="version">v1.1 · WASD / arrows to drive · works with gamepads</div>
@@ -196,6 +282,8 @@ export class Menu {
         <div class="field"><label>Tyre wear</label>${this.chips('tyreWear', [{ value: 0, label: 'Off' }, { value: 1.5, label: 'Low' }, { value: 3, label: 'Normal' }, { value: 6, label: 'High' }], c.tyreWear)}<div class="hint">Normal makes the Soft last about 5 laps and the Hard about 12. High forces a stop in a short race.</div></div>
         ${this.toggle('damage', 'Damage', 'Wings, floor and tyre punctures from contact', c.damage)}
         ${timetrial ? '' : this.toggle('collisions', 'Car-to-car collisions', 'Off lets cars pass through each other', c.collisions)}
+        ${timetrial ? '' : this.toggle('equalCars', 'Identical cars', 'Every team has exactly your car; only the drivers differ (off: stronger teams have faster cars)', c.equalCars)}
+        ${timetrial ? '' : this.toggle('qualify', 'Qualifying session first', '3 minutes, all 20 cars: your best lap sets your grid slot (overrides the start position)', c.qualify)}
         ${timetrial ? '' : this.toggle('mandatoryStop', 'Mandatory pit stop', 'Use two compounds or take +15 s', c.mandatoryStop)}
         ${timetrial ? '' : this.toggle('adaptive', 'Adaptive AI pace', 'Cars far ahead ease off, cars far behind push (±3-5%)', c.adaptive)}
       </div></div>`;
@@ -254,7 +342,8 @@ export class Menu {
       <div class="grid2"><div class="panel"><h3>Graphics</h3>
         <div class="field"><label>Quality</label>${this.chips('quality', [{ value: 'low', label: 'Low' }, { value: 'medium', label: 'Medium' }, { value: 'high', label: 'High' }], s.quality)}<div class="hint">Low: no shadows, fewer trees, lower resolution. Changes apply to the next session.</div></div>
         ${this.toggle('s.line', 'Racing line guide', 'Green: keep going. Yellow: ease off. Red: brake now (key L)', s.line !== false)}
-        ${this.toggle('s.shake', 'Camera shake', 'Kerbs, speed and impacts', s.shake)}
+        ${this.toggle('s.shake', 'Camera shake', 'Kerbs, speed, engine rumble and impacts', s.shake)}
+        ${this.toggle('s.blur', 'Motion blur', 'Radial speed blur that builds up fast at high speed (not on Low quality)', s.blur !== false)}
         ${this.toggle('s.minimap', 'Show minimap', '', s.minimap)}
         ${this.toggle('s.tower', 'Show timing tower', '', s.tower)}
       </div><div class="panel"><h3>Audio &amp; units</h3>
@@ -278,7 +367,7 @@ export class Menu {
   }
 
   screen_results(data) {
-    const { cls, player, race, season, trackName } = data;
+    const { cls, player, race, season, trackName, careerRes } = data;
     const top3 = cls.slice(0, 3);
     const order = [top3[1], top3[0], top3[2]].filter(Boolean);
     const fmt = (e) => (e.time != null ? formatTime(e.time) : 'DNF');
@@ -298,16 +387,100 @@ export class Menu {
       const table = Object.entries(season.points).sort((a, b) => b[1] - a[1]).slice(0, 10);
       seasonHtml = `<div class="panel"><h3>Championship standings after round ${season.round + 1}</h3><table class="results"><tr><th>Pos</th><th>Driver</th><th>Pts</th></tr>${table.map(([n, p], i) => `<tr class="${n === 'You' ? 'me' : ''}"><td class="pos">${i + 1}</td><td>${esc(n)}</td><td><b>${p}</b></td></tr>`).join('')}</table></div>`;
     }
-    const final = season && season.round + 1 >= TRACK_DEFS.length;
+    const final = season && season.round + 1 >= CHAMP_CAL.length;
     return `<section class="screen panel-screen full">
       <h2>${esc(trackName)} <span>results</span></h2>
       <div class="podium">${order.map((e) => `<div class="pod p${e.pos}" style="--c:${e.info.team.color}"><div class="hint">P${e.pos}</div><b>${esc(e.info.code)}</b><div>${esc(e.info.team.short)}</div><div class="hint">${fmt(e)}</div></div>`).join('')}</div>
       ${me ? `<div class="hint" style="text-align:center">You finished <b>P${me.pos}</b>${me.penalty ? ` (includes ${me.penalty}s of penalties)` : ''} · best lap ${me.best < Infinity ? formatTime(me.best) : '—'}</div>` : ''}
+      ${careerRes ? `<div class="panel"><h3>Career</h3><div class="hint">Finished <b style="color:#fff">P${careerRes.pos}</b> · objective P${careerRes.objective} ${careerRes.met ? '<b style="color:#31d17a">achieved</b>' : '<b style="color:#ff6b6b">missed</b>'} · prize money <b style="color:#ffd24a">+${careerRes.prize}</b>${careerRes.fastest ? ' (fastest lap bonus)' : ''} · budget now <b style="color:#ffd24a">${careerRes.budget}</b></div></div>` : ''}
       <div class="grid2" style="grid-template-columns:${season ? '2fr 1fr' : '1fr'}"><div class="panel" style="overflow:auto"><table class="results"><tr><th>Pos</th><th>Driver</th><th>Team</th><th>Time</th><th>Gap</th><th>Pen</th><th>Best lap</th><th>Stops</th><th>Grid</th><th>Pts</th></tr>${rows}</table></div>${seasonHtml}</div>
       <div class="footer"><button class="btn sm" data-act="quit">Main menu</button><div class="row">
-        <button class="btn ${season && !final ? '' : 'primary'}" data-act="restart">Race again</button>
+        ${careerRes ? '<button class="btn primary" data-act="careercontinue">Continue career ▶</button>' : `<button class="btn ${season && !final ? '' : 'primary'}" data-act="restart">Race again</button>`}
         ${season && !final ? '<button class="btn primary" data-act="nextround">Next round ▶</button>' : ''}
         ${final ? '<button class="btn primary" data-act="endseason">Finish season</button>' : ''}</div></div></section>`;
+  }
+
+  // ---- career ------------------------------------------------------------------------------------
+  screen_career_new() {
+    const n = this.cnew || (this.cnew = { team: 6, level: 0.55, rounds: 4, distance: 'standard' });
+    const diff = DIFFICULTIES.reduce((a, b) => (Math.abs(b.level - n.level) < Math.abs(a.level - n.level) ? b : a));
+    return `<section class="screen panel-screen full">
+      <div class="row"><h2>New <span>career</span></h2><div class="grow"></div></div>
+      <div class="panel"><h3>Choose your team</h3><div class="teams">${TEAMS.map((t, i) => {
+        const o = objectiveFor(i);
+        return `<button class="team ${n.team === i ? 'on' : ''}" data-cteam="${i}" style="--c:${t.color};--c2:${t.accent}"><i></i><div><b>${esc(t.name)}</b><div class="hint">Car ${Math.round(55 + t.rating * 45)}% · target P${o.finish}</div><div class="bar"><span style="width:${Math.round(55 + t.rating * 45)}%"></span></div></div></button>`;
+      }).join('')}</div>
+      <div class="hint" style="margin-top:.5rem">A weaker car is a tougher start: prize money buys upgrades, and strong seasons earn offers from better teams.</div></div>
+      <div class="grid2" style="margin-top:1rem">
+        <div class="panel"><h3>AI difficulty</h3>${this.chips('cn.level', DIFFICULTIES.map((d) => ({ value: d.level, label: d.name })), diff.level)}<div class="hint">${esc(diff.blurb)}. It rises a little every season.</div></div>
+        <div class="panel"><h3>Season</h3><div class="field"><label>Calendar</label>${this.chips('cn.rounds', [{ value: 4, label: '4 rounds' }, { value: 8, label: '8 rounds' }], n.rounds)}</div>
+        <div class="field"><label>Race distance</label>${this.chips('cn.distance', DISTANCES.map((d) => ({ value: d.id, label: `${d.name} · ${d.km} km` })), n.distance)}</div></div></div>
+      <div class="footer"><button class="btn sm" data-act="main">◀ Back</button><div class="hint">${esc(TEAMS[n.team].name)} · ${n.rounds} rounds · ${esc(diff.name)}</div><button class="btn primary" data-act="careerstart">Start career</button></div></section>`;
+  }
+
+  screen_career_hub() {
+    const c = this.save.career;
+    const s = c.season;
+    const id = s.calendar[s.round];
+    const def = TRACK_DEFS.find((d) => d.id === id);
+    const tr = this.hooks.tracks[id];
+    const laps = tr ? lapsFor(tr.length, c.distance) : 5;
+    const obj = objectiveFor(c.team);
+    const team = TEAMS[c.team];
+    const dr = driverStandings(s).slice(0, 8);
+    const cons = constructorStandings(s).slice(0, 6);
+    const ups = UPGRADE_KEYS.map((k) => {
+      const lv = c.upgrades[k] || 0;
+      const cost = upgradeCost(lv);
+      const pips = Array.from({ length: UPGRADE_MAX }, (_, i) => `<i class="${i < lv ? 'on' : ''}"></i>`).join('');
+      return `<div class="upg"><div><b>${esc(UPGRADE_INFO[k].name)}</b><div class="hint">${esc(UPGRADE_INFO[k].blurb)}</div><div class="pips">${pips}</div></div>
+        <button class="btn sm" data-buy="${k}" ${lv >= UPGRADE_MAX || c.budget < cost ? 'disabled' : ''}>${lv >= UPGRADE_MAX ? 'Max' : `Upgrade · ${cost}`}</button></div>`;
+    }).join('');
+    return `<section class="screen panel-screen full">
+      <div class="row"><h2>Career <span>season ${c.seasonNo}</span></h2><div class="grow"></div><div class="hint"><b style="color:#fff">${esc(team.name)}</b> · budget <b style="color:#ffd24a;font-size:1.3rem">${c.budget}</b></div></div>
+      <div class="grid2" style="grid-template-columns:1.1fr 1fr">
+        <div class="panel"><h3>Round ${s.round + 1} of ${s.calendar.length}</h3>
+          <div class="hubtrack">${tr ? trackThumb(tr) : ''}<div><b style="font-size:1.3rem">${esc(def.name)}</b><div class="hint">${esc(def.country)} · ${tr ? (tr.length / 1000).toFixed(2) + ' km' : ''} · ${laps} laps</div>
+          <div class="hint" style="margin-top:.5rem">Objective: finish <b style="color:#fff">P${obj.finish}</b> or better (+8 prize). Constructors target: P${obj.constructor}.</div></div></div>
+          <div class="row" style="margin-top:.8rem"><button class="btn primary grow" data-act="careerrace" data-q="1">Qualify &amp; race</button><button class="btn grow" data-act="careerrace" data-q="0">Race now</button></div>
+        </div>
+        <div class="panel"><h3>Car development</h3>${ups}</div>
+      </div>
+      <div class="grid2" style="margin-top:1rem">
+        <div class="panel"><h3>Drivers' championship</h3><table class="results">${dr.length ? dr.map((d, i) => `<tr class="${d.name === 'You' ? 'me' : ''}"><td class="pos">${i + 1}</td><td>${esc(d.name)}</td><td>${esc(d.team)}</td><td><b>${d.pts}</b></td></tr>`).join('') : '<tr><td class="hint">No races yet</td></tr>'}</table></div>
+        <div class="panel"><h3>Constructors</h3><table class="results">${cons.length ? cons.map((d, i) => `<tr class="${d.team === team.short ? 'me' : ''}"><td class="pos">${i + 1}</td><td>${esc(d.team)}</td><td><b>${d.pts}</b></td></tr>`).join('') : '<tr><td class="hint">No races yet</td></tr>'}</table></div>
+      </div>
+      <div class="footer"><button class="btn sm" data-act="main">Main menu</button><div class="hint">${c.history.length ? `Previous seasons: ${c.history.map((h) => `S${h.seasonNo} P${h.driverPos}`).join(' · ')}` : ''}</div><button class="btn sm" data-act="careerwipe" data-confirm="0">Abandon career</button></div></section>`;
+  }
+
+  screen_career_end() {
+    const c = this.save.career;
+    const r = c.seasonRecap;
+    const team = TEAMS[c.team];
+    const offers = (r.offers || []).map((i) => `<button class="team" data-coffer="${i}" style="--c:${TEAMS[i].color};--c2:${TEAMS[i].accent}"><i></i><div><b>${esc(TEAMS[i].name)}</b><div class="hint">Offer: join for season ${c.seasonNo + 1} · car ${Math.round(55 + TEAMS[i].rating * 45)}%</div><div class="bar"><span style="width:${Math.round(55 + TEAMS[i].rating * 45)}%"></span></div></div></button>`).join('');
+    return `<section class="screen panel-screen full">
+      <div class="row"><h2>Season ${r.seasonNo} <span>${r.champion ? 'champion!' : 'complete'}</span></h2></div>
+      <div class="grid2"><div class="panel"><h3>Your season</h3>
+        <div class="bigstats"><div><small>Drivers'</small><b>P${r.driverPos}</b></div><div><small>${esc(team.short)}</small><b>P${r.teamPos}</b></div><div><small>Points</small><b>${r.points}</b></div><div><small>Wins</small><b>${r.wins}</b></div><div><small>Podiums</small><b>${r.podiums}</b></div></div>
+        <div class="hint" style="margin-top:.6rem">Constructors objective (P${r.constructorObjective}): <b style="color:${r.metConstructor ? '#31d17a' : '#ff6b6b'}">${r.metConstructor ? 'achieved' : 'missed'}</b>. Season bonus added to your budget: now <b style="color:#ffd24a">${c.budget}</b>.</div></div>
+        <div class="panel"><h3>Contracts for next season</h3><div class="teams">${offers || '<div class="hint">No offers this year. Finish higher in the standings to attract bigger teams.</div>'}
+          <button class="team on" data-coffer="${c.team}" style="--c:${team.color};--c2:${team.accent}"><i></i><div><b>Stay with ${esc(team.short)}</b><div class="hint">Keep your car development</div></div></button></div></div></div>
+      <div class="footer"><button class="btn sm" data-act="main">Main menu</button><div class="hint">Moving teams starts car development again.</div></div></section>`;
+  }
+
+  screen_quali(data) {
+    const { q, player, trackName } = data;
+    const pole = q.list[0] && Number.isFinite(q.list[0].best) ? q.list[0].best : null;
+    const rows = q.list.map((e) => {
+      const me = e.car === player;
+      const gap = Number.isFinite(e.best) ? (pole != null && e.pos > 1 ? '+' + (e.best - pole).toFixed(3) : '') : '';
+      return `<tr class="${me ? 'me' : ''}"><td class="pos">${e.pos}</td><td><span class="tc" style="--c:${e.info.team.color}"></span>${esc(e.info.name)}</td><td>${esc(e.info.team.short)}</td><td>${Number.isFinite(e.best) ? formatTime(e.best) : 'no time'}</td><td>${gap}</td><td>${e.laps}</td></tr>`;
+    }).join('');
+    const mine = q.list.find((e) => e.car === player);
+    return `<section class="screen panel-screen full">
+      <div class="row"><h2>Qualifying <span>${esc(trackName)}</span></h2><div class="grow"></div><div class="hint">You start from <b style="color:#fff;font-size:1.4rem">P${mine.pos}</b></div></div>
+      <div class="panel" style="overflow:auto"><table class="results"><tr><th>Pos</th><th>Driver</th><th>Team</th><th>Best lap</th><th>Gap</th><th>Laps</th></tr>${rows}</table></div>
+      <div class="footer"><button class="btn sm" data-act="quit">Main menu</button><button class="btn" data-act="restart">Qualify again</button><button class="btn primary" data-act="qualirace">Start race from P${mine.pos}</button></div></section>`;
   }
 
   screen_timetrial(data) {
@@ -344,6 +517,12 @@ export class Menu {
     if (t.dataset.chip) {
       const k = t.dataset.chip, v = t.dataset.value;
       const c = this.config;
+      if (k.startsWith('cn.')) {
+        const n = this.cnew || (this.cnew = { team: 6, level: 0.55, rounds: 4, distance: 'standard' });
+        const f = k.slice(3);
+        n[f] = f === 'distance' ? v : +v;
+        return this.rerender();
+      }
       if (k === 'diff') c.level = +v;
       else if (k === 'compound') c.compound = v;
       else if (k === 'tyreWear') c.tyreWear = +v;
@@ -366,6 +545,12 @@ export class Menu {
       H.applySettings && H.applySettings();
       return this.rerender();
     }
+    if (t.dataset.cteam != null && t.dataset.cteam !== '') {
+      (this.cnew || (this.cnew = { team: 6, level: 0.55, rounds: 4, distance: 'standard' })).team = +t.dataset.cteam;
+      return this.rerender();
+    }
+    if (t.dataset.coffer != null) return H.careerNext(+t.dataset.coffer);
+    if (t.dataset.buy) return H.careerBuy(t.dataset.buy);
     if (t.dataset.preset) {
       this.config.assists = { ...ASSIST_PRESETS[t.dataset.preset] };
       this.persist();
@@ -381,14 +566,32 @@ export class Menu {
         return H.startRace({ ...c });
       case 'setup':
         c.mode = t.dataset.mode;
+        if (t.dataset.qualify != null) c.qualify = t.dataset.qualify === '1';
         this.tab = 'circuit';
         this.persist();
         return this.show('setup');
       case 'season':
         return H.openSeason();
+      case 'career': return H.openCareer();
+      case 'careerstart': return H.careerStart({ ...this.cnew });
+      case 'careerrace': return H.careerRace(t.dataset.q === '1');
+      case 'careercontinue': return H.openCareer();
+      case 'careerwipe':
+        if (t.dataset.confirm !== '1') {
+          t.dataset.confirm = '1';
+          t.textContent = 'Click again to delete career';
+          return;
+        }
+        return H.careerAbandon();
       case 'go':
         this.persist();
+        if (c.mode === 'race' && c.qualify) return H.startRace({ ...c, mode: 'qualifying', qualiTimes: null, seed: undefined });
         return H.startRace({ ...c });
+      case 'qualirace': {
+        const d = this.lastData;
+        if (d && d.q) return H.raceFromQuali({ cfg: d.cfg, times: d.q.times, grid: d.q.list.find((e) => e.car === d.player).pos });
+        return;
+      }
       case 'main':
         return H.toMain();
       case 'controls':

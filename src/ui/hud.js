@@ -26,6 +26,11 @@ const sty = (el, prop, v) => {
   }
 };
 
+const mmss = (t) => {
+  t = Math.ceil(t);
+  return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0');
+};
+
 export class HUD {
   constructor(root) {
     this.root = root;
@@ -332,19 +337,20 @@ export class HUD {
     // top bar
     const total = race.totalLaps;
     const lap = Math.min(total, Math.max(1, rs.laps + 1));
-    const lapHtml = race.opt.mode === 'timetrial' ? `<small>Lap</small>${Math.max(1, rs.laps + 1)}` : `<small>Lap</small>${rs.finished ? total : lap}/${total}`;
+    const lapHtml = race.isQuali ? `<small>${race.chequered ? 'Final lap' : 'Time left'}</small>${race.chequered ? '' : mmss(race.qualiLeft())}` : race.opt.mode === 'timetrial' ? `<small>Lap</small>${Math.max(1, rs.laps + 1)}` : `<small>Lap</small>${rs.finished ? total : lap}/${total}`;
     if (this._lapHtml !== lapHtml) {
       this._lapHtml = lapHtml;
       el.tbLap.innerHTML = lapHtml;
     }
     const rt = race.t0 != null ? race.time - race.t0 : 0;
     let clockTxt = race.phase === 'grid' || race.phase === 'countdown' ? (race.opt.mode === 'timetrial' ? 'Time trial' : 'Formation') : formatTime(Math.max(0, rt), 1);
-    if (race.opt.mode === 'timetrial') clockTxt = rs.laps < 2 ? (rs.laps === 0 ? 'Out lap' : 'Push lap') : 'Flying lap';
+    if (race.isQuali) clockTxt = rs.laps < 1 ? 'Out lap' : rs.finished ? 'Session over' : rs.laps < 2 ? 'Push lap' : 'Flying lap';
+    else if (race.opt.mode === 'timetrial') clockTxt = rs.laps < 2 ? (rs.laps === 0 ? 'Out lap' : 'Push lap') : 'Flying lap';
     txt(el.tbClock, clockTxt);
 
     // gaps
     const ahead = p.ahead, behind = p.behind;
-    const gapHtml = race.opt.mode === 'timetrial' ? '' : `${ahead ? `▲ ${ahead.info.code} <b>+${(p.gapAhead ?? 0).toFixed(1)}</b>` : 'Leading'}<br>${behind ? `▼ ${behind.info.code} <b>-${(behind.gapAhead ?? 0).toFixed(1)}</b>` : ''}`;
+    const gapHtml = race.opt.mode === 'timetrial' ? '' : race.isQuali ? `P${rs.pos} of ${race.cars.length}${ahead && Number.isFinite(rs.best) ? `<br>▲ ${ahead.info.code} <b>${(p.gapAhead ?? 0).toFixed(3)}</b>` : ''}` : `${ahead ? `▲ ${ahead.info.code} <b>+${(p.gapAhead ?? 0).toFixed(1)}</b>` : 'Leading'}<br>${behind ? `▼ ${behind.info.code} <b>-${(behind.gapAhead ?? 0).toFixed(1)}</b>` : ''}`;
     if (this._gapHtml !== gapHtml) {
       this._gapHtml = gapHtml;
       el.gap.innerHTML = gapHtml;
@@ -412,7 +418,7 @@ export class HUD {
       for (let i = pos - 3; i <= pos + 3; i++) if (i >= 0 && i < n) set.add(i);
       idx = [...set].sort((a, b) => a - b).slice(0, 13);
     }
-    this.el.twLap.textContent = `${n} cars`;
+    this.el.twLap.textContent = race.isQuali ? 'Qualifying' : `${n} cars`;
     this.rows.forEach((row, k) => {
       if (k >= idx.length) {
         row.style.display = 'none';
@@ -426,7 +432,8 @@ export class HUD {
       row.children[0].textContent = idx[k] + 1;
       row.children[2].textContent = c.info.code;
       let g = '';
-      if (idx[k] === 0) g = rs.finished ? 'FIN' : race.phase === 'racing' ? `L${Math.min(race.totalLaps, rs.laps + 1)}` : '';
+      if (race.isQuali) g = Number.isFinite(rs.best) ? (idx[k] === 0 ? formatTime(rs.best) : `+${(rs.best - list[0].rs.best).toFixed(3)}`) : '--';
+      else if (idx[k] === 0) g = rs.finished ? 'FIN' : race.phase === 'racing' ? `L${Math.min(race.totalLaps, rs.laps + 1)}` : '';
       else if (race.phase !== 'racing' && race.phase !== 'finished') g = '';
       else if (rs.lapsDown > 0) g = `+${rs.lapsDown}L`;
       else g = `+${(c.gapAhead ?? 0).toFixed(1)}`;

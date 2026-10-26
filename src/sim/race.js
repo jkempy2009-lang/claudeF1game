@@ -5,6 +5,7 @@ import { AIDriver } from './ai.js';
 import { collideCars, collideWalls } from './collision.js';
 import { TEAMS, DRIVERS } from './teams.js';
 import { SURF } from './track.js';
+import { upgradeEffects } from './career.js';
 import { clamp, loopDelta, mod, mulberry32 } from '../util/math.js';
 
 export const DT = 1 / 240;
@@ -17,7 +18,11 @@ export const DIFFICULTIES = [
 ];
 
 export const DEFAULT_OPTIONS = {
-  mode: 'race', // race | timetrial
+  mode: 'race', // race | timetrial | qualifying
+  qualiTime: 180, // seconds of session in qualifying
+  equalCars: true, // all cars share the player's specification
+  upgrades: null, // career car development { power, aero, grip } levels
+  qualiTimes: null, // { driverCode: bestLap } from a qualifying session: sets the grid
   laps: 5,
   level: 0.55,
   adaptive: false,
@@ -51,7 +56,9 @@ export class Race {
     this.phase = 'grid'; // grid | countdown | racing | finished
     this.lights = 0;
     this.lightsOutAt = null;
-    this.totalLaps = opt.mode === 'timetrial' ? 9999 : opt.laps;
+    this.isQuali = opt.mode === 'qualifying';
+    if (this.isQuali) opt.collisions = false;
+    this.totalLaps = opt.mode === 'timetrial' ? 9999 : this.isQuali ? 999 : opt.laps;
     this.events = [];
     this.cars = [];
     this.sorted = [];
@@ -89,8 +96,9 @@ export class Race {
   makeCarSpec(team, compound, isPlayer) {
     const opt = this.opt;
     const rec = this.track.def.setup || { front: 5, rear: 5 };
-    const fuel = clamp(Math.min(this.totalLaps, 60) * (this.track.length / 1000) * FUEL_KG_PER_KM * 1.1 + 2, 6, 105);
-    const rating = team.rating;
+    const fuel = this.isQuali ? 14 : clamp(Math.min(this.totalLaps, 60) * (this.track.length / 1000) * FUEL_KG_PER_KM * 1.1 + 2, 6, 105);
+    // identical cars: every team runs the same machinery, only the drivers differ (career keeps the team pecking order)
+    const rating = opt.equalCars ? 1 : team.rating;
     const grip = 0.985 + 0.015 * rating;
     const setup = isPlayer
       ? { frontWing: opt.setup.frontWing ?? rec.front, rearWing: opt.setup.rearWing ?? rec.rear, brakeBias: opt.setup.brakeBias }
@@ -98,6 +106,15 @@ export class Race {
     const spec = makeSpec({ ...setup, compound, performance: 0.972 + 0.028 * rating, fuel });
     spec.frontGrip *= grip;
     spec.rearGrip *= grip;
+    if (isPlayer && opt.upgrades) {
+      // career car development
+      const u = upgradeEffects(opt.upgrades);
+      spec.powerScale *= u.power;
+      spec.clAf *= u.aero;
+      spec.clAr *= u.aero;
+      spec.frontGrip *= u.grip;
+      spec.rearGrip *= u.grip;
+    }
     return spec;
   }
 
@@ -128,9 +145,15 @@ export class Race {
     // qualifying-ish order from car + driver + luck
     ai.forEach((s) => (s.q = s.team.rating * 0.55 + s.driver.talent * 0.45 + (rng() - 0.5) * 0.16));
     ai.sort((a, b) => b.q - a.q);
-    const grid = ai.map((s) => ({ seat: s, player: false }));
+    let grid = ai.map((s) => ({ seat: s, player: false }));
     const pg = clamp(Math.round(opt.playerGrid) - 1, 0, grid.length);
     grid.splice(timeTrial ? 0 : pg, 0, { seat: seats[playerSeat], player: true });
+    if (opt.qualiTimes && !this.isQuali && !timeTrial) {
+      // the grid is set by the qualifying session (cars without a time start at the back in their old order)
+      const qt = opt.qualiTimes;
+      const t = (g) => (qt[g.player ? 'YOU' : g.seat.driver.code] ?? Infinity);
+      grid = grid.map((g, i) => ({ g, i })).sort((a, b) => t(a.g) - t(b.g) || a.i - b.i).map((x) => x.g);
+    }
 
     const aiCompounds = ['soft', 'medium', 'hard'];
     grid.forEach((g, k) => {
@@ -169,9 +192,13 @@ export class Race {
           boxD: track.pit ? track.pitBox(seat.ti).d : null,
         });
         car.driver = driver;
+        if (this.isQuali) {
+          driver.releaseDelay = k * 2.4; // cars leave one after another so the lap is clear
+          driver.ignoreTraffic = true;
+        }
         // pit strategy: stop once somewhere in the middle of the race if the race is long enough / wear is high
         const stopLap = Math.round(this.totalLaps * (0.35 + 0.35 * rng()));
-        car.rs.plannedStop = this.totalLaps >= 4 && (opt.mandatoryStop || opt.tyreWear >= 2.5 || rng() < 0.3) ? Math.max(1, stopLap) : null;
+        car.rs.plannedStop = !this.isQuali && this.totalLaps >= 4 && (opt.mandatoryStop || opt.tyreWear >= 2.5 || rng() < 0.3) ? Math.max(1, stopLap) : null;
       }
       if (player) {
         this.player = car;
@@ -236,7 +263,7 @@ export class Race {
     if (this.phase !== 'grid') return;
     this.phase = 'countdown';
     this.cdStart = this.time;
-    const quick = this.opt.mode === 'timetrial';
+    const quick = this.opt.mode === 'timetrial' || this.isQuali;
     this.lightsSeq = quick ? [0.6, 1.2, 1.8] : [1.2, 2.2, 3.2, 4.2, 5.2];
     this.holdTime = quick ? 0.5 : 0.7 + this.rng() * 2.2;
     this.lightsOutAt = this.cdStart + this.lightsSeq[this.lightsSeq.length - 1] + this.holdTime;
@@ -275,6 +302,11 @@ export class Race {
       }
     }
 
+    if (this.isQuali && this.phase === 'racing' && !this.chequered && this.time - this.t0 >= this.opt.qualiTime) {
+      this.chequered = true;
+      this.chequeredAt = this.time;
+      this.pushEvent({ type: 'chequered', car: null });
+    }
     const racing = this.phase === 'racing' || this.phase === 'finished';
     for (const car of this.cars) {
       const inp = this.inputFor(car, dt, pin);
@@ -521,6 +553,19 @@ export class Race {
 
   updateRank() {
     const list = this.sorted;
+    if (this.isQuali) {
+      // qualifying order: best valid lap, then whoever has covered more ground
+      list.sort((a, b) => (a.rs.best - b.rs.best) || (b.rs.maxDist - a.rs.maxDist));
+      list.forEach((c, i) => {
+        c.rs.pos = i + 1;
+        const ahead = i > 0 ? list[i - 1] : null;
+        c.ahead = ahead;
+        c.behind = i < list.length - 1 ? list[i + 1] : null;
+        c.gapAhead = ahead && Number.isFinite(c.rs.best) && Number.isFinite(ahead.rs.best) ? c.rs.best - ahead.rs.best : null;
+        c.rs.lapsDown = 0;
+      });
+      return;
+    }
     list.sort((a, b) => {
       const ra = a.rs, rb = b.rs;
       if (ra.finished !== rb.finished) return ra.finished ? -1 : 1;
@@ -584,14 +629,14 @@ export class Race {
     const tr = this.track;
     const rs = car.rs;
     if (!tr.drs.length) return;
-    const enabled = this.phase === 'racing' && (this.opt.mode === 'timetrial' || rs.laps >= 1);
+    const enabled = this.phase === 'racing' && (this.opt.mode === 'timetrial' || this.isQuali || rs.laps >= 1);
     const zone = tr.inDrsZone(car.s);
     for (let k = 0; k < tr.drs.length; k++) {
       const z = tr.drs[k];
       // detection line crossed since last tick?
       const rel = loopDelta(car.s, z.detect, tr.length);
       if (rel >= 0 && rel < Math.max(8, car.speed * 0.06)) {
-        rs.drsEligible[k] = this.opt.mode === 'timetrial' || (car.gapAhead != null && car.gapAhead < 1.0);
+        rs.drsEligible[k] = this.opt.mode === 'timetrial' || this.isQuali || (car.gapAhead != null && car.gapAhead < 1.0);
       }
       if (zone !== k && rs.drsEligible[k] && loopDelta(car.s, z.end, tr.length) > 10 && loopDelta(car.s, z.end, tr.length) < 200) rs.drsEligible[k] = false;
     }
@@ -748,6 +793,22 @@ export class Race {
       if (rs.stops < 1 || new Set(rs.compounds).size < 2) this.addPenalty(this.player, 15, 'Mandatory stop / two compounds not completed');
     }
     this.pushEvent({ type: 'raceEnd' });
+  }
+
+  /** Qualifying order with each car's best lap (cars without a valid lap follow in track-position order). */
+  qualifying() {
+    const list = this.cars.map((c) => ({ car: c, info: c.info, best: c.rs.best, laps: c.rs.laps, dist: c.rs.maxDist }));
+    list.sort((a, b) => (a.best - b.best) || (b.dist - a.dist));
+    list.forEach((e, i) => (e.pos = i + 1));
+    const times = {};
+    for (const e of list) if (Number.isFinite(e.best)) times[e.info.isPlayer ? 'YOU' : e.info.code] = e.best;
+    return { list, times };
+  }
+
+  /** Seconds left in a qualifying session (0 once the flag is out). */
+  qualiLeft() {
+    if (!this.isQuali || this.t0 == null) return this.opt.qualiTime;
+    return Math.max(0, this.opt.qualiTime - (this.time - this.t0));
   }
 
   /** Final classification with penalties applied. */

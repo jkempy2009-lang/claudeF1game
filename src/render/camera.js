@@ -136,10 +136,14 @@ export class CameraRig {
     this.init = true;
 
     // vibration: kerbs, speed, impacts
-    const sh = (car.kerbShake * 0.03 + clamp(speed / 100, 0, 1) * 0.004 + this.impact * 0.25);
+    // engine / speed rumble rises exponentially with speed and revs, strongest from the cockpit
+    const vx = clamp(speed / 95, 0, 1), rx = clamp((car.rpm - 5000) / 9500, 0, 1);
+    const expo = (x) => (Math.exp(3 * x) - 1) / (Math.exp(3) - 1);
+    const rumble = this.shakeOn === false ? 0 : (expo(vx) * 0.65 + expo(rx) * 0.35) * (this.mode === 'cockpit' ? 0.016 : this.mode === 'tcam' ? 0.011 : this.mode === 'close' ? 0.0045 : 0.0022);
+    const sh = (car.kerbShake * 0.03 + rumble + this.impact * 0.25);
     this.impact *= Math.exp(-dt * 6);
-    if (sh > 0.001 && this.mode !== 'tv') {
-      const t = this.time * 53;
+    if (sh > 0.0004 && this.mode !== 'tv') {
+      const t = this.time * (53 + rx * 40);
       cam.position.x += Math.sin(t * 1.3) * sh;
       cam.position.y += Math.sin(t * 1.9 + 1) * sh;
       cam.position.z += Math.cos(t * 1.1) * sh;

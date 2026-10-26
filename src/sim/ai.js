@@ -36,6 +36,9 @@ export class AIDriver {
     this.offset = 0; // current lateral offset from the base line (overtaking)
     this.offTarget = 0;
     this.passSide = 0;
+    this.defendSide = 0;
+    this.defendUntil = 0;
+    this.rcMode = 'free';
     this.neigh = [];
     this.neighTimer = 0;
     this.paceAdapt = 1;
@@ -104,7 +107,7 @@ export class AIDriver {
       inp.pitLimit = 0;
       return inp;
     }
-    if (this.goTime === null) this.goTime = race.time + this.react;
+    if (this.goTime === null) this.goTime = race.time + this.react + (this.releaseDelay || 0);
 
     const s = car.s;
     const inPitZone = this.pitState !== 'none';
@@ -276,51 +279,123 @@ export class AIDriver {
     const car = this.car, tr = this.track;
     const list = this.neigh;
     list.length = 0;
+    if (this.ignoreTraffic) return;
     const Ltr = tr.length;
     for (const o of race.cars) {
       if (o === car || o.retired || o.inGarage) continue;
       const ds = loopDelta(o.s, car.s, Ltr);
-      if (ds < -14 || ds > 70) continue;
+      if (ds < -60 || ds > 90) continue;
       list.push({ c: o, ds, dd: o.d - car.d, v: o.speed });
     }
-    // overtaking decision --------------------------------------------------
+    const V = Math.max(car.speed, 5);
+    const base = this.basePath(car.s);
+    const wl = tr.wl[car.i] - 1.6, wr = tr.wr[car.i] - 1.6;
+    const probe = (d) => tr.at(tr.curv, car.s + d);
+    // where is the next corner, and which side is its inside?
+    let dCorner = Infinity, inside = 0;
+    for (let d = 30; d <= 450; d += 15) {
+      const k = probe(d);
+      if (Math.abs(k) > 0.0035) {
+        dCorner = d;
+        inside = Math.sign(k); // left-hand corner (k > 0): the inside is on the left (+d)
+        break;
+      }
+    }
+    const straight = Math.abs(probe(0)) < 0.0012 && Math.abs(probe(35)) < 0.0018;
+    const now = race.time;
+    let target = 0;
+
+    // ---- the car we are trying to pass ------------------------------------------------------------------------
     let blocker = null;
     for (const n of list) {
-      if (n.ds > 0 && n.ds < 50 && Math.abs(n.dd) < 3.4 && (!blocker || n.ds < blocker.ds)) blocker = n;
+      if (n.ds > 0 && n.ds < 60 && Math.abs(n.dd) < 3.4 && (!blocker || n.ds < blocker.ds)) blocker = n;
     }
     this.blocker = blocker;
-    let target = 0;
+    this.rcMode = 'free';
     if (blocker) {
       const o = blocker.c;
-      const kt = Math.abs(this.track.at(this.track.curv, car.s + blocker.ds));
-      const willing = this.dp.aggression + (kt < 0.002 ? 0.35 : -0.1) + (blocker.ds < 25 ? 0.25 : 0);
-      // pick a side once and hold it
+      const gap = blocker.ds - CAR_LEN;
+      const closing = V - blocker.v;
+      const willing = this.dp.aggression + (straight ? 0.3 : -0.1) + (gap < 12 ? 0.25 : 0);
       if (!this.passSide) {
-        const wl = tr.wl[car.i] - 1.7, wr = tr.wr[car.i] - 1.7;
+        // choose the side: the inside of the coming corner when it is close (late-braking dive), otherwise the side with room
         const needLeft = o.d + 3.0, needRight = o.d - 3.0;
-        const leftOk = needLeft <= wl, rightOk = needRight >= -wr;
-        if (leftOk && rightOk) this.passSide = Math.abs(needLeft - car.d) < Math.abs(needRight - car.d) ? 1 : -1;
-        else if (leftOk) this.passSide = 1;
-        else if (rightOk) this.passSide = -1;
+        const free = (pd) => !list.some((m) => m !== blocker && m.ds > -9 && m.ds < blocker.ds + 8 && Math.abs(car.d + m.dd - pd) < 2.7);
+        const leftOk = needLeft <= wl && free(needLeft), rightOk = needRight >= -wr && free(needRight);
+        let pick = 0;
+        if (leftOk && rightOk) pick = dCorner < 320 && inside ? inside : Math.abs(needLeft - car.d) < Math.abs(needRight - car.d) ? 1 : -1;
+        else if (leftOk) pick = 1;
+        else if (rightOk) pick = -1;
+        this.passSide = pick;
+      }
+      if (this.passSide) {
+        // someone moved into the gap we wanted: forget it and choose again next tick
+        const pdWant = o.d + this.passSide * 3.0;
+        if (list.some((m) => m !== blocker && m.ds > -9 && m.ds < blocker.ds + 8 && Math.abs(car.d + m.dd - pdWant) < 2.4)) this.passSide = 0;
       }
       if (this.passSide && willing > 0.45) {
-        const pd = o.d + this.passSide * 3.0;
-        const base = this.basePath(car.s);
-        target = clamp(pd - base, -9, 9);
-        const wl = tr.wl[car.i] - 1.5, wr = tr.wr[car.i] - 1.5;
-        target = clamp(base + target, -wr, wl) - base;
+        const drafting = straight && gap > 17 && dCorner > 170 && closing < 22 && blocker.c.speed > 30;
+        if (drafting) {
+          // tuck into the slipstream and wait for the right moment to pull out
+          target = clamp(o.d - base, -9, 9);
+          this.rcMode = 'draft';
+        } else {
+          const pd = o.d + this.passSide * 3.0;
+          target = clamp(clamp(pd, -wr, wl) - base, -12, 12);
+          this.rcMode = 'attack';
+        }
       }
     } else {
       this.passSide = 0;
     }
-    // side-by-side: keep clear of a car alongside
+
+    // ---- the car trying to pass us: defend once, no weaving ------------------------------------------------------
+    let attacker = null;
     for (const n of list) {
-      if (n.ds > -7 && n.ds < 6 && Math.abs(n.dd) < 2.9) {
-        const away = n.dd > 0 ? -1 : 1;
-        target += away * (2.9 - Math.abs(n.dd)) * 0.9;
+      if (n.ds < -3 && n.ds > -48 && Math.abs(n.dd) < 4.6 && (!attacker || n.ds > attacker.ds)) attacker = n;
+    }
+    if (attacker && !(blocker && this.rcMode === 'attack')) {
+      const timeGap = -attacker.ds / V;
+      const closing = attacker.v - V;
+      const wantsDefend = this.dp.aggression > 0.45 && straight && dCorner > 55 && dCorner < 480 && timeGap < 0.95 && closing > -3 && this.level > 0.3;
+      if (wantsDefend && !this.defendSide) {
+        // cover the side the attacker is on, unless that leaves them the inside of the corner anyway
+        this.defendSide = attacker.dd > 0.8 ? 1 : attacker.dd < -0.8 ? -1 : inside || 1;
+        this.defendUntil = now + 6;
       }
     }
-    this.offTarget = clamp(target, -10, 10);
+    if (this.defendSide) {
+      const stillThreat = attacker && -attacker.ds / V < 1.6;
+      if (now > this.defendUntil && !stillThreat) this.defendSide = 0;
+      else if (!stillThreat && !attacker) this.defendSide = 0;
+    }
+    if (this.defendSide && this.rcMode !== 'attack') {
+      // a single move toward the attacker's side, held through the braking zone (never after the turn-in point)
+      const lim = this.defendSide > 0 ? wl : -wr;
+      const want = clamp(this.defendSide * Math.min(Math.abs(lim), 4.2) , -wr, wl);
+      if (dCorner > 25) target = clamp(want - base, -12, 12);
+      this.rcMode = 'defend';
+    }
+
+    // a car is alongside: no new lateral commitments, hold the line we are on
+    if (list.some((n) => n.ds > -8 && n.ds < 7 && Math.abs(n.dd) < 3.8)) {
+      target = this.offset;
+      this.defendSide = this.defendSide && now > this.defendUntil ? 0 : this.defendSide;
+    }
+
+    // ---- side by side: leave a car's width, yield when behind -------------------------------------------------------
+    for (const n of list) {
+      if (n.ds > -7 && n.ds < 6 && Math.abs(n.dd) < 3.0) {
+        const away = n.dd > 0 ? -1 : 1;
+        const need = 3.0 - Math.abs(n.dd);
+        // the car with its nose behind gives way more than the one ahead
+        const give = n.ds > 1.5 ? 1.15 : n.ds < -2 ? 0.55 : 0.9;
+        target += away * need * give;
+        this.rcMode = this.rcMode === 'free' ? 'side' : this.rcMode;
+      }
+    }
+    // never plan a position outside the track
+    this.offTarget = clamp(target, -wr - base, wl - base);
   }
 
   trafficCap(vt, race) {
