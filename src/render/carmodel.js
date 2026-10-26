@@ -29,22 +29,42 @@ function loft(sections, seg = 18, n = 3.4) {
       idx.push(a, c, b, b, c, d);
     }
   }
-  // end caps
-  for (const [r, flip] of [[0, false], [rings - 1, true]]) {
+  const side = new THREE.BufferGeometry();
+  side.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  side.setIndex(idx);
+  ensureOutward(side); // the tube's own winding, whichever way the sections run
+  const ix = Array.from(side.index.array);
+  // end caps: wound to face away from the middle of the tube, whichever way the sections run
+  const mid = new THREE.Vector3((sections[0].x + sections[rings - 1].x) / 2, 0, 0);
+  const pa = new THREE.Vector3(), pb = new THREE.Vector3(), pc = new THREE.Vector3(), nrm = new THREE.Vector3();
+  for (const r of [0, rings - 1]) {
     const sct = sections[r];
     const ci = pos.length / 3;
     pos.push(sct.x, (sct.yb + sct.yt) / 2, sct.cz || 0);
+    pc.set(sct.x, (sct.yb + sct.yt) / 2, sct.cz || 0);
     for (let k = 0; k < seg; k++) {
       const a = r * seg + k, b = r * seg + ((k + 1) % seg);
-      if (flip) idx.push(ci, a, b);
-      else idx.push(ci, b, a);
+      pa.set(pos[a * 3], pos[a * 3 + 1], pos[a * 3 + 2]);
+      pb.set(pos[b * 3], pos[b * 3 + 1], pos[b * 3 + 2]);
+      nrm.subVectors(pa, pc).cross(pb.sub(pc));
+      if (nrm.x * (sct.x - mid.x) >= 0) ix.push(ci, a, b);
+      else ix.push(ci, b, a);
     }
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.setIndex(idx);
+  g.setIndex(ix);
   g.computeVertexNormals();
-  return ensureOutward(g);
+  return g;
+}
+
+const WING_PIVOT_FL = new THREE.Vector3(2.55, 0.15, -0.1), WING_PIVOT_FR = new THREE.Vector3(2.55, 0.15, 0.1), WING_PIVOT_R = new THREE.Vector3(-2.4, 0.8, 0);
+const pivotTmp = new THREE.Vector3();
+/** Tilts a wing about its mount point (not the model origin, which would swing it metres away) and drops it by dy. */
+function bendAbout(obj, pivot, rx, rz, dy) {
+  obj.rotation.set(rx, 0, rz);
+  obj.position.copy(pivot).sub(pivotTmp.copy(pivot).applyEuler(obj.rotation));
+  obj.position.y += dy;
 }
 
 function ensureOutward(g) {
@@ -126,7 +146,7 @@ function livery(team, part) {
         if (part === 'cover' && az < 0.05) c.copy(acc);
         break;
       case 'chevron': {
-        const t = (x * 1.7 + az * 2.4) % 1;
+        const t0 = x * 1.7 + az * 2.4, t = t0 - Math.floor(t0);
         if ((part === 'side' || part === 'mono') && t > 0.88) c.copy(acc);
         if (part === 'nose' && x > 2.75) c.copy(acc);
         break;
@@ -397,7 +417,7 @@ export class CarView {
         o.receiveShadow = false;
       }
     });
-    for (const wd of this.wheelDefs) wd.glow.castShadow = false;
+    for (const wd of this.wheelDefs) { wd.glow.castShadow = false; wd.glow.userData.noShadow = true; }
     if (this.ghost) this.makeGhost();
     this.layoutWheels(1.962, 1.638, 1.6, 1.55, 3.6, 0);
     this.pitchSmooth = 0;
@@ -408,6 +428,7 @@ export class CarView {
     this.group.traverse((o) => {
       if (o.isMesh) {
         o.material = o.material.clone();
+        o.material.userData = {}; // a clone of a shared material is the ghost's own, so dispose() frees it
         o.material.transparent = true;
         o.material.opacity = 0.35;
         o.material.depthWrite = false;
@@ -458,17 +479,18 @@ export class CarView {
     const df = car.damageFront || 0, dr = car.damageRear || 0;
     this.frontWingR.visible = df < 0.85;
     this.frontWingL.visible = df < 0.97;
-    this.frontWingL.rotation.z = -df * 0.25;
-    this.frontWingL.rotation.x = df * 0.2;
-    this.frontWingL.position.y = -df * 0.04;
-    this.frontWingR.rotation.z = -df * 0.12;
-    this.frontWingR.rotation.x = -df * 0.3;
-    this.frontWingR.position.y = -df * 0.06;
+    if (df !== this._df) {
+      this._df = df;
+      bendAbout(this.frontWingL, WING_PIVOT_FL, df * 0.2, -df * 0.25, -df * 0.04);
+      bendAbout(this.frontWingR, WING_PIVOT_FR, -df * 0.3, -df * 0.12, -df * 0.06);
+    }
     this.rearWing.visible = dr < 0.92;
-    this.rearWing.rotation.z = dr * 0.12;
-    this.rearWing.rotation.x = dr * 0.12;
+    if (dr !== this._dr) {
+      this._dr = dr;
+      bendAbout(this.rearWing, WING_PIVOT_R, dr * 0.12, dr * 0.12, 0);
+    }
     // crumpled sidepods (left pod is the -Z side of the model)
-    const sd = [car.damageSideR || 0, car.damageSideL || 0];
+    const sd = [car.damageSideL || 0, car.damageSideR || 0];
     for (let k = 0; k < 2; k++) {
       const m = this.pods[k];
       if (m && Math.abs(sd[k] - m.userData.d) > 0.03) this.crumple(m, sd[k]);
@@ -486,7 +508,7 @@ export class CarView {
     };
     for (let i = 0; i < a.length; i += 3) {
       const x = base[i], y = base[i + 1], z = base[i + 2];
-      const outer = Math.max(0, (z * side - 0.18) / 0.2); // skin facing outwards
+      const outer = clamp((z * side - 0.18) / 0.2, 0, 1); // skin facing outwards
       const n = 0.4 + 0.6 * hash(Math.round(x * 4), Math.round(y * 8));
       const dent = d * outer * n * 0.17;
       a[i] = x + (hash(y * 9, x * 3) - 0.5) * d * 0.05 * outer;
@@ -502,7 +524,7 @@ export class CarView {
     if (this.shadowOn === on) return;
     this.shadowOn = on;
     this.group.traverse((o) => {
-      if (o.isMesh) o.castShadow = on;
+      if (o.isMesh && !o.userData.noShadow) o.castShadow = on;
     });
   }
 
