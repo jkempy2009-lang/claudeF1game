@@ -9,6 +9,7 @@ const suites = [
   ['safety car', 'tests/safetycar.mjs'],
   ['weather', 'tests/weather.mjs'],
   ['DRS rules', 'tests/drs.mjs'],
+  ['race rules and timing', 'tests/rules.mjs'],
   ['idle player ends session', 'tests/idle.mjs'],
   ['driving school', 'tests/school.mjs'],
   ['key rebinding model', 'tests/keys.mjs'],

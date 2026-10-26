@@ -69,6 +69,7 @@ export class Race {
     this.chequered = false;
     this.chequeredAt = null;
     this.stepCount = 0;
+    this.ghostStart = 0; // step at which the current lap's ghost recording began
     this.profileCache = new Map();
     this.pairContact = new Map();
     this.fastest = { time: Infinity, car: null, lap: 0 };
@@ -105,7 +106,7 @@ export class Race {
   makeCarSpec(team, compound, isPlayer) {
     const opt = this.opt;
     const rec = this.track.def.setup || { front: 5, rear: 5 };
-    const fuel = this.isQuali ? 14 : clamp(Math.min(this.totalLaps, 60) * (this.track.length / 1000) * FUEL_KG_PER_KM * 1.1 + 2, 6, 105);
+    const fuel = this.isQuali ? 14 : this.opt.mode === 'timetrial' ? 18 : clamp(Math.min(this.totalLaps, 60) * (this.track.length / 1000) * FUEL_KG_PER_KM * 1.1 + 2, 6, 105);
     // identical cars: every team runs the same machinery, only the drivers differ (career keeps the team pecking order)
     const rating = opt.equalCars ? 1 : team.rating;
     const grip = 0.985 + 0.015 * rating;
@@ -176,6 +177,7 @@ export class Race {
       if (!player && this.wet > 0.4) compound = 'wet';
       const spec = this.makeCarSpec(team, compound, player);
       const car = new Car(spec, track);
+      if (timeTrial) car.fuelRate = 0; // a time trial runs at one constant, light weight: lap times say nothing about the fuel load
       car.wearMult = opt.tyreWear;
       const slot = track.gridSlot(k);
       const pt = track.pointAt(slot.s, slot.d);
@@ -223,7 +225,7 @@ export class Race {
     for (const c of this.cars) c.wetness = this.wet;
     this.sorted = [...this.cars];
     // cars start at the grid slot but the line crossing counts laps from distance 0 at the start line
-    this.cars.forEach((c) => this.updateRank());
+    this.updateRank();
   }
 
   makeRaceState(car, slot) {
@@ -554,7 +556,7 @@ export class Race {
     const lapTime = tc - rs.lapStart;
     // last sector
     const s3 = tc - rs.sectorStart;
-    this.finishSector(car, 2, s3);
+    if (rs.laps >= 2) this.finishSector(car, 2, s3); // lap 1 starts from the grid: its sector splits are not meaningful
     rs.sectorStart = tc;
     rs.sectorIdx = 0;
     if (rs.laps >= 1) {
@@ -584,11 +586,14 @@ export class Race {
         this.fastest = { time: lapTime, car, lap: rs.laps };
         this.pushEvent({ type: 'fastest', car, time: lapTime });
       }
-      this.pushEvent({ type: 'lap', car, time: lapTime, lap: rs.laps, best: lapTime <= rs.best, valid });
+      this.pushEvent({ type: 'lap', car, time: lapTime, lap: rs.laps, best: valid && lapTime <= rs.best, valid });
       rs.invalidLap = false;
     }
     rs.lapStart = tc;
-    if (this.opt.mode === 'timetrial') this.ghostRec = [];
+    if (this.opt.mode === 'timetrial') {
+      this.ghostRec = [];
+      this.ghostStart = this.stepCount; // frames are 12 steps apart starting exactly at the line
+    }
     // finish?
     if (!rs.finished && (rs.laps >= this.totalLaps || this.chequered)) {
       rs.finished = true;
@@ -617,10 +622,14 @@ export class Race {
       });
       return;
     }
+    const Ltrack = this.track.length;
     list.sort((a, b) => {
       const ra = a.rs, rb = b.rs;
-      if (ra.finished !== rb.finished) return ra.finished ? -1 : 1;
+      // laps come first: a lapped car that has taken the flag is still behind the lead-lap cars that have not yet
+      const pa = ra.finished ? ra.laps : ra.maxDist / Ltrack, pb = rb.finished ? rb.laps : rb.maxDist / Ltrack;
+      if (Math.abs(pa - pb) > 1e-6) return pb - pa;
       if (ra.finished && rb.finished) return ra.finishTime - rb.finishTime;
+      if (ra.finished !== rb.finished) return ra.finished ? -1 : 1;
       return rb.maxDist - ra.maxDist;
     });
     const track = this.track;
@@ -852,11 +861,11 @@ export class Race {
     if (car === this.player && this.opt.assists.pitAuto && !rs.service) {
       if (!rs.pilot) {
         const box = tr.pitBox(car.info.teamIdx);
-        rs.pilot = new AIDriver({ car, track: tr, profile: this.getProfile(car.spec, 'pilot'), level: 1, seed: 99, boxS: box.s, boxD: box.d });
+        rs.pilot = new AIDriver({ car, track: tr, profile: this.getProfile(car.spec, 'pilot:' + car.compound.id), level: 1, seed: 99, boxS: box.s, boxD: box.d });
         rs.pilot.dp.pace = 0.9;
         rs.pilot.goTime = 0;
       }
-      rs.pilot.profile = this.getProfile(car.spec, 'pilot');
+      rs.pilot.profile = this.getProfile(car.spec, 'pilot:' + car.compound.id);
       rs.pilot.wantsPit = rs.pitRequested;
       if (rs.pilot.pitState === 'none') {
         const toEntry = mod(tr.pit.start - car.s, tr.length);
@@ -995,7 +1004,7 @@ export class Race {
     const out = [];
     for (const c of this.cars) {
       if (!c.driver || c.rs.finished || c.rs.inPitLane || c.rs.service || c.inGarage) continue;
-      const beside = Math.abs(c.d) > tr.wl[c.i] + 1.5 || Math.abs(c.d) > tr.wr[c.i] + 1.5;
+      const beside = c.d > tr.wl[c.i] + 1.5 || -c.d > tr.wr[c.i] + 1.5;
       if (c.speed < 3.5 && (c.driver.stuckT > 1.2 || (beside && c.speed < 1.5))) out.push(c);
     }
     return out;
@@ -1007,7 +1016,7 @@ export class Race {
     if (!this.opt.safetyCar || this.isQuali || this.opt.mode === 'timetrial' || this.phase !== 'racing') return;
     const t = this.time - this.t0;
     const dis = t > 20 ? this.disabledCars() : [];
-    const stalled = dis;
+    const stalled = dis; // cars that are stranded right now
     // yellow flag while any car is stranded (local hazard)
     const yel = stalled.length > 0 && sc.state === 'none';
     if (yel !== this.yellow) {
@@ -1138,7 +1147,7 @@ export class Race {
     this.sc.state = 'none';
     this.yellow = false;
     // mandatory stop penalty
-    if (this.opt.mandatoryStop && this.player) {
+    if (this.opt.mandatoryStop && this.player && this.opt.mode === 'race' && this.track.pit) {
       const rs = this.player.rs;
       if (rs.stops < 1 || new Set(rs.compounds).size < 2) this.addPenalty(this.player, 15, 'Mandatory stop / two compounds not completed');
     }
@@ -1212,13 +1221,13 @@ export class Race {
 
   /** Marshals put a car back on the racing line, pointing the right way, at walking pace. */
   resetToTrack(car, penalty = 0) {
+    if (car.rs.service) return; // a car in its pit box is not moved by the marshals
     const tr = this.track;
     const p = tr.pointAt(car.s, clamp(tr.lineAt(car.s) * 0.5, -tr.wr[car.i] + 3, tr.wl[car.i] - 3));
     car.reset(p.x, p.y, p.heading, 6);
     car.repair();
     car.rs.resets++;
     car.rs.lastS = car.s;
-    car.rs.dist = car.rs.maxDist;
     car.dirtyAir = 0;
     if (car.driver) {
       car.driver.offset = 0;
@@ -1232,7 +1241,7 @@ export class Race {
   // ---- ghost (time trial) -----------------------------------------------------------------------------
   recordGhost() {
     if (this.phase !== 'racing' || !this.player) return;
-    if (this.stepCount % 12 !== 0) return;
+    if ((this.stepCount - this.ghostStart) % 12 !== 0) return;
     const c = this.player;
     this.ghostRec.push(c.x, c.y, c.theta, c.steer);
   }
