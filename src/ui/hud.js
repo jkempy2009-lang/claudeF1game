@@ -1,4 +1,5 @@
 import { formatTime, clamp } from '../util/math.js';
+import { COMPOUNDS } from '../sim/carspec.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 
@@ -378,7 +379,8 @@ export class HUD {
     el.tyB.textContent = comp.letter;
     el.tyB.style.background = comp.color;
     el.tyN.textContent = comp.name;
-    el.tyW.textContent = `Wear ${Math.round(ts.wear * 100)}%`;
+    const adv = p.rs.advice;
+    el.tyW.textContent = `Wear ${Math.round(ts.wear * 100)}%` + (adv && !p.rs.pitRequested ? ` · box ${adv.thisLap ? 'now' : 'lap ' + adv.lap} (${COMPOUNDS[adv.compound].letter})` : '');
     el.tyT.textContent = `Temp ${Math.round(ts.temp)}°C`;
     el.tyF.textContent = `Fuel ${p.fuel.toFixed(1)} kg · ${['LEAN', 'STD', 'RICH'][p.fuelMode]} · ERS ${['HARV', 'BAL', 'ATK'][p.ersMode]} · BB ${Math.round(p.spec.brakeBias * 100)}`;
     const dm = p.damageSummary();

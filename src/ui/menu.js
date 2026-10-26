@@ -9,7 +9,7 @@ import { CHAMP_CAL, sanitizeCareer, UPGRADE_KEYS, UPGRADE_INFO, UPGRADE_MAX, upg
 
 export const SAVE_KEY = 'apex-grand-prix.v1';
 
-export const DEFAULT_SETTINGS = { quality: 'high', volume: 0.55, units: 'kmh', line: true, minimap: true, shake: true, camera: 'chase', tower: true, blur: true, steerSpeed: 1, padDead: 0.07, rumble: true, autoQuality: true };
+export const DEFAULT_SETTINGS = { quality: 'high', volume: 0.55, units: 'kmh', line: true, minimap: true, shake: true, camera: 'chase', tower: true, blur: true, steerSpeed: 1, padDead: 0.07, rumble: true, autoQuality: true, cbSafe: false, calm: false, bigHud: false };
 export const DEFAULT_CONFIG = {
   mode: 'race',
   trackId: 'northfield',
@@ -23,6 +23,7 @@ export const DEFAULT_CONFIG = {
   damage: true,
   collisions: true,
   mandatoryStop: false,
+  pitCalls: 'radio',
   adaptive: false,
   qualify: false,
   equalCars: true,
@@ -66,6 +67,7 @@ export function sanitizeConfig(raw) {
     damage: bool(r.damage, D.damage),
     collisions: bool(r.collisions, D.collisions),
     mandatoryStop: bool(r.mandatoryStop, D.mandatoryStop),
+    pitCalls: ['off', 'radio', 'auto'].includes(r.pitCalls) ? r.pitCalls : D.pitCalls,
     adaptive: bool(r.adaptive, D.adaptive),
     qualify: bool(r.qualify, D.qualify),
     equalCars: bool(r.equalCars, D.equalCars),
@@ -103,6 +105,9 @@ export function sanitizeSettings(raw) {
     padDead: num(r.padDead, 0, 0.3, D.padDead),
     rumble: bool(r.rumble, D.rumble),
     autoQuality: bool(r.autoQuality, D.autoQuality),
+    cbSafe: bool(r.cbSafe, D.cbSafe),
+    calm: bool(r.calm, D.calm),
+    bigHud: bool(r.bigHud, D.bigHud),
   };
 }
 
@@ -351,6 +356,7 @@ export class Menu {
         ${timetrial ? '' : this.toggle('equalCars', 'Identical cars', 'Every team has exactly your car; only the drivers differ (off: stronger teams have faster cars)', c.equalCars)}
         ${timetrial ? '' : this.toggle('qualify', 'Qualifying session first', '3 minutes, all 20 cars: your best lap sets your grid slot (overrides the start position)', c.qualify)}
         ${timetrial ? '' : this.toggle('mandatoryStop', 'Mandatory pit stop', 'Use two compounds or take +15 s', c.mandatoryStop)}
+        ${timetrial ? '' : `<div class="field"><label>Pit wall</label>${this.chips('pitCalls', [{ value: 'off', label: 'Silent' }, { value: 'radio', label: 'Radio advice' }, { value: 'auto', label: 'Calls you in' }], c.pitCalls)}<div class="hint">Advice reads your real tyre wear and tells you when to box and what to fit; Calls you in presses the pit button for you (B cancels).</div></div>`}
         ${timetrial ? '' : this.toggle('adaptive', 'Adaptive AI pace', 'Cars far ahead ease off, cars far behind push (±3-5%)', c.adaptive)}
       </div></div>`;
   }
@@ -428,6 +434,9 @@ export class Menu {
         ${this.toggle('s.line', 'Racing line guide', 'Green: keep going. Yellow: ease off. Red: brake now (key L)', s.line !== false)}
         ${this.toggle('s.shake', 'Camera shake', 'Kerbs, speed, engine rumble and impacts', s.shake)}
         ${this.toggle('s.blur', 'Motion blur', 'Radial speed blur that builds up fast at high speed (not on Low quality)', s.blur !== false)}
+        ${this.toggle('s.cbSafe', 'Colour-blind-safe guide', 'Racing line in blue / yellow / magenta instead of green / yellow / red', s.cbSafe)}
+        ${this.toggle('s.calm', 'Reduce motion', 'No motion blur, camera shake or flashing lights', s.calm)}
+        ${this.toggle('s.bigHud', 'Larger HUD', 'Scales the race HUD up by a fifth', s.bigHud)}
         ${this.toggle('s.minimap', 'Show minimap', '', s.minimap)}
         ${this.toggle('s.tower', 'Show timing tower', '', s.tower)}
       </div><div class="panel"><h3>Audio &amp; units</h3>
@@ -634,6 +643,7 @@ export class Menu {
       else if (k === 'compound') c.compound = v;
       else if (k === 'weather') { c.weather = v; if ((v === 'light' || v === 'heavy') && !COMPOUNDS[c.compound].wetTyre) c.compound = 'wet'; else if ((v === 'dry' || v === 'changing') && COMPOUNDS[c.compound].wetTyre) c.compound = 'medium'; }
       else if (k === 'timeOfDay') c.timeOfDay = v;
+      else if (k === 'pitCalls') c.pitCalls = ['off', 'radio', 'auto'].includes(v) ? v : 'radio';
       else if (k === 'tyreWear') c.tyreWear = +v;
       else if (k === 'tc') c.assists.tc = +v;
       else if (k === 'stability') c.assists.stability = +v;

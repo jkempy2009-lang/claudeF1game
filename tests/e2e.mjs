@@ -50,6 +50,11 @@ for (const [name, bad] of [
   await page.click('[data-act=settings]');
   await page.waitForSelector('[data-toggle]');
   await page.click('[data-toggle="s.shake"]');
+  await page.click('[data-toggle="s.calm"]');
+  await page.click('[data-toggle="s.bigHud"]');
+  step('accessibility toggles apply', await page.evaluate(() => document.body.classList.contains('calm') && document.body.classList.contains('bighud') && window.apex.save.settings.calm === true));
+  await page.click('[data-toggle="s.calm"]');
+  await page.click('[data-toggle="s.bigHud"]');
   await page.keyboard.press('Escape');
   await page.waitForSelector('[data-act=quick]');
   step('settings round trip', true);
@@ -57,6 +62,11 @@ for (const [name, bad] of [
   for (const tab of ['circuit', 'race', 'car', 'assists']) {
     await page.click(`[data-tab=${tab}]`);
     await page.waitForTimeout(150);
+    if (tab === 'race') {
+      await page.click('[data-chip=pitCalls][data-value=auto]');
+      step('pit wall option selectable', (await page.evaluate(() => window.apex.menu.config.pitCalls)) === 'auto');
+      await page.click('[data-chip=pitCalls][data-value=radio]');
+    }
   }
   step('setup tabs', true);
   await page.click('[data-tab=circuit]');

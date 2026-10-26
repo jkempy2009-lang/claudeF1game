@@ -36,6 +36,7 @@ export const DEFAULT_OPTIONS = {
   damage: true,
   tyreWear: 3, // multiplier on wear rate
   mandatoryStop: false,
+  pitCalls: 'radio', // pit wall: 'off' | 'radio' (advice) | 'auto' (calls you in)
   compound: 'medium',
   setup: { frontWing: null, rearWing: null, brakeBias: 0.58 },
   assists: { abs: true, tc: 2, steer: 1, stability: 1, autoGear: true, pitAuto: true, pitGame: true },
@@ -754,6 +755,20 @@ export class Race {
         this.pushEvent({ type: 'damageBox', car });
       }
       if (sv < 0.1) rs.damageBoxed = false;
+      // pit-wall strategy: radio the plan, or in 'auto' mode put the call in for the player
+      if (this.opt.pitCalls !== 'off' && !rs.pitRequested && !rs.service && !rs.damageBoxed) {
+        rs.adviceT = (rs.adviceT || 0) + dt;
+        if (rs.adviceT > 1) {
+          rs.adviceT = 0;
+          const adv = this.strategyAdvice(car);
+          rs.advice = adv;
+          if (adv && adv.thisLap && rs.calledLap !== adv.lap && car.s / tr.length > 0.12 && car.s / tr.length < 0.9) {
+            rs.calledLap = adv.lap;
+            this.pushEvent({ type: 'pitCall', car, advice: adv, auto: this.opt.pitCalls === 'auto' });
+            if (this.opt.pitCalls === 'auto') { rs.pitRequested = true; if (!rs.nextCompound) rs.nextCompound = adv.compound; }
+          }
+        }
+      }
     }
     // player: stopped in the box?
     if (rs.boxLatch && car.speed > 3) rs.boxLatch = false;
@@ -844,6 +859,51 @@ export class Race {
   }
 
   // ---- weather -----------------------------------------------------------------------------------------------
+  /**
+   * Pit-wall advice for a car from the wear it has actually shown: the lap to box on and the tyre to fit.
+   * Returns null when there is nothing to say (no pit lane, no data yet, or the tyres will last to the flag).
+   */
+  strategyAdvice(car) {
+    const rs = car.rs, tr = this.track;
+    if (!tr.pit || this.opt.mode !== 'race' || this.phase !== 'racing' || rs.finished) return null;
+    const total = this.totalLaps;
+    const lastStop = rs.stopLaps.length ? rs.stopLaps[rs.stopLaps.length - 1] : 0;
+    const done = rs.laps - lastStop;
+    const frac = clamp(car.s / tr.length, 0, 1);
+    const lapsOn = done + (done >= 1 ? 0 : frac);
+    const left = total - rs.laps;
+    if (left < 2) return null;
+    const wearNow = car.tyreSummary().wear;
+    const wet = this.wet;
+    let reason = 'wear', want = false;
+    // weather beats everything
+    let compound = null;
+    if (wet > 0.35 && !car.compound.wetTyre) { want = true; reason = 'wet'; compound = 'wet'; }
+    else if (wet < 0.14 && this.rain < 0.05 && car.compound.wetTyre) { want = true; reason = 'dry'; compound = DRY_COMPOUND_IDS[1]; }
+    const rate = lapsOn >= 0.6 ? wearNow / lapsOn : 0; // wear per lap measured so far
+    let boxIn = Infinity; // laps from now (0 = this lap)
+    if (rate > 0.004 && !car.compound.wetTyre) {
+      boxIn = Math.max(0, Math.floor((0.7 - wearNow) / rate - 0.15));
+    }
+    const finishWear = wearNow + rate * left;
+    const mandatoryOpen = this.opt.mandatoryStop && rs.stops === 0 && !car.compound.wetTyre;
+    if (mandatoryOpen) {
+      // the stop has to happen before the last lap or two
+      boxIn = Math.min(boxIn, Math.max(0, left - 3));
+      reason = boxIn === Math.max(0, left - 3) && finishWear < 0.85 ? 'rules' : reason;
+    } else if ((finishWear < 0.88 || left < 3) && !want) return null;
+    if (!want && boxIn === Infinity) return null;
+    if (!want && boxIn > 0 && boxIn > left - 2) return null;
+    if (!compound) {
+      const remaining = Math.max(1, left - boxIn);
+      const order = remaining <= 5 ? ['soft', 'medium', 'hard'] : remaining <= 10 ? ['medium', 'hard', 'soft'] : ['hard', 'medium', 'soft'];
+      const must = mandatoryOpen ? order.filter((c) => c !== car.compound.id) : order;
+      compound = (must.length ? must : order)[0];
+    }
+    const thisLap = want || boxIn === 0;
+    return { lap: rs.laps + 1 + (thisLap ? 0 : boxIn), thisLap, nextLap: !thisLap && boxIn === 1, compound, reason };
+  }
+
   setupWeather() {
     const w = this.opt.weather;
     this.wx = [];

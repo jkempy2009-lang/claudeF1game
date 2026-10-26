@@ -4,6 +4,34 @@ import { clamp } from '../util/math.js';
 const AHEAD = 150; // samples (~300 m)
 const HALF = 1.0; // half width of the ribbon in metres
 
+/** green -> yellow -> red by how hard the braking demand is (0..1+) */
+function classicColour(r) {
+  if (r < 0.35) return [0.15, 0.95, 0.3];
+  if (r < 0.65) {
+    const t = (r - 0.35) / 0.3;
+    return [0.15 + 0.85 * t, 0.95 - 0.1 * t, 0.3 - 0.2 * t];
+  }
+  if (r < 0.95) {
+    const t = (r - 0.65) / 0.3;
+    return [1, 0.85 - 0.72 * t, 0.1];
+  }
+  return [1, 0.13, 0.1];
+}
+
+/** Colour-blind-safe version: blue -> yellow -> magenta (separable for red-green and blue-yellow deficiencies alike by lightness too) */
+function cbColour(r) {
+  if (r < 0.35) return [0.1, 0.5, 1];
+  if (r < 0.65) {
+    const t = (r - 0.35) / 0.3;
+    return [0.1 + 0.9 * t, 0.5 + 0.4 * t, 1 - 0.9 * t];
+  }
+  if (r < 0.95) {
+    const t = (r - 0.65) / 0.3;
+    return [1, 0.9 - 0.8 * t, 0.1 + 0.8 * t];
+  }
+  return [1, 0.1, 0.9];
+}
+
 /**
  * Racing-line guide painted on the road ahead of the car. Each point is coloured by how hard you would have to brake,
  * from where you are now, to be at that point's target speed: green = keep going, yellow = lift / start braking,
@@ -32,6 +60,7 @@ export class Guideline {
     this.mesh.renderOrder = 4;
     this.smooth = new Float32Array(n);
     this.margin = 0.96;
+    this.cbSafe = false;
   }
 
   setVisible(v) {
@@ -69,18 +98,7 @@ export class Guideline {
       pos[k * 6 + 5] = -(tr.y[i] + tr.ny[i] * (c + HALF));
       // light smoothing across neighbours so the colours don't flicker
       const r = (need[k] * 2 + need[Math.max(0, k - 1)] + need[Math.min(AHEAD - 1, k + 1)]) / 4;
-      let R, G, B;
-      if (r < 0.35) {
-        R = 0.15; G = 0.95; B = 0.3; // green
-      } else if (r < 0.65) {
-        const t = (r - 0.35) / 0.3;
-        R = 0.15 + 0.85 * t; G = 0.95 - 0.1 * t; B = 0.3 - 0.2 * t; // green -> yellow
-      } else if (r < 0.95) {
-        const t = (r - 0.65) / 0.3;
-        R = 1; G = 0.85 - 0.72 * t; B = 0.1; // yellow -> red
-      } else {
-        R = 1; G = 0.13; B = 0.1;
-      }
+      const [R, G, B] = this.cbSafe ? cbColour(r) : classicColour(r);
       const fade = clamp(1 - k / AHEAD, 0, 1);
       const a = 0.92 * Math.min(1, fade * 1.7) * (k < 3 ? k / 3 : 1);
       for (let q = 0; q < 2; q++) {

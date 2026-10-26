@@ -30,6 +30,7 @@ Everything below was added or fixed in this release, grouped by area.
 - In-race tuning keys: **X** ERS mode (harvest / balanced / attack), **Z** fuel mix (lean / standard / rich), **[ ]** live brake bias.
 - **Pit-entry fixes (changeable weather)**: cars now slow to the pit limit *before* the entry ramp starts turning (they used to brake and steer at the same time and spin on the ramp), call the pits for wet tyres as soon as rain arrives rather than once the track is soaked, abandon a missed entry and try again next lap, and a car wedged in the pit lane is recovered by the marshals like any other. A changeable-weather race went from about 80 marshal recoveries to about 20; the whole field finishes.
 - Safety car: a car heading for the pits now obeys the pace-car speed cap until it reaches the pit lane.
+- **Pit-wall strategy**: the race setup has a Pit wall option (Silent / Radio advice / Calls you in). The engineers read your actual tyre wear, project it to the flag, and call the lap to box on and the tyre to fit (wets when the track is soaked, slicks when it dries, the mandatory stop before the last laps). The tyre panel shows the box lap, and in the last two laps nothing is called unless the weather demands it. `tests/strategy.mjs` covers it.
 - Track-limit and pit rules unchanged from 1.1; the fast-forward to results is now about 20 times faster.
 
 ### Presentation
@@ -42,6 +43,7 @@ Everything below was added or fixed in this release, grouped by area.
 - Audio: exhaust pops and crackles on lift-off, downshift burbles, rain on the bodywork and water spray scaled by speed.
 
 ### Controls and settings
+- **Accessibility**: colour-blind-safe racing line (blue / yellow / magenta), Reduce motion (no blur, shake, strobing tail light or UI animation) and a Larger HUD (x1.2).
 - Gamepad vibration (kerbs, grass, tyre slip, impacts), keyboard steering speed, stick deadzone, automatic quality (lowers resolution, then shadows and blur, if the frame rate stays under 40 fps), motion-blur toggle.
 - The main menu no longer overlaps on short windows (scrolls and compacts), Escape in the pause-menu settings returns to the pause menu.
 

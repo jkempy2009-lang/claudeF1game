@@ -319,3 +319,7 @@ table.results .tc { display: inline-block; width: 4px; height: 1em; vertical-ali
 .ach span { font-size: 0.78rem; color: var(--dim); }
 .ach.got { opacity: 1; border-color: #ffd24a; background: rgba(255,210,74,0.08); }
 .ach.got b::before { content: "★ "; color: #ffd24a; }
+
+/* accessibility */
+body.bighud #hud { zoom: 1.2; }
+body.calm *, body.calm *::before, body.calm *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }

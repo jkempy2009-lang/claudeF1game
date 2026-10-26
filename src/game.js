@@ -7,7 +7,7 @@ import { Race, DT, DIFFICULTIES } from './sim/race.js';
 import { TEAMS } from './sim/teams.js';
 import { COMPOUNDS } from './sim/carspec.js';
 import { World } from './render/world.js';
-import { CarView } from './render/carmodel.js';
+import { CarView, VIEW_OPTS } from './render/carmodel.js';
 import { PitCrew } from './render/crew.js';
 import { Guideline } from './render/guideline.js';
 import { PostFX } from './render/postfx.js';
@@ -201,7 +201,11 @@ class Game {
     const tw = this.hud.el.tower;
     tw.style.visibility = this.save.settings.tower ? '' : 'hidden';
     this.resize();
-    if (this.session && this.session.camRig) this.session.camRig.shakeOn = this.save.settings.shake;
+    if (this.session && this.session.camRig) this.session.camRig.shakeOn = this.save.settings.shake && !this.save.settings.calm;
+    if (this.session && this.session.guide) this.session.guide.cbSafe = !!this.save.settings.cbSafe;
+    VIEW_OPTS.calm = !!this.save.settings.calm;
+    document.body.classList.toggle('calm', !!this.save.settings.calm);
+    document.body.classList.toggle('bighud', !!this.save.settings.bigHud);
   }
 
   async boot() {
@@ -454,6 +458,7 @@ class Game {
       damage: cfg.damage,
       tyreWear: cfg.tyreWear,
       mandatoryStop: cfg.mandatoryStop,
+      pitCalls: cfg.pitCalls,
       compound: cfg.compound,
       setup: { frontWing: cfg.frontWing, rearWing: cfg.rearWing, brakeBias: cfg.brakeBias },
       assists: { ...cfg.assists, stability: cfg.assists.stability, tc: cfg.assists.tc, steer: cfg.assists.steer },
@@ -511,7 +516,8 @@ class Game {
     const camera = this.camera;
     const camRig = new CameraRig(camera);
     camRig.setMode(this.save.settings.camera || 'chase');
-    camRig.shakeOn = this.save.settings.shake;
+    camRig.shakeOn = this.save.settings.shake && !this.save.settings.calm;
+    guide.cbSafe = !!this.save.settings.cbSafe;
     let ghostView = null;
     if (cfg.mode === 'timetrial') {
       const g = this.save.ghosts[track.id];
@@ -735,7 +741,7 @@ class Game {
   /** Motion blur strength 0..1: grows exponentially with speed, a little more with DRS / ERS boost. */
   speedBlur(s) {
     const set = this.save.settings;
-    if (!set.blur || set.quality === 'low' || s.camRig.mode === 'tv' || s.paused) return 0;
+    if (!set.blur || set.calm || set.quality === 'low' || s.camRig.mode === 'tv' || s.paused) return 0;
     const p = s.player;
     const x = clamp((p.speed * 3.6 - 140) / 200, 0, 1);
     let k = (Math.exp(3 * x) - 1) / (Math.exp(3) - 1);
@@ -1002,6 +1008,14 @@ class Game {
             s._pgTip = true;
             hud.radio('Pit stop: press Space as each marker enters the green. Perfect timing on all four wheels is a 2.5 second stop.', 7);
           } else if (e.car === player) hud.radio('Box, box — hold position, tyres going on.', 3);
+          break;
+        case 'pitCall':
+          if (e.car === player) {
+            const nm = COMPOUNDS[e.advice.compound].name.toUpperCase();
+            const why = { wet: 'The track is wet', dry: 'The track is dry', rules: 'We need the mandatory stop', wear: 'The tyres are going' }[e.advice.reason] || 'Strategy';
+            hud.radio(e.auto ? `${why}. Box, box: ${nm} tyres. (B cancels)` : `${why}. Box this lap for ${nm}: press B (T changes the tyre).`, 7);
+            this.audio.ui('good');
+          }
           break;
         case 'mode':
           if (e.car === player) {

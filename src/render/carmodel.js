@@ -155,6 +155,9 @@ function sharedMaterials() {
   return shared;
 }
 
+/** Shared render switches (set from the settings): calm = no strobing lamps. */
+export const VIEW_OPTS = { calm: false };
+
 export class CarView {
   /**
    * @param {object} team  from teams.js
@@ -428,7 +431,7 @@ export class CarView {
     const br = car.brake > 0.08;
     // brake light; while the hybrid system harvests the lamp strobes amber/red
     this.harvT = (this.harvT || 0) + dt;
-    const strobe = car.harvesting && !br ? (Math.floor(this.harvT * 9) % 2 ? 0xffa010 : 0xff2010) : null;
+    const strobe = car.harvesting && !br && !VIEW_OPTS.calm ? (Math.floor(this.harvT * 9) % 2 ? 0xffa010 : 0xff2010) : null;
     this.brakeLight.material.color.setHex(strobe ?? (br ? 0xff1010 : car.harvesting ? 0xff6a10 : 0x400000));
     const df = car.damageFront || 0, dr = car.damageRear || 0;
     this.frontWingR.visible = df < 0.85;
