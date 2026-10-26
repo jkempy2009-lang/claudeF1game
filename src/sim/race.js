@@ -1224,8 +1224,7 @@ export class Race {
     if (car.rs.service) return; // a car in its pit box is not moved by the marshals
     const tr = this.track;
     const p = tr.pointAt(car.s, clamp(tr.lineAt(car.s) * 0.5, -tr.wr[car.i] + 3, tr.wl[car.i] - 3));
-    car.reset(p.x, p.y, p.heading, 6);
-    car.repair();
+    car.reset(p.x, p.y, p.heading, 6); // the marshals put the car back; damage stays until the pit crew repairs it
     car.rs.resets++;
     car.rs.lastS = car.s;
     car.dirtyAir = 0;

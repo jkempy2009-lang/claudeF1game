@@ -4,7 +4,11 @@ import { AIR_DENSITY, SURFACE, engineTorque, wetGripFactor } from './carspec.js'
 
 export const FL = 0, FR = 1, RL = 2, RR = 3;
 const AMBIENT = 30;
-const BRAKE_HEAT_CAP = 720; // J/K per corner (disc, pads and calipers)
+const BRAKE_HEAT_CAP = 720;
+const FUEL_MODE_TORQUE = [0.97, 1, 1.025];
+const FUEL_MODE_BURN = [0.85, 1, 1.2];
+const ERS_DEPLOY = [0.1, 0.3, 0.6];
+const ERS_HARVEST = [1.6, 1, 0.7]; // J/K per corner (disc, pads and calipers)
 const TYRE_HEAT_CAP = 3500; // J/K, lumped surface+carcass
 export const TUNE = { heat: 0.1, coolBase: 0.0011, coolSpeed: 0.00007 };
 /** Joules of tyre slip energy per tyre per "reference lap" - calibrated so wearLaps reads as real laps at pace 1.0. */
@@ -72,6 +76,11 @@ export class Car {
     this.u = speed;
     this.v = 0;
     this.r = 0;
+    // nothing from the moments before the reset (slip, smoke, traction-control readings) carries over
+    if (this.kappa) this.kappa.fill(0);
+    if (this.slipVis) this.slipVis.fill(0);
+    if (this.alpha) this.alpha.fill(0);
+    this.harvesting = false;
     this.steer = 0;
     this.gear = 1;
     this.rpm = this.spec.idleRpm;
@@ -232,7 +241,14 @@ export class Car {
       // never ask for more front slip than the tyres can use: delta ~ L*ay/V^2 + alpha_peak
       let ayLim = 0;
       for (let w = 0; w < 4; w++) ayLim += (sp.mu0 - sp.loadSens * (fz[w] - sp.fz0)) * fz[w];
-      ayLim = (ayLim * sp.compound.mu * 0.97) / m;
+      // the grip the tyres really have: surface water, temperature and wear
+      let gf = 0;
+      for (let w = 0; w < 4; w++) {
+        const c = sp.compound;
+        const tf = clamp(1 - 0.2 * ((this.temp[w] - c.tOpt) / c.tRange) ** 2, 0.7, 1.02);
+        gf += (tf * (1 - 0.06 * this.wear[w] - 0.2 * smoothstep(0.62, 1.0, this.wear[w]))) / 4;
+      }
+      ayLim = (ayLim * sp.compound.mu * 0.97 * (0.5 + 0.5 * gf * wetGripFactor(sp.compound, this.wetness || 0))) / m; // half weight: the assist should ease the lock, not strangle it
       const dGrip = (L * ayLim) / Math.max(V * V, 1) + sp.alphaPeak * 0.95;
       lim = Math.min(maxSteer, dGrip);
     }
@@ -255,7 +271,7 @@ export class Car {
     else if (this.gear < 0) ratio = -8.5;
     const rpmWheel = Math.abs(omegaRear) * Math.abs(ratio) * (30 / Math.PI);
     let rpm = rpmWheel;
-    const launching = Math.abs(ratio) > 12 && speed < 14;
+    const launching = this.gear === 1 && speed < 14;
     if (launching) rpm = Math.max(rpm, sp.idleRpm + (8200 - sp.idleRpm) * Math.max(thr, 0.2));
     rpm = Math.max(rpm, sp.idleRpm);
     this.rpm = lerp(this.rpm, rpm, 1 - Math.exp(-dt * 40));
@@ -297,9 +313,9 @@ export class Car {
     const ersAvail = this.soc > 0.01;
     const boost = !!inp.boost && ersAvail;
     let ersP = 0;
-    if (ersAvail && thr > 0.5 && this.gear > 0) ersP = (boost ? 1 : [0.1, 0.3, 0.6][this.ersMode]) * sp.ersPower;
+    if (ersAvail && thr > 0.5 && this.gear > 0 && !inp.hold) ersP = (boost ? 1 : ERS_DEPLOY[this.ersMode]) * sp.ersPower;
     if (Math.abs(ratio) > 0) {
-      const tPos = engineTorque(this.rpm) * sp.powerScale * thr * [0.97, 1, 1.025][this.fuelMode];
+      const tPos = engineTorque(this.rpm) * sp.powerScale * thr * FUEL_MODE_TORQUE[this.fuelMode];
       const ersT = (ersP * sp.powerScale * thr) / Math.max((this.rpm * Math.PI) / 30, 300);
       const tBrake = (30 + 0.0075 * this.rpm) * (1 - thr);
       Te = tPos + ersT - tBrake;
@@ -491,11 +507,11 @@ export class Car {
     // ---------------------------------------------------------------- energy / fuel / ERS
     // fuel is burnt per distance driven (about 0.2 kg/km at full race pace) plus a small idle flow: a slow driver or a car waiting
     // for the marshals uses no more than a quick one, so the tank loaded for the race distance always lasts
-    const burn = (0.0015 + 0.0002 * Math.abs(this.u) * (0.5 + 0.75 * thr)) * (this.fuelRate ?? 1) * [0.85, 1, 1.2][this.fuelMode];
+    const burn = (0.0015 + 0.0002 * Math.abs(this.u) * (0.5 + 0.75 * thr)) * (this.fuelRate ?? 1) * FUEL_MODE_BURN[this.fuelMode];
     this.fuel = Math.max(0, this.fuel - burn * dt);
     let harvest = 0;
-    const hMul = [1.6, 1, 0.7][this.ersMode];
-    if (brk > 0.05 && this.gear > 0) harvest = sp.ersPower * Math.min(1, brk * 1.2) * hMul;
+    const hMul = ERS_HARVEST[this.ersMode];
+    if (brk > 0.05 && this.gear > 0) harvest = sp.ersPower * Math.min(1, brk * 1.2) * hMul * clamp(speed / 20, 0, 1); // the K recovers brake power: none at a standstill
     else if (thr < 0.05 && speed > 10) harvest = sp.ersPower * 0.25 * hMul;
     this.soc = clamp(this.soc + ((harvest - ersP) * dt) / sp.ersCapacity, 0, 1);
     this.harvesting = harvest > 0.2 * sp.ersPower && this.soc < 0.999;
@@ -558,9 +574,8 @@ export class Car {
     return { fw: dF, rw: dR, floor: dFl, sideL: sL, sideR: sR, aeroLoss: 1 - now / full, worst, severity: Math.max(dF * 0.9, sL * 0.7, sR * 0.7, dR * 0.6, dFl * 0.7) };
   }
 
+  /** Bodywork repaired in the pit box; a new set of tyres (fitTyres) is what clears punctures and flat spots. */
   repair() {
     this.damageFront = this.damageRear = this.damageFloor = this.damageSideL = this.damageSideR = 0;
-    this.puncture.fill(0);
-    this.flat.fill(0);
   }
 }
