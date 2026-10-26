@@ -1,6 +1,6 @@
 # Apex Grand Prix
 
-A 3D Formula-style racing game that runs in the browser. Twenty cars, ten original circuits, a physics model built from first principles (not a canned arcade handling model), and an AI field with adjustable difficulty.
+A 3D Formula-style racing game that runs in the browser. Twenty cars, twelve original circuits, a physics model built from first principles (not a canned arcade handling model), and an AI field with adjustable difficulty.
 
 **Play:** open `dist/apex-grand-prix.html` (single self-contained file), or serve `docs/` with any static server (GitHub Pages works: set the source to the `docs` folder).
 
@@ -32,6 +32,8 @@ npm run test:leak    # browser: GPU resources across repeated sessions
 | Parc Lumière | 3.8 km | Tight city-park ribbon between barriers |
 | Porto Vecchio Harbour Circuit | 4.3 km | Waterfront blast then tight docks, street walls |
 | Sakura Ridge Circuit | 5.5 km | Wooded ridge, flowing esses, 36 m of elevation change |
+| Circuit de la Bastide | 3.6 km | Medieval harbour town: short, tight, walls on both sides, high downforce |
+| Caldera Speedway | 5.2 km | Fast open bowl around a dormant volcano, long sweepers, 34 m of elevation change |
 
 **Racing** – standing start with lights, 10 fictional teams x 2 drivers, live timing tower with real time gaps, sector timing (purple/green), best-lap delta, DRS (detection line + <1 s rule, painted lines and signs), ERS deploy/harvest with a boost button and three ERS modes, fuel mix, live brake bias, slipstream and dirty air, damage (wings, bendable and crumpling sidepods, floor, punctures), tyre compounds (including **Wet**) with a temperature window, wear and lock-up flat spots, mandatory-stop option, pit lane with speed limiter and an **interactive pit stop** (time your presses on the four wheel nuts: 2.5 s if perfect), track-limits warnings, collision penalties, pit speeding penalties, **safety car**, marshal recovery, fast-forward to the final classification.
 
@@ -45,16 +47,18 @@ Reference clean-lap pace of the best car at each level (medium tyres; `node tool
 
 | | Rookie | Amateur | Pro | Elite | Legend |
 |---|---|---|---|---|---|
-| Autodromo del Vettore | 1:22.037 | 1:16.883 | 1:12.925 | 1:09.950 | 1:08.550 |
-| Circuit de la Rade | 1:20.529 | 1:15.183 | 1:10.825 | 1:07.508 | 1:05.375 |
-| Northfield Grand Prix Circuit | 1:39.150 | 1:32.792 | 1:27.954 | 1:24.362 | 1:22.675 |
-| Circuit des Hautes-Fagnes | 1:33.642 | 1:27.850 | 1:23.042 | 1:19.537 | 1:18.050 |
-| Autódromo Costa Azul | 1:37.912 | 1:31.283 | 1:26.204 | 1:22.462 | 1:20.704 |
-| Monte Aurora Ring | 1:23.492 | 1:17.517 | 1:13.062 | 1:09.767 | 1:08.179 |
-| Mirage International Circuit | 1:39.417 | 1:32.554 | 1:27.458 | 1:23.692 | 1:22.029 |
-| Parc Lumière | 1:42.054 | 1:34.533 | 1:28.792 | 1:24.587 | 1:21.933 |
-| Porto Vecchio Harbour Circuit | 1:41.458 | 1:34.083 | 1:28.767 | 1:24.654 | 1:22.192 |
-| Sakura Ridge Circuit | 2:01.896 | 1:53.362 | 1:47.183 | 1:42.671 | 1:40.562 |
+| Autodromo del Vettore | 1:22.125 | 1:16.887 | 1:12.933 | 1:09.942 | 1:08.558 |
+| Circuit de la Rade | 1:20.525 | 1:15.154 | 1:10.825 | 1:07.533 | 1:05.533 |
+| Northfield Grand Prix Circuit | 1:39.229 | 1:32.792 | 1:27.950 | 1:24.354 | 1:22.679 |
+| Circuit des Hautes-Fagnes | 1:33.771 | 1:27.850 | 1:23.050 | 1:19.575 | 1:18.121 |
+| Autódromo Costa Azul | 1:37.921 | 1:31.287 | 1:26.196 | 1:22.525 | 1:20.783 |
+| Monte Aurora Ring | 1:23.471 | 1:17.512 | 1:13.067 | 1:09.871 | 1:08.287 |
+| Mirage International Circuit | 1:39.533 | 1:32.546 | 1:27.479 | 1:23.817 | 1:22.183 |
+| Parc Lumière | 1:42.112 | 1:34.571 | 1:28.792 | 1:24.746 | 1:22.446 |
+| Porto Vecchio Harbour Circuit | 1:41.471 | 1:34.104 | 1:28.767 | 1:24.858 | 1:22.529 |
+| Sakura Ridge Circuit | 2:01.779 | 1:53.392 | 1:47.600 | 1:43.279 | 1:41.096 |
+| Circuit de la Bastide | 1:29.575 | 1:23.462 | 1:19.046 | 1:15.975 | 1:14.296 |
+| Caldera Speedway | 1:27.937 | 1:22.158 | 1:17.883 | 1:14.712 | 1:13.508 |
 
 **After the flag** – a finish scene with a Victory / Podium / Points banner, then the classification with **telemetry charts** (lap time, fuel, tyre wear, top speed against the winner), a 30-second **instant replay** from trackside cameras, and **photo mode** with PNG capture.
 
