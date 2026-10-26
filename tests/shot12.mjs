@@ -16,7 +16,7 @@ await page.waitForTimeout(4000);
 await page.click('[data-act=quick]');
 await page.waitForSelector('#hud:not(.hidden)', { timeout: 180000 });
 await page.waitForTimeout(500);
-await page.evaluate(() => { const a = window.apex; a.session.introCancelled = true; a.debugSkip(14); });
+await page.evaluate((k) => { const a = window.apex; a.session.introCancelled = true; a.debugSkip(k); }, +(process.env.SKIP || 14));
 await page.waitForTimeout(3000);
 await page.screenshot({ path: `${out}/night-chase.png`, timeout: 180000 });
 await page.evaluate(() => { window.apex.session.camRig.setMode('heli'); });

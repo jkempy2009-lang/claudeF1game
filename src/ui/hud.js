@@ -381,7 +381,8 @@ export class HUD {
     el.tyN.textContent = comp.name;
     const adv = p.rs.advice;
     el.tyW.textContent = `Wear ${Math.round(ts.wear * 100)}%` + (adv && !p.rs.pitRequested ? ` · box ${adv.thisLap ? 'now' : 'lap ' + adv.lap} (${COMPOUNDS[adv.compound].letter})` : '');
-    el.tyT.textContent = `Temp ${Math.round(ts.temp)}°C`;
+    const bmax = Math.max(p.brakeTemp[0], p.brakeTemp[1], p.brakeTemp[2], p.brakeTemp[3]);
+    el.tyT.textContent = `Temp ${Math.round(ts.temp)}°C · Brakes ${Math.round(bmax / 10) * 10}°${bmax > 1000 ? ' FADE' : ''}`;
     el.tyF.textContent = `Fuel ${p.fuel.toFixed(1)} kg · ${['LEAN', 'STD', 'RICH'][p.fuelMode]} · ERS ${['HARV', 'BAL', 'ATK'][p.ersMode]} · BB ${Math.round(p.spec.brakeBias * 100)}`;
     const dm = p.damageSummary();
     const dmg = dm.worst;

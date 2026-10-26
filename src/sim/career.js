@@ -29,9 +29,21 @@ export function lapsFor(lengthM, distanceId = 'standard') {
   return Math.max(2, Math.min(30, Math.round((d.km * 1000) / lengthM)));
 }
 
-export function newSeason(rounds = 4) {
-  return { calendar: makeCalendar(rounds), round: 0, points: {}, teamPoints: {}, teamOf: {}, results: [] };
+export const WEATHER_IDS = ['dry', 'light', 'heavy', 'changing'];
+export const WEATHER_NAMES = { dry: 'Dry', light: 'Light rain', heavy: 'Heavy rain', changing: 'Showers possible' };
+
+/** One forecast per round, decided when the season is created so the calendar is stable between sessions. */
+export function rollWeather(n, rand = Math.random) {
+  const bag = ['dry', 'dry', 'dry', 'dry', 'dry', 'changing', 'changing', 'light', 'heavy'];
+  return Array.from({ length: n }, (_, i) => (i === 0 ? 'dry' : bag[Math.floor(rand() * bag.length)]));
 }
+
+export function newSeason(rounds = 4) {
+  const calendar = makeCalendar(rounds);
+  return { calendar, round: 0, points: {}, teamPoints: {}, teamOf: {}, results: [], weather: rollWeather(calendar.length) };
+}
+
+export const weatherFor = (season, round = season.round) => (season.weather && WEATHER_IDS.includes(season.weather[round]) ? season.weather[round] : 'dry');
 
 export const seasonDone = (s) => s.round >= s.calendar.length;
 
@@ -194,6 +206,8 @@ export function sanitizeCareer(raw) {
     season.round = Math.round(n(season.round, 0, season.calendar.length, 0));
     for (const k of ['points', 'teamPoints', 'teamOf']) if (!season[k] || typeof season[k] !== 'object') season[k] = {};
     if (!Array.isArray(season.results)) season.results = [];
+    if (!Array.isArray(season.weather) || season.weather.length < season.calendar.length) season.weather = rollWeather(season.calendar.length);
+    season.weather = season.weather.map((w) => (WEATHER_IDS.includes(w) ? w : 'dry'));
     const up = raw.upgrades || {};
     return {
       v: 1,

@@ -365,14 +365,26 @@ export class CarView {
         rings.push(ring);
         parts.push(tint(cap, new THREE.Color('#1a1c21')));
       }
+      // glowing carbon disc seen through the wheel: the brightness follows the real disc temperature
+      const glowMat = new THREE.MeshBasicMaterial({ color: 0xff5a10, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
+      const glowGeo = [];
+      for (const sd of [-1, 1]) {
+        const g = new THREE.RingGeometry(0.07, 0.2, 18);
+        if (sd < 0) g.rotateY(Math.PI);
+        g.translate(0, 0, sd * (w / 2 + 0.008));
+        glowGeo.push(g);
+      }
       const assembly = new THREE.Group();
       const spin = new THREE.Group();
       spin.add(new THREE.Mesh(mergeClean(parts), wheelMat));
+      const glow = new THREE.Mesh(mergeClean(glowGeo), glowMat);
+      glow.visible = false;
+      spin.add(glow);
       const rg = mergeClean(rings);
       spin.add(new THREE.Mesh(rg, compoundMat));
       assembly.add(spin);
       this.model.add(assembly);
-      return { assembly, spin, front, left };
+      return { assembly, spin, front, left, glow, glowMat };
     };
     this.wheelDefs = [mkWheel(true, true), mkWheel(true, false), mkWheel(false, true), mkWheel(false, false)];
     this.wheelFront = [this.wheelDefs[0], this.wheelDefs[1]];
@@ -385,6 +397,7 @@ export class CarView {
         o.receiveShadow = false;
       }
     });
+    for (const wd of this.wheelDefs) wd.glow.castShadow = false;
     if (this.ghost) this.makeGhost();
     this.layoutWheels(1.962, 1.638, 1.6, 1.55, 3.6, 0);
     this.pitchSmooth = 0;
@@ -425,6 +438,15 @@ export class CarView {
     for (let w = 0; w < 4; w++) {
       this.spinAngle[w] -= (car.omega[w] * dt) % (Math.PI * 2);
       this.wheelDefs[w].spin.rotation.z = this.spinAngle[w];
+      // brake disc glow: visible from about 450 C, orange to yellow-white by 1000 C
+      const wd = this.wheelDefs[w];
+      const bt = car.brakeTemp ? car.brakeTemp[w] : 0;
+      const k = clamp((bt - 450) / 550, 0, 1);
+      if (wd.glow.visible !== k > 0.02) wd.glow.visible = k > 0.02;
+      if (k > 0.02) {
+        wd.glowMat.opacity = Math.min(1, k * 1.25);
+        wd.glowMat.color.setRGB(1, 0.32 + 0.5 * k, 0.06 + 0.55 * k * k);
+      }
     }
     // DRS flap, brake light, damage
     this.drsPivot.rotation.z = car.drsPos * 0.55;

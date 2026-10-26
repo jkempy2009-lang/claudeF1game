@@ -4,6 +4,7 @@ import { AIR_DENSITY, SURFACE, engineTorque, wetGripFactor } from './carspec.js'
 
 export const FL = 0, FR = 1, RL = 2, RR = 3;
 const AMBIENT = 30;
+const BRAKE_HEAT_CAP = 720; // J/K per corner (disc, pads and calipers)
 const TYRE_HEAT_CAP = 3500; // J/K, lumped surface+carcass
 export const TUNE = { heat: 0.1, coolBase: 0.0011, coolSpeed: 0.00007 };
 /** Joules of tyre slip energy per tyre per "reference lap" - calibrated so wearLaps reads as real laps at pace 1.0. */
@@ -15,6 +16,7 @@ const tmpProj = { i: 0, t: 0, s: 0, d: 0, dist: 0 };
  * One car: rigid body (planar, body-frame velocities u/v and yaw rate r) with four independent
  * tyre contact patches. Fixed-step integration (call step() with the same dt every time, 1/240 s).
  */
+
 export class Car {
   constructor(spec, track) {
     this.spec = spec;
@@ -37,6 +39,7 @@ export class Car {
     this.omega = new Float64Array(4);
     this.alphaLag = new Float64Array(4);
     this.temp = new Float64Array(4).fill(85);
+    this.brakeTemp = new Float64Array(4).fill(260); // carbon discs, deg C: glow when hot, fade when cooked, weak when cold
     this.wear = new Float64Array(4);
     this.fz = new Float64Array(4);
     this.kappa = new Float64Array(4);
@@ -381,11 +384,18 @@ export class Car {
 
       // brakes (+ABS)
       let Tb = front ? brk * sp.brakeTorque * sp.brakeBias * 0.5 : brk * sp.brakeTorque * (1 - sp.brakeBias) * 0.5;
+      {
+        // carbon discs: weak when cold, best at 450-850 C, fading beyond ~900 C
+        const bt = this.brakeTemp[w];
+        Tb *= (0.86 + 0.14 * smoothstep(120, 420, bt)) * (1 - 0.3 * smoothstep(880, 1150, bt));
+      }
       if (brk > 0.02 && this.assist.abs) {
         if (absVl > 4 && Math.abs(kap) > sp.kappaPeak * 1.1 && kap < 0) this.absF[w] = Math.max(0.1, this.absF[w] - 14 * dt);
         else this.absF[w] = Math.min(1, this.absF[w] + 9 * dt);
         Tb *= this.absF[w];
       } else this.absF[w] = 1;
+      // disc heating: friction power in, convection out (cooling ducts work harder at speed)
+      this.brakeTemp[w] += ((Tb * Math.abs(om)) / BRAKE_HEAT_CAP - (this.brakeTemp[w] - AMBIENT) * (0.011 + 0.0008 * V)) * dt;
       if (Tb > 0) {
         const dwb = (Tb / I) * dt;
         if (Math.abs(om) <= dwb) om = 0;

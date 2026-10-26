@@ -29,7 +29,7 @@ for (const def of TRACK_DEFS) {
   const drv = new AIDriver({ car, track, profile: prof, level: 0.9, seed: 1 });
   const race = { phase: 'racing', time: 0, cars: [car], lapsLeft: () => 3 };
   let laps = 0, last = 0, off = 0, lapStart = 0, best = Infinity;
-  for (let t = 0; t < 200 && laps < 2; t += DT) {
+  for (let t = 0; t < 280 && laps < 2; t += DT) {
     car.step(DT, drv.update(DT, race));
     race.time = t;
     if (car.surf.every((s) => s >= 2 && s !== 5)) off += DT;

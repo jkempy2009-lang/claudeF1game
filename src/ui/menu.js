@@ -5,7 +5,7 @@ import { COMPOUNDS, COMPOUND_IDS } from '../sim/carspec.js';
 import { formatTime } from '../util/math.js';
 import { drawLineChart } from './charts.js';
 import { ACHIEVEMENTS, DEFAULT_STATS } from '../sim/achievements.js';
-import { CHAMP_CAL, sanitizeCareer, UPGRADE_KEYS, UPGRADE_INFO, UPGRADE_MAX, upgradeCost, objectiveFor, DISTANCES, seasonDone, driverStandings, constructorStandings, lapsFor, teamRank } from '../sim/career.js';
+import { CHAMP_CAL, sanitizeCareer, UPGRADE_KEYS, UPGRADE_INFO, UPGRADE_MAX, upgradeCost, objectiveFor, DISTANCES, seasonDone, driverStandings, constructorStandings, lapsFor, teamRank, weatherFor, WEATHER_NAMES } from '../sim/career.js';
 
 export const SAVE_KEY = 'apex-grand-prix.v1';
 
@@ -543,7 +543,8 @@ export class Menu {
       <div class="grid2" style="grid-template-columns:1.1fr 1fr">
         <div class="panel"><h3>Round ${s.round + 1} of ${s.calendar.length}</h3>
           <div class="hubtrack">${tr ? trackThumb(tr) : ''}<div><b style="font-size:1.3rem">${esc(def.name)}</b><div class="hint">${esc(def.country)} · ${tr ? (tr.length / 1000).toFixed(2) + ' km' : ''} · ${laps} laps</div>
-          <div class="hint" style="margin-top:.5rem">Objective: finish <b style="color:#fff">P${obj.finish}</b> or better (+8 prize). Constructors target: P${obj.constructor}.</div></div></div>
+          <div class="hint" style="margin-top:.5rem">Forecast: <b style="color:#fff">${esc(WEATHER_NAMES[weatherFor(s)])}</b>${weatherFor(s) !== 'dry' ? ' — be ready to change tyres' : ''}</div>
+          <div class="hint" style="margin-top:.3rem">Objective: finish <b style="color:#fff">P${obj.finish}</b> or better (+8 prize). Constructors target: P${obj.constructor}.</div></div></div>
           <div class="row" style="margin-top:.8rem"><button class="btn primary grow" data-act="careerrace" data-q="1">Qualify &amp; race</button><button class="btn grow" data-act="careerrace" data-q="0">Race now</button></div>
         </div>
         <div class="panel"><h3>Car development</h3>${ups}</div>
