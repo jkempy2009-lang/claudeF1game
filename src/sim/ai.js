@@ -296,8 +296,8 @@ export class AIDriver {
       const overlap = clamp((3.0 - lat) / 0.9, 0, 1);
       const gap = n.ds - CAR_LEN;
       // desired: be able to stop behind it
-      const c = n.v + Math.max(0, gap - 2.5) * 1.1 + 1;
-      cap = Math.min(cap, lerp(vt, Math.max(c, 3), overlap));
+      const c = n.v + (gap - 7.5) * 0.9;
+      cap = Math.min(cap, lerp(vt, Math.max(c, 2), overlap));
     }
     return cap;
   }

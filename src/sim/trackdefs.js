@@ -6,6 +6,7 @@
 export const TRACK_DEFS = [
   {
     id: 'vettore',
+    setup: { front: 1, rear: 0 },
     name: 'Autodromo del Vettore',
     country: 'Italy',
     blurb: 'Temple of speed. Huge straights, heavy braking, chicanes. Run low downforce.',
@@ -56,6 +57,7 @@ export const TRACK_DEFS = [
   },
   {
     id: 'rade',
+    setup: { front: 9, rear: 9 },
     name: 'Circuit de la Rade',
     country: 'Monaco-style harbour',
     blurb: 'Tight street circuit between the barriers. No room for error. Run maximum downforce.',
@@ -98,6 +100,7 @@ export const TRACK_DEFS = [
   },
   {
     id: 'northfield',
+    setup: { front: 5, rear: 5 },
     name: 'Northfield Grand Prix Circuit',
     country: 'England',
     blurb: 'Flowing, fast and brutal on the tyres. Every corner leads into the next.',
@@ -141,6 +144,7 @@ export const TRACK_DEFS = [
   },
   {
     id: 'ardennes',
+    setup: { front: 6, rear: 5 },
     name: 'Circuit des Hautes-Fagnes',
     country: 'Belgian forest',
     blurb: 'Huge elevation changes through the pines. Courage rewarded, mistakes punished.',
