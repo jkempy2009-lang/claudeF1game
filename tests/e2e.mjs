@@ -58,6 +58,11 @@ for (const [name, bad] of [
   const page = await open(fast);
   await page.click('[data-act=controls]');
   step('controls screen', !!(await page.waitForSelector('text=/Controls/i', { timeout: 5000 }).catch(() => null)));
+  await page.click('[data-rebind=camera]');
+  await page.keyboard.press('KeyJ');
+  step('a key can be rebound', await page.evaluate(() => window.apex.input.keys.camera.join() === 'KeyJ' && window.apex.save.settings.keys.camera[0] === 'KeyJ'));
+  await page.click('[data-act=resetkeys]');
+  step('keys reset to defaults', await page.evaluate(() => window.apex.input.keys.camera.join() === 'KeyC' && !window.apex.save.settings.keys.camera));
   await page.keyboard.press('Escape');
   await page.waitForSelector('[data-act=quick]');
   await page.click('[data-act=settings]');

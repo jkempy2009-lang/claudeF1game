@@ -27,6 +27,58 @@ export const DEFAULT_KEYS = {
   confirm: ['Enter', 'Space'],
 };
 
+/** Rebindable actions in the order the controls screen lists them. */
+export const KEY_ACTIONS = [
+  ['throttle', 'Throttle'], ['brake', 'Brake / reverse'], ['left', 'Steer left'], ['right', 'Steer right'], ['drs', 'DRS / wheel nut'], ['boost', 'ERS boost (hold)'],
+  ['gearUp', 'Gear up (manual)'], ['gearDown', 'Gear down (manual)'], ['pit', 'Pit request'], ['tyre', 'Change pit tyre'], ['camera', 'Camera'], ['lookBack', 'Look back'],
+  ['reset', 'Reset to track'], ['pause', 'Pause'], ['line', 'Racing line guide'], ['tele', 'Live telemetry'], ['map', 'Minimap size'], ['mute', 'Mute'],
+  ['ersMode', 'ERS mode'], ['fuelMode', 'Fuel mix'], ['bbUp', 'Brake bias forward'], ['bbDown', 'Brake bias rearward'],
+];
+const KEY_CODE = /^[A-Za-z][A-Za-z0-9]{1,23}$/;
+const RESERVED = new Set(['Escape', 'Enter', 'Tab', 'F5', 'F11', 'F12']);
+
+/** Human-readable label for a KeyboardEvent.code. */
+export function keyLabel(code) {
+  if (/^Key[A-Z]$/.test(code)) return code.slice(3);
+  if (/^Digit\d$/.test(code)) return code.slice(5);
+  const map = { ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→', Space: 'Space', ShiftLeft: 'Shift', ShiftRight: 'R-Shift', ControlLeft: 'Ctrl', ControlRight: 'R-Ctrl', AltLeft: 'Alt', AltRight: 'R-Alt', BracketLeft: '[', BracketRight: ']', Equal: '=', Minus: '-', Comma: ',', Period: '.', Slash: '/', Semicolon: ';', Quote: "'", Backquote: '`', Backslash: '\\', Backspace: 'Backspace', Escape: 'Esc' };
+  return map[code] || code.replace(/^Numpad/, 'Num ');
+}
+
+/** Saved custom bindings -> a clean { action: [codes] } (unknown actions, junk codes and reserved keys dropped). */
+export function sanitizeKeys(raw) {
+  const out = {};
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+  for (const [a] of KEY_ACTIONS) {
+    const v = raw[a];
+    if (!Array.isArray(v)) continue;
+    const codes = v.filter((c) => typeof c === 'string' && KEY_CODE.test(c) && !RESERVED.has(c)).slice(0, 3);
+    if (codes.length) out[a] = [...new Set(codes)];
+  }
+  return out;
+}
+
+/** Defaults overlaid with the custom bindings; Esc always still pauses. */
+export function mergeKeys(custom) {
+  const keys = {};
+  for (const a of Object.keys(DEFAULT_KEYS)) keys[a] = DEFAULT_KEYS[a].slice();
+  const c = sanitizeKeys(custom);
+  for (const a of Object.keys(c)) keys[a] = c[a];
+  if (!keys.pause.includes('Escape')) keys.pause.push('Escape');
+  return keys;
+}
+
+/** Binds `code` to `action` (replacing its keys) and takes it away from any other action. Returns the new custom map. */
+export function bindKey(custom, action, code) {
+  const out = sanitizeKeys(custom);
+  if (RESERVED.has(code) || !KEY_CODE.test(code)) return out;
+  const merged = mergeKeys(out);
+  for (const a of Object.keys(merged)) if (a !== action && merged[a].includes(code)) out[a] = merged[a].filter((c) => c !== code);
+  out[action] = [code];
+  for (const a of Object.keys(out)) if (!out[a].length) delete out[a]; // an emptied action falls back to its default
+  return out;
+}
+
 const dead = (v, d) => (Math.abs(v) < d ? 0 : (v - Math.sign(v) * d) / (1 - d));
 
 /** Keyboard + gamepad (+ touch overlay) -> a single driver input state with sensible ramping for digital keys. */

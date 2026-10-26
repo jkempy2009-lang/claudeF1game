@@ -1,0 +1,16 @@
+import { createRequire } from 'node:module';
+import fs from 'node:fs';
+const require = createRequire(import.meta.url);
+const { chromium } = require('playwright');
+const [out] = process.argv.slice(2);
+fs.mkdirSync(out, { recursive: true });
+const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--enable-webgl'] });
+const page = await browser.newPage({ viewport: { width: 1120, height: 630 } });
+await page.goto('http://localhost:8099/index.html');
+await page.waitForSelector('[data-act=controls]', { timeout: 60000 });
+await page.click('[data-act=controls]');
+await page.waitForSelector('[data-rebind]');
+await page.click('[data-rebind=drs]');
+await page.waitForTimeout(600);
+await page.screenshot({ path: `${out}/controls.png` });
+await browser.close();

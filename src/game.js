@@ -16,7 +16,7 @@ import { Rain } from './render/rain.js';
 import { ReplayBuffer, makeReplayCars } from './render/replay.js';
 import { Effects } from './render/effects.js';
 import { CameraRig, CAMERA_MODES, CAMERA_NAMES } from './render/camera.js';
-import { Input } from './ui/input.js';
+import { Input, bindKey, mergeKeys } from './ui/input.js';
 import { AudioEngine } from './ui/audio.js';
 import { HUD } from './ui/hud.js';
 import { Menu, loadSave, persist, sanitizeConfig } from './ui/menu.js';
@@ -89,6 +89,21 @@ class Game {
     window.addEventListener('keydown', (e) => {
       this.audio.start();
       this.audio.resume();
+      // controls screen: the next key press is the new binding for the chosen action
+      if (this.menu.rebinding) {
+        e.preventDefault();
+        const a = this.menu.rebinding;
+        this.menu.rebinding = null;
+        if (e.code !== 'Escape') {
+          this.save.settings.keys = bindKey(this.save.settings.keys, a, e.code);
+          persist(this.save);
+          this.applySettings();
+        }
+        this.input.pressed.clear();
+        this.input.down.clear();
+        this.menu.rerender();
+        return;
+      }
       if (this.state === 'replay') {
         const r = this.session && this.session.replay;
         if (e.code === 'Space') { e.preventDefault(); this.replayAction('play'); }
@@ -197,6 +212,7 @@ class Game {
     persist(this.save);
     this.audio.setVolume(this.save.settings.volume);
     Object.assign(this.input.opts, { steerSpeed: this.save.settings.steerSpeed, padDead: this.save.settings.padDead, rumble: this.save.settings.rumble !== false });
+    this.input.keys = mergeKeys(this.save.settings.keys);
     this.hud.setUnits(this.save.settings.units);
     this.hud.el.minimap.classList.toggle('hidden', !this.save.settings.minimap);
     if (this.session && this.session.guide) this.session.guide.setVisible(this.save.settings.line !== false);
@@ -578,7 +594,7 @@ class Game {
     this.state = 'race';
     document.getElementById('touch') && this.updateTouchVisibility();
     this.hud.message(cfg.mode === 'qualifying' ? 'Qualifying' : cfg.mode === 'timetrial' ? 'Time trial' : `${track.name}`, '', cfg.mode === 'qualifying' ? '3 minutes · best lap sets your grid slot · all 20 cars on track' : cfg.mode === 'timetrial' ? 'Set your best lap — your ghost follows' : `${cfg.laps} laps · P${race.player.info.gridPos} on the grid${cfg.qualiTimes ? ' (qualified)' : ''}`, 4);
-    this.hud.showKeyHint(10000);
+    this.hud.showKeyHint(10000, this.input.keys);
     if (cfg.mode === 'race') this.hud.radio('Welcome to ' + track.name + '. Lights out when you are ready — good luck.', 6);
   }
 

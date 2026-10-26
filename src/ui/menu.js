@@ -6,11 +6,12 @@ import { formatTime } from '../util/math.js';
 import { drawLineChart } from './charts.js';
 import { ACHIEVEMENTS, DEFAULT_STATS } from '../sim/achievements.js';
 import { LESSONS, sanitizeSchool } from '../sim/school.js';
+import { KEY_ACTIONS, keyLabel, mergeKeys, sanitizeKeys } from './input.js';
 import { CHAMP_CAL, sanitizeCareer, UPGRADE_KEYS, UPGRADE_INFO, UPGRADE_MAX, upgradeCost, objectiveFor, DISTANCES, seasonDone, driverStandings, constructorStandings, lapsFor, teamRank, weatherFor, WEATHER_NAMES } from '../sim/career.js';
 
 export const SAVE_KEY = 'apex-grand-prix.v1';
 
-export const DEFAULT_SETTINGS = { quality: 'high', volume: 0.55, units: 'kmh', line: true, minimap: true, shake: true, camera: 'chase', tower: true, blur: true, steerSpeed: 1, padDead: 0.07, rumble: true, autoQuality: true, cbSafe: false, calm: false, bigHud: false, bloom: true };
+export const DEFAULT_SETTINGS = { quality: 'high', volume: 0.55, units: 'kmh', line: true, minimap: true, shake: true, camera: 'chase', tower: true, blur: true, steerSpeed: 1, padDead: 0.07, rumble: true, autoQuality: true, cbSafe: false, calm: false, bigHud: false, bloom: true, keys: {} };
 export const DEFAULT_CONFIG = {
   mode: 'race',
   trackId: 'northfield',
@@ -109,6 +110,7 @@ export function sanitizeSettings(raw) {
     rumble: bool(r.rumble, D.rumble),
     autoQuality: bool(r.autoQuality, D.autoQuality),
     cbSafe: bool(r.cbSafe, D.cbSafe),
+    keys: sanitizeKeys(r.keys),
     bloom: bool(r.bloom, D.bloom),
     calm: bool(r.calm, D.calm),
     bigHud: bool(r.bigHud, D.bigHud),
@@ -403,16 +405,14 @@ export class Menu {
   }
 
   screen_controls() {
-    const k = (...a) => a.map((x) => `<kbd>${x}</kbd>`).join('');
-    const rows = [
-      ['Throttle', k('W', '↑')], ['Brake / reverse', k('S', '↓')], ['Steer', k('A', 'D', '←', '→')], ['DRS (in a zone, when eligible)', k('Space')], ['ERS boost (hold)', k('Shift')],
-      ['Gear up / down (manual)', k('E', 'Q')], ['Pit request toggle', k('B')], ['Change pit tyre', k('T')], ['Camera', k('C')], ['Look back', k('V')],
-      ['Reset to track', k('R')], ['Pause', k('Esc', 'P')], ['Racing line guide', k('L')], ['Live telemetry traces', k('Y')], ['Minimap size', k('M')], ['Mute', k('N')],
-      ['ERS mode: harvest / balanced / attack', k('X')], ['Fuel mix: lean / standard / rich', k('Z')], ['Brake bias (front) + / −', k(']', '[')], ['Pit stop: hit each wheel nut', k('Space')],
-    ];
+    const keys = mergeKeys(this.save.settings.keys);
+    const rows = KEY_ACTIONS.map(([a, label]) => {
+      const waiting = this.rebinding === a;
+      return `<div class="key"><span>${esc(label)}</span><button class="keybtn ${waiting ? 'wait' : ''}" data-rebind="${a}">${waiting ? 'Press a key…' : keys[a].filter((c) => c !== 'Escape' || a === 'pause').map((c) => `<kbd>${esc(keyLabel(c))}</kbd>`).join('')}</button></div>`;
+    });
     const pad = [['Steer', 'Left stick'], ['Throttle / brake', 'RT / LT'], ['DRS', 'A'], ['Boost', 'X'], ['Pit request', 'B'], ['Camera', 'Y'], ['Gears', 'LB / RB'], ['Look back', 'L3'], ['Pause', 'Start'], ['Reset', 'Back'], ['Fuel mix / ERS mode', 'D-pad up / down'], ['Next pit tyre', 'D-pad right']];
     return `<section class="screen panel-screen full"><h2>Con<span>trols</span></h2>
-      <div class="grid2"><div class="panel"><h3>Keyboard</h3><div class="keys">${rows.map(([n, v]) => `<div class="key"><span>${n}</span><span>${v}</span></div>`).join('')}</div></div>
+      <div class="grid2"><div class="panel"><h3>Keyboard <small class="hint">· click a key to rebind it</small></h3><div class="keys">${rows.join('')}</div><button class="btn sm" data-act="resetkeys" style="margin-top:.6rem">Reset keys to default</button><div class="hint" style="margin-top:.4rem">Esc always pauses. Enter confirms in menus. In a pit stop, the DRS key hits the wheel nut.</div></div>
       <div class="panel"><h3>Gamepad</h3><div class="keys">${pad.map(([n, v]) => `<div class="key"><span>${n}</span><span><kbd>${v}</kbd></span></div>`).join('')}</div>
       <h3 style="margin-top:1.2rem">Racecraft</h3><div class="hint">• Brake in a straight line, then trail off the pedal as you turn in.<br>• Hit the apex kerb, then use all the track on exit — but not past the white line, or you get a track-limits warning.<br>• DRS opens the rear wing for ~10-15 km/h when you are within one second of the car ahead at the detection line.<br>• ERS boost spends the battery: harvest it by braking hard and lifting.<br>• Follow closely and you lose front downforce (dirty air) but gain a slipstream on the straights.<br>• Tyres have a temperature window: scrubbing them sliding overheats them, and worn tyres lose grip fast.<br>• Press <kbd>B</kbd> to call a pit stop — new tyres, repairs, and a limiter in the lane.</div></div></div>
       <div class="footer"><button class="btn sm" data-act="back">◀ Back</button></div></section>`;
@@ -636,7 +636,7 @@ export class Menu {
 
   // ---- events --------------------------------------------------------------------------------------
   onClick(e) {
-    const t = e.target.closest('[data-act],[data-tab],[data-track],[data-team],[data-chip],[data-toggle],[data-preset],button');
+    const t = e.target.closest('[data-act],[data-tab],[data-track],[data-team],[data-chip],[data-toggle],[data-preset],[data-rebind],button');
     if (!t) return;
     const H = this.hooks;
     H.sfx && H.sfx('click');
@@ -654,6 +654,10 @@ export class Menu {
       this.config.team = +t.dataset.team;
       this.persist();
       H.previewTeam && H.previewTeam(this.config.team);
+      return this.rerender();
+    }
+    if (t.dataset.rebind) {
+      this.rebinding = this.rebinding === t.dataset.rebind ? null : t.dataset.rebind;
       return this.rerender();
     }
     if (t.dataset.chip) {
@@ -755,6 +759,11 @@ export class Menu {
         return this.show('settings');
       case 'back':
         return H.toMain();
+      case 'resetkeys':
+        this.save.settings.keys = {};
+        this.rebinding = null;
+        H.applySettings();
+        return this.rerender();
       case 'resetsetup':
         c.frontWing = c.rearWing = null;
         c.brakeBias = 0.58;

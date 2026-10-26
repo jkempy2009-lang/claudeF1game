@@ -52,6 +52,7 @@ Everything below was added or fixed in this release, grouped by area.
 - Audio: exhaust pops and crackles on lift-off, downshift burbles, rain on the bodywork and water spray scaled by speed.
 
 ### Controls and settings
+- **Rebindable keyboard**: click any action on the Controls screen and press the new key (Esc always pauses; a key taken from another action is moved; an action left with nothing falls back to its default). Saved with the settings; the first-lap key hint follows your bindings. `tests/keys.mjs`.
 - **Touch**: the on-screen pedals now come with pause, camera, racing line, DRS, ERS boost (hold) and pit buttons; the first tap on the gas on the grid starts the lights. Covered by an emulated-touch e2e check.
 - **Accessibility**: colour-blind-safe racing line (blue / yellow / magenta), Reduce motion (no blur, shake, strobing tail light or UI animation) and a Larger HUD (x1.2).
 - Gamepad vibration (kerbs, grass, tyre slip, impacts), keyboard steering speed, stick deadzone, automatic quality (lowers resolution, then shadows and blur, if the frame rate stays under 40 fps), motion-blur toggle.
