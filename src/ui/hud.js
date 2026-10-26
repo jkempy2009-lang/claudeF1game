@@ -41,6 +41,7 @@ export class HUD {
     this.lastTower = 0;
     this.lastMini = 0;
     this.teleOn = false;
+    this.keyNames = { pit: 'B', tyre: 'T' }; // kept in step with the player's bindings by the game
     this.teleBuf = { t: new Float32Array(240), b: new Float32Array(240), s: new Float32Array(240), v: new Float32Array(240), n: 0, last: 0, draw: 0 };
     root.innerHTML = `
       <div id="tower" class="hud-box"><div class="hd"><span>Race</span><span id="tw-lap"></span></div><div id="tw-rows"></div></div>
@@ -490,7 +491,7 @@ export class HUD {
     } else if (rs.pitRequested && race.track.pit) {
       pitEl.classList.remove('hidden', 'service');
       const next = rs.nextCompound || '(auto)';
-      pitEl.innerHTML = `<div class="big">Box, box</div>Entering pits this lap · next tyre <b>${next.toUpperCase()}</b> <span class="hint">[T] to change · [B] cancel</span>`;
+      pitEl.innerHTML = `<div class="big">Box, box</div>Entering pits this lap · next tyre <b>${next.toUpperCase()}</b> <span class="hint">[${this.keyNames.tyre}] to change · [${this.keyNames.pit}] cancel</span>`;
     } else pitEl.classList.add('hidden');
 
     // throttled things

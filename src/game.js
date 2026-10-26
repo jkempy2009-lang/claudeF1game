@@ -16,7 +16,7 @@ import { Rain } from './render/rain.js';
 import { ReplayBuffer, makeReplayCars } from './render/replay.js';
 import { Effects } from './render/effects.js';
 import { CameraRig, CAMERA_MODES, CAMERA_NAMES } from './render/camera.js';
-import { Input, bindKey, mergeKeys } from './ui/input.js';
+import { Input, bindKey, mergeKeys, keyLabel } from './ui/input.js';
 import { AudioEngine } from './ui/audio.js';
 import { HUD } from './ui/hud.js';
 import { Menu, loadSave, persist, sanitizeConfig } from './ui/menu.js';
@@ -208,11 +208,20 @@ class Game {
     this.pointScale = (window.innerHeight * pr) / (2 * Math.tan((this.camera.fov * Math.PI) / 360));
   }
 
+  /** Label of the first key bound to an action, for on-screen text. */
+  kn(action) {
+    const c = (this.input.keys[action] || [])[0];
+    return c ? keyLabel(c) : '(unbound)';
+  }
+
   applySettings() {
     persist(this.save);
     this.audio.setVolume(this.save.settings.volume);
     Object.assign(this.input.opts, { steerSpeed: this.save.settings.steerSpeed, padDead: this.save.settings.padDead, rumble: this.save.settings.rumble !== false });
     this.input.keys = mergeKeys(this.save.settings.keys);
+    const pgk = this.hud.el.pitgame && this.hud.el.pitgame.querySelector('.pgt kbd');
+    if (pgk) pgk.textContent = this.kn('drs');
+    this.hud.keyNames = { pit: this.kn('pit'), tyre: this.kn('tyre') };
     this.hud.setUnits(this.save.settings.units);
     this.hud.el.minimap.classList.toggle('hidden', !this.save.settings.minimap);
     if (this.session && this.session.guide) this.session.guide.setVisible(this.save.settings.line !== false);
@@ -1093,14 +1102,14 @@ class Game {
         case 'pitStopStart':
           if (e.car === player && e.game && !s._pgTip) {
             s._pgTip = true;
-            hud.radio('Pit stop: press Space as each marker enters the green. Perfect timing on all four wheels is a 2.5 second stop.', 7);
+            hud.radio(`Pit stop: press ${this.kn('drs')} as each marker enters the green. Perfect timing on all four wheels is a 2.5 second stop.`, 7);
           } else if (e.car === player) hud.radio('Box, box — hold position, tyres going on.', 3);
           break;
         case 'pitCall':
           if (e.car === player) {
             const nm = COMPOUNDS[e.advice.compound].name.toUpperCase();
             const why = { wet: 'The track is wet', dry: 'The track is dry', rules: 'We need the mandatory stop', wear: 'The tyres are going' }[e.advice.reason] || 'Strategy';
-            hud.radio(e.auto ? `${why}. Box, box: ${nm} tyres. (B cancels)` : `${why}. Box this lap for ${nm}: press B (T changes the tyre).`, 7);
+            hud.radio(e.auto ? `${why}. Box, box: ${nm} tyres. (${this.kn('pit')} cancels)` : `${why}. Box this lap for ${nm}: press ${this.kn('pit')} (${this.kn('tyre')} changes the tyre).`, 7);
             this.audio.ui('good');
           }
           break;
@@ -1122,7 +1131,7 @@ class Game {
           if (e.car === player) this.audio.ui(e.res === 'perfect' ? 'good' : e.res === 'good' ? 'click' : 'bad');
           break;
         case 'pitGameDone':
-          if (e.car === player) hud.message(e.misses ? 'Cross-threaded wheel nut' : e.perfects === 4 ? 'Perfect pit stop' : 'Clean pit stop', e.misses ? 'bad' : '', `${e.dur.toFixed(1)} seconds`, 3);
+          if (e.car === player) hud.message(e.misses ? 'Cross-threaded wheel nut' : e.perfects === 4 ? 'Perfect pit stop' : 'Clean pit stop', e.misses ? 'bad' : '', `${e.dur.toFixed(1)} seconds` + (e.repair > 0.05 ? ` + ${e.repair.toFixed(1)} s repairs` : ''), 3);
           break;
         case 'scDeploy':
           hud.flag('SAFETY CAR', '#ffc400', 6, 'sc');
@@ -1440,8 +1449,9 @@ class Game {
     const r = s.replay;
     if (!r) return;
     const rec = s.rec;
+    const wasEnter = this.input.pressed.has('Enter'); // Space is play / pause in a replay, so only Enter (and Esc / P) leave it
     const input = this.input.poll(dt, 0);
-    if (input.pause || input.confirm) return this.endReplay();
+    if (input.pause || wasEnter) return this.endReplay();
     if (input.camera) this.replayAction('cam');
     if (r.playing) {
       r.t += dt * r.speed;
@@ -1570,20 +1580,20 @@ class Game {
     const fc = rc.forecast();
     if (fc && fc.rainIn < 70 && !s._rainWarn) {
       s._rainWarn = true;
-      this.hud.radio(`Rain is coming, about ${Math.round(fc.rainIn / 10) * 10} seconds away. Think about wet tyres (B to box, T to choose Wet).`, 7);
+      this.hud.radio(`Rain is coming, about ${Math.round(fc.rainIn / 10) * 10} seconds away. Think about wet tyres (${this.kn('pit')} to box, ${this.kn('tyre')} to choose Wet).`, 7);
     } else if (rc.wet > 0.35 && !p.compound.wetTyre && s.track.pit && !s._wetCalled) {
       s._wetCalled = true;
-      this.hud.radio('The track is wet. Box for wet tyres: press B, then T to pick Wet.', 7);
+      this.hud.radio(`The track is wet. Box for wet tyres: press ${this.kn('pit')}, then ${this.kn('tyre')} to pick Wet.`, 7);
     } else if (rc.wet < 0.14 && rc.rain < 0.05 && p.compound.wetTyre && !s._dryCalled && rs.laps > 1) {
       s._dryCalled = true;
       this.hud.radio('The track is drying. Box for slicks when you are ready.', 6);
     } else if (rc.wet > 0.35) s._dryCalled = false;
     if (ts.wear > 0.7 && !rs.pitRequested && rs.stops === 0 && left > 1 && s.track.pit && !s._wearCalled) {
       s._wearCalled = true;
-      this.hud.radio('Tyres are going off. Press B when you want to box.', 6);
+      this.hud.radio(`Tyres are going off. Press ${this.kn('pit')} when you want to box.`, 6);
     } else if (p.drsAllowed && !s._drsCalled) {
       s._drsCalled = true;
-      this.hud.radio('DRS enabled. Press Space on the straight.', 4);
+      this.hud.radio(`DRS enabled. Press ${this.kn('drs')} on the straight.`, 4);
     } else if (!p.drsAllowed) s._drsCalled = false;
     else if (p.behind && (p.behind.gapAhead ?? 9) < 0.8 && !s._behindCalled) {
       s._behindCalled = true;

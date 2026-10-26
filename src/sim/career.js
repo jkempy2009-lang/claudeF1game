@@ -67,7 +67,7 @@ export function driverStandings(season) {
   const names = new Set([...Object.keys(season.points), ...Object.keys(season.teamOf)]);
   return [...names]
     .map((name) => ({ name, team: season.teamOf[name] || '', pts: season.points[name] || 0 }))
-    .sort((a, b) => b.pts - a.pts || (a.name === 'You' ? -1 : 0));
+    .sort((a, b) => b.pts - a.pts || (a.name === 'You' ? -1 : 0) - (b.name === 'You' ? -1 : 0));
 }
 
 export function constructorStandings(season) {
@@ -136,7 +136,7 @@ export function settleRace(career, row, cls) {
   const me = row.order.find((o) => o.name === 'You');
   const obj = objectiveFor(career.team);
   const met = !!me && me.pos <= obj.finish;
-  const fl = cls.find((e) => e.info.isPlayer && e.best === Math.min(...cls.map((c) => c.best)));
+  const fl = cls.find((e) => e.info.isPlayer && Number.isFinite(e.best) && e.best === Math.min(...cls.map((c) => c.best)));
   const prize = prizeFor(me ? me.pos : 20, met, !!fl);
   career.budget += prize;
   return { pos: me ? me.pos : null, met, prize, objective: obj.finish, fastest: !!fl };
@@ -169,7 +169,7 @@ export function endSeason(career) {
     if (i === career.team) continue;
     if (r < cur && dPos <= 2 * r + 3) recap.offers.push(i);
   }
-  recap.offers = recap.offers.slice(-3);
+  recap.offers = recap.offers.slice(0, 3); // the best three cars the finishing position has earned
   career.history.push({ ...recap, offers: undefined });
   career.seasonRecap = recap;
   bonusOnEnd(career, recap);

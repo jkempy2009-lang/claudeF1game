@@ -819,7 +819,7 @@ export class Race {
         if (pg.done && rs.service.dur === Infinity) {
           rs.service.dur = pg.dur + (rs.service.repair || 0); // bodywork repairs run alongside the wheels but take longer than a clean stop
           if (pg.perfects === 4) rs.perfectStops = (rs.perfectStops || 0) + 1;
-          this.pushEvent({ type: 'pitGameDone', car, dur: pg.dur, perfects: pg.perfects, misses: pg.misses });
+          this.pushEvent({ type: 'pitGameDone', car, dur: pg.dur, repair: rs.service.repair || 0, perfects: pg.perfects, misses: pg.misses });
         }
       }
       if (rs.service.t >= rs.service.dur) {
@@ -1007,7 +1007,7 @@ export class Race {
     if (!this.opt.safetyCar || this.isQuali || this.opt.mode === 'timetrial' || this.phase !== 'racing') return;
     const t = this.time - this.t0;
     const dis = t > 20 ? this.disabledCars() : [];
-    const stalled = this.player && this.player.rs.pos > 0 ? dis : dis;
+    const stalled = dis;
     // yellow flag while any car is stranded (local hazard)
     const yel = stalled.length > 0 && sc.state === 'none';
     if (yel !== this.yellow) {
@@ -1134,6 +1134,9 @@ export class Race {
 
   endRace() {
     this.phase = 'finished';
+    // the flag is out: no pace car, no yellow and DRS rules apply again for the cool-down
+    this.sc.state = 'none';
+    this.yellow = false;
     // mandatory stop penalty
     if (this.opt.mandatoryStop && this.player) {
       const rs = this.player.rs;

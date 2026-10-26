@@ -441,6 +441,16 @@ export class Menu {
       <div class="footer"><button class="btn sm" data-act="back">◀ Back</button></div></section>`;
   }
 
+  /** The grid slot a qualifying result really gives: a player with no timed lap starts behind everyone who set one. */
+  qualiGrid(q, player) {
+    const me = q.list.find((e) => e.car === player);
+    const times = { ...q.times };
+    if (me && Number.isFinite(me.best)) return { grid: me.pos, times };
+    const timed = q.list.filter((e) => Number.isFinite(e.best));
+    times.YOU = (timed.length ? Math.max(...timed.map((e) => e.best)) : 100) + 0.001;
+    return { grid: timed.length + 1, times };
+  }
+
   screen_school() {
     const done = this.save.school || {};
     const n = LESSONS.filter((l) => done[l.id]).length;
@@ -648,9 +658,9 @@ export class Menu {
     }).join('');
     const mine = q.list.find((e) => e.car === player);
     return `<section class="screen panel-screen full">
-      <div class="row"><h2>Qualifying <span>${esc(trackName)}</span></h2><div class="grow"></div><div class="hint">You start from <b style="color:#fff;font-size:1.4rem">P${mine.pos}</b></div></div>
+      <div class="row"><h2>Qualifying <span>${esc(trackName)}</span></h2><div class="grow"></div><div class="hint">You start from <b style="color:#fff;font-size:1.4rem">P${this.qualiGrid(q, player).grid}</b></div></div>
       <div class="panel" style="overflow:auto"><table class="results"><tr><th>Pos</th><th>Driver</th><th>Team</th><th>Best lap</th><th>Gap</th><th>Laps</th></tr>${rows}</table></div>
-      <div class="footer"><button class="btn sm" data-act="quit">Main menu</button><button class="btn" data-act="restart">Qualify again</button><button class="btn primary" data-act="qualirace">Start race from P${mine.pos}</button></div></section>`;
+      <div class="footer"><button class="btn sm" data-act="quit">Main menu</button><button class="btn" data-act="restart">Qualify again</button><button class="btn primary" data-act="qualirace">Start race from P${this.qualiGrid(data.q, data.player).grid}</button></div></section>`;
   }
 
   screen_timetrial(data) {
@@ -699,7 +709,12 @@ export class Menu {
       }
       if (k === 'diff') c.level = +v;
       else if (k === 'compound') c.compound = v;
-      else if (k === 'weather') { c.weather = v; if ((v === 'light' || v === 'heavy') && !COMPOUNDS[c.compound].wetTyre) c.compound = 'wet'; else if ((v === 'dry' || v === 'changing') && COMPOUNDS[c.compound].wetTyre) c.compound = 'medium'; }
+      else if (k === 'weather') {
+        c.weather = v;
+        // wet weather starts you on wets; coming back to dry restores the dry tyre you had chosen before
+        if ((v === 'light' || v === 'heavy') && !COMPOUNDS[c.compound].wetTyre) { this.dryCompound = c.compound; c.compound = 'wet'; }
+        else if ((v === 'dry' || v === 'changing') && COMPOUNDS[c.compound].wetTyre) c.compound = this.dryCompound && !COMPOUNDS[this.dryCompound].wetTyre ? this.dryCompound : 'medium';
+      }
       else if (k === 'timeOfDay') c.timeOfDay = v;
       else if (k === 'pitCalls') c.pitCalls = ['off', 'radio', 'auto'].includes(v) ? v : 'radio';
       else if (k === 'tyreWear') c.tyreWear = +v;
@@ -767,7 +782,10 @@ export class Menu {
         return H.startRace({ ...c });
       case 'qualirace': {
         const d = this.lastData;
-        if (d && d.q) return H.raceFromQuali({ cfg: d.cfg, times: d.q.times, grid: d.q.list.find((e) => e.car === d.player).pos });
+        if (d && d.q) {
+          const slot = this.qualiGrid(d.q, d.player);
+          return H.raceFromQuali({ cfg: d.cfg, times: slot.times, grid: slot.grid });
+        }
         return;
       }
       case 'main':
