@@ -97,6 +97,7 @@ function makeSky(theme) {
 
 /** Adverts are printed on the track side only: the back of a board is plain painted metal (no mirrored lettering). */
 function plainBack(mat, grey = 0.68) {
+  mat.customProgramCacheKey = () => 'plainBack' + grey;
   mat.onBeforeCompile = (sh) => {
     const inject = `\n  if (!gl_FrontFacing) diffuseColor.rgb = vec3(${grey.toFixed(2)}, ${(grey + 0.01).toFixed(2)}, ${(grey + 0.03).toFixed(2)});`;
     if (sh.fragmentShader.includes('#include <map_fragment>')) sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>', '#include <map_fragment>' + inject);
@@ -549,7 +550,9 @@ export class World {
         uv.set([s / vLen, 0, s / vLen, 1], n * 4);
         if (n < count - 1) {
           const p = n * 2;
-          idx.push(p, p + 1, p + 2, p + 1, p + 3, p + 2);
+          // wound so the front face (the printed side) looks towards the track from either wall
+          if (sgn > 0) idx.push(p, p + 2, p + 1, p + 1, p + 2, p + 3);
+          else idx.push(p, p + 1, p + 2, p + 1, p + 3, p + 2);
         }
       }
       const g = new THREE.BufferGeometry();
@@ -738,7 +741,7 @@ export class World {
       const lg = new THREE.PlaneGeometry(4.4, 0.8);
       const uv = lg.attributes.uv;
       for (let i = 0; i < uv.count; i++) uv.setY(i, 1 - (ti + 1 - uv.getY(i)) / TEAMS.length);
-      labels.push(place(lg, pt.x, pt.h + 4.05, -pt.y, rot).translate(-Math.sin(rot) * 0.03, 0, -Math.cos(rot) * 0.03));
+      labels.push(place(lg, pt.x, pt.h + 4.05, -pt.y, rot).translate(Math.sin(rot) * 0.03, 0, Math.cos(rot) * 0.03));
       tr.pointAt(box.s, box.d, pt);
       boxes.push(col(place(new THREE.PlaneGeometry(6.4, 3.4), pt.x, pt.h + 0.03, -pt.y, pt.heading, -Math.PI / 2), team.color, 0.55));
     });
@@ -757,8 +760,7 @@ export class World {
     const tr = this.track, N = tr.N;
     const i0 = 0;
     const mat = new THREE.MeshBasicMaterial({ map: this.tex.start, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
-    this.tex.start.repeat.set(8, 1);
-    const g = this.ribbonGeometry(N - 1, 1, (i) => -tr.wr[i], (i) => tr.wl[i], { yOff: 0.018, vLen: 2.4, uRepeat: (tr.wl[0] + tr.wr[0]) / 1.2 });
+    const g = this.ribbonGeometry(N - 1, 1, (i) => -tr.wr[i], (i) => tr.wl[i], { yOff: 0.018, vLen: 2.4, uRepeat: (tr.wl[0] + tr.wr[0]) / 2.4 });
     // narrow: keep only ~2.4 m long strip around s = 0
     const strip = new THREE.Mesh(g, mat);
     this.group.add(strip);
