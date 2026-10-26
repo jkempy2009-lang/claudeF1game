@@ -1,0 +1,15 @@
+{
+  "name": "Apex Grand Prix",
+  "short_name": "Apex GP",
+  "description": "A 3D Formula racing game with real tyre, aero and powertrain physics and a 20-car AI grid.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "landscape",
+  "background_color": "#090b0e",
+  "theme_color": "#090b0e",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

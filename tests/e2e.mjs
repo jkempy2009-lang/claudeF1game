@@ -40,6 +40,19 @@ for (const [name, bad] of [
   await page.context().close();
 }
 
+// 1b. deployment files: manifest, icon and service worker are served and parse
+{
+  const page = await open(fast);
+  const r = await page.evaluate(async () => {
+    const out = {};
+    for (const f of ['manifest.webmanifest', 'icon.svg', 'sw.js']) { const res = await fetch(f); out[f] = res.ok ? (await res.text()).length : -1; }
+    return out;
+  }).catch(() => ({}));
+  const man = await page.evaluate(async () => { try { const j = await (await fetch('manifest.webmanifest')).json(); return j.name === 'Apex Grand Prix' && j.icons.length > 0; } catch (e) { return false; } });
+  step('manifest, icon and service worker are served', r['manifest.webmanifest'] > 0 && r['icon.svg'] > 0 && r['sw.js'] > 0 && man, JSON.stringify(r));
+  await page.context().close();
+}
+
 // 2. menus
 {
   const page = await open(fast);

@@ -133,6 +133,7 @@ class Game {
     window.addEventListener('error', (ev) => report(ev.message));
     window.addEventListener('unhandledrejection', (ev) => report(String(ev.reason)));
     this.setupTouch();
+    this.hud.onRadio = () => this.audio.ui('radio');
     document.getElementById('hud').addEventListener('click', (e) => {
       if (e.target.closest('#finish') && this.session && this.session.fin) this.session.finConfirm = true;
     });

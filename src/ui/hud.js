@@ -280,6 +280,7 @@ export class HUD {
   }
 
   radio(text, ttl = 5) {
+    if (this.onRadio && this.el.radioT.textContent !== text) this.onRadio();
     this.el.radio.classList.remove('hidden');
     this.el.radioT.textContent = text;
     clearTimeout(this._radioT);

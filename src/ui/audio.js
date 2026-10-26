@@ -396,12 +396,35 @@ export class AudioEngine {
     this.blip(1320, 0.45, 0.14, 'sine');
   }
 
+  /** Team-radio squelch: a short burst of band-passed noise, then a two-tone chirp. */
+  radioClick() {
+    if (!this.started || !this.noiseBuf) return;
+    const ctx = this.ctx, t = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 1900;
+    bp.Q.value = 1.4;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.09, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0008, t + 0.16);
+    src.connect(bp);
+    bp.connect(g);
+    g.connect(this.master);
+    src.start(t);
+    src.stop(t + 0.2);
+    setTimeout(() => this.blip(1500, 0.05, 0.035, 'square'), 170);
+    setTimeout(() => this.blip(1180, 0.05, 0.03, 'square'), 235);
+  }
+
   ui(kind = 'click') {
     if (kind === 'click') this.blip(720, 0.05, 0.05, 'triangle');
     else if (kind === 'good') {
       this.blip(660, 0.1, 0.07, 'triangle');
       setTimeout(() => this.blip(990, 0.14, 0.07, 'triangle'), 90);
     } else if (kind === 'bad') this.blip(180, 0.25, 0.1, 'sawtooth', -60);
-    else if (kind === 'radio') this.blip(2200, 0.06, 0.05, 'square');
+    else if (kind === 'radio') this.radioClick();
   }
 }

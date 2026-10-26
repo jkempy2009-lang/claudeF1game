@@ -5,6 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Apex Grand Prix</title>
 <meta name="theme-color" content="#090b0e">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta property="og:title" content="Apex Grand Prix">
 <meta property="og:description" content="A 3D Formula racing game with real tyre, aero and powertrain physics, a 20-car AI grid and adjustable difficulty.">
 <meta name="description" content="A 3D Formula racing game with a real tyre, aero and powertrain model, a 20-car AI grid and adjustable difficulty.">
@@ -23,5 +27,6 @@
   <div id="toast"></div>
 </div>
 <script src="game.js"></script>
+<script>if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol) && location.hostname !== "localhost") window.addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });</script>
 </body>
 </html>
