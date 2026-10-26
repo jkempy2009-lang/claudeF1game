@@ -16,7 +16,7 @@ npm run test:leak    # browser: GPU resources across repeated sessions
 
 ## What's in it
 
-**Modes** – *Driving school* (seven guided lessons), Race (1-30 laps, 2-20 cars), *Qualify & race* (a 3-minute session with all 20 cars sets the grid), Time Trial with a persistent ghost of your best lap, a 4-round Championship with driver and constructor standings, and a **Career**: pick a team, earn prize money, buy car upgrades (power, aero, grip), earn contract offers and play seasons of 4 or 8 rounds with difficulty that creeps up each year.
+**Modes** – *Driving school* (nine guided lessons: launch, braking, clean laps, DRS, slipstream, pit stop, hybrid power, smooth driving, wet weather), Race (1-30 laps, 2-20 cars), *Qualify & race* (a 3-minute session with all 20 cars sets the grid), Time Trial with a persistent ghost of your best lap, a 4-round Championship with driver and constructor standings, and a **Career**: pick a team, earn prize money, buy car upgrades (power, aero, grip), earn contract offers and play seasons of 4 or 8 rounds with difficulty that creeps up each year.
 
 **Circuits** (generated procedurally from corner data, with elevation, kerbs, run-off, pit lane, DRS zones, brake boards)
 

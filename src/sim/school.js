@@ -77,6 +77,27 @@ export const LESSONS = [
     tip: 'B to call the stop. Press Space as each marker enters the green band.',
   },
   {
+    id: 'ers',
+    title: 'Hybrid power',
+    track: 'aurora',
+    mode: 'timetrial',
+    blurb: 'The battery is free speed: hold the boost button on the straights and let the car harvest it back under braking.',
+    goals: [
+      { id: 'a', text: 'Hold ERS boost for 8 seconds in total', test: (c) => c.boostSec >= 8, progress: (c) => `${Math.min(8, c.boostSec).toFixed(0)}/8 s` },
+      { id: 'b', text: 'A valid lap using the boost', test: (c) => c.validLaps >= 1 && c.boostSec >= 8 },
+    ],
+    tip: 'Hold Shift with the throttle down. The ERS bar on the dash drains while you boost and recharges when you brake and lift.',
+  },
+  {
+    id: 'smooth',
+    title: 'Smooth and clean',
+    track: 'rade',
+    mode: 'timetrial',
+    blurb: 'Fast drivers do not lock wheels. Brake hard, but release as the speed drops, and keep the tyres out of the smoke.',
+    goals: [{ id: 'a', text: 'Two valid laps without a flat-spotted tyre', test: (c) => c.smoothLaps >= 2, progress: (c) => `${Math.min(2, c.smoothLaps)}/2` }],
+    tip: 'Tyre smoke on the brakes means a lock-up: ease the pedal. ABS in the setup menu helps if you want it.',
+  },
+  {
     id: 'wet',
     title: 'Wet-weather driving',
     track: 'aurora',
@@ -94,12 +115,13 @@ export const lessonById = (id) => LESSONS.find((l) => l.id === id) || null;
 export class SchoolTracker {
   constructor(lesson) {
     this.lesson = lesson;
-    this.ctx = { maxKmh: 0, cleanStops: 0, validLaps: 0, bestValid: Infinity, drsOpens: 0, minGap: Infinity, passes: 0, stops: 0, bestPerfects: 0 };
+    this.ctx = { maxKmh: 0, cleanStops: 0, validLaps: 0, bestValid: Infinity, drsOpens: 0, minGap: Infinity, passes: 0, stops: 0, bestPerfects: 0, boostSec: 0, smoothLaps: 0 };
     this.done = Object.fromEntries(lesson.goals.map((g) => [g.id, false]));
     this.complete = false;
     this._stop = null; // { flat0 } while braking from a high speed
     this._armed = false;
     this._drsOpen = false;
+    this._flatLap = 0; // the worst flat spot at the start of this lap
   }
 
   /** Per-frame update with the player's car; returns true the frame the whole lesson becomes complete. */
@@ -107,6 +129,7 @@ export class SchoolTracker {
     const c = this.ctx;
     const kmh = car.speed * 3.6;
     c.maxKmh = Math.max(c.maxKmh, kmh);
+    if (car.boostOn) c.boostSec += dt;
     const open = car.drsPos > 0.5;
     if (open && !this._drsOpen) c.drsOpens++;
     this._drsOpen = open;
@@ -134,6 +157,11 @@ export class SchoolTracker {
   onEvent(e, car) {
     if (e.car !== car) return false;
     const c = this.ctx;
+    if (e.type === 'lap') {
+      const flat = Math.max(car.flat[0], car.flat[1], car.flat[2], car.flat[3]);
+      if (e.valid && flat - this._flatLap < 0.02) c.smoothLaps++;
+      this._flatLap = flat;
+    }
     if (e.type === 'lap' && e.valid) {
       c.validLaps++;
       c.bestValid = Math.min(c.bestValid, e.time);

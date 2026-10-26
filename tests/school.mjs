@@ -31,7 +31,7 @@ function drive(S, level, maxSec, extra = () => ({}), until = () => false) {
   }
 }
 
-ok('seven lessons, each with goals and a tip', LESSONS.length >= 7 && LESSONS.every((l) => l.goals.length && l.tip && TRACK_DEFS.some((d) => d.id === l.track)));
+ok('nine lessons, each with goals and a tip', LESSONS.length >= 9 && LESSONS.every((l) => l.goals.length && l.tip && TRACK_DEFS.some((d) => d.id === l.track)));
 ok('save sanitiser keeps only known lessons', JSON.stringify(sanitizeSchool({ launch: true, bogus: true, wet: 'yes' })) === '{"launch":true}' && JSON.stringify(sanitizeSchool([1, 2])) === '{}' && JSON.stringify(sanitizeSchool(null)) === '{}');
 
 // launch: the AI drives a quick lap
@@ -75,6 +75,29 @@ ok('save sanitiser keeps only known lessons', JSON.stringify(sanitizeSchool({ la
   const S = session('line');
   drive(S, 0.6, 400, () => ({}), () => S.tr.complete);
   ok('line: two valid laps and a time under 1:20', S.tr.complete, `valid ${S.tr.ctx.validLaps}, best ${S.tr.ctx.bestValid.toFixed(1)}`);
+}
+// hybrid power: holding boost on the straights adds up; boosting with an empty battery does not count
+{
+  const S = session('ers');
+  drive(S, 0.8, 200, () => ({ boost: true }), () => S.tr.ctx.boostSec >= 8);
+  ok('ers: boost seconds are counted', S.tr.ctx.boostSec >= 8, `${S.tr.ctx.boostSec.toFixed(1)} s`);
+  const S2 = session('ers');
+  S2.car.soc = 0;
+  drive(S2, 0.8, 20, () => ({ boost: true }), () => false);
+  ok('ers: an empty battery earns little boost credit', S2.tr.ctx.boostSec < 4, `${S2.tr.ctx.boostSec.toFixed(2)} s`);
+}
+// smooth laps: a modest AI lap has no lock-ups; a lap with a flat-spotted tyre does not count
+{
+  const S = session('smooth');
+  drive(S, 0.6, 400, () => ({}), () => S.tr.complete);
+  ok('smooth: two clean valid laps pass', S.tr.complete, `smooth ${S.tr.ctx.smoothLaps}, valid ${S.tr.ctx.validLaps}`);
+  const T = new SchoolTracker(lessonById('smooth'));
+  const car = { flat: [0, 0, 0, 0] };
+  T.onEvent({ type: 'lap', car, valid: true, time: 80 }, car);
+  car.flat[1] = 0.3;
+  T.onEvent({ type: 'lap', car, valid: true, time: 80 }, car);
+  T.onEvent({ type: 'lap', car, valid: true, time: 80 }, car);
+  ok('smooth: the lap that flat-spots a tyre is not counted', T.ctx.smoothLaps === 2 && T.ctx.validLaps === 3, `${T.ctx.smoothLaps} smooth of ${T.ctx.validLaps}`);
 }
 // wet laps
 {

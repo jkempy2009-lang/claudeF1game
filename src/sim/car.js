@@ -52,6 +52,7 @@ export class Car {
     this.absF = new Float64Array(4).fill(1);
     this.surf = new Uint8Array(4);
     this.puncture = new Float64Array(4);
+    this.boostOn = false; // the ERS boost is really being deployed this step (driving school, HUD)
     this.flat = new Float64Array(4); // flat-spotted by lock-ups (0..1), cleared by a tyre change
     this.wheelFx = new Float64Array(4);
     this.wheelFy = new Float64Array(4);
@@ -319,6 +320,7 @@ export class Car {
     const boost = !!inp.boost && ersAvail;
     let ersP = 0;
     if (ersAvail && thr > 0.5 && this.gear > 0 && !inp.hold) ersP = (boost ? 1 : ERS_DEPLOY[this.ersMode]) * sp.ersPower;
+    this.boostOn = boost && ersP > 0;
     if (Math.abs(ratio) > 0) {
       const tPos = engineTorque(this.rpm) * sp.powerScale * thr * FUEL_MODE_TORQUE[this.fuelMode];
       const ersT = (ersP * sp.powerScale * thr) / Math.max((this.rpm * Math.PI) / 30, 300);
