@@ -612,6 +612,7 @@ class Game {
     this.applySettings();
     this.screens.innerHTML = '';
     this.state = 'race';
+    this.input.pressed.clear(); // keys tapped in the menus are not commands for the new race
     document.getElementById('touch') && this.updateTouchVisibility();
     this.hud.message(cfg.mode === 'qualifying' ? 'Qualifying' : cfg.mode === 'timetrial' ? 'Time trial' : `${track.name}`, '', cfg.mode === 'qualifying' ? '3 minutes · best lap sets your grid slot · all 20 cars on track' : cfg.mode === 'timetrial' ? 'Set your best lap — your ghost follows' : `${cfg.laps} laps · P${race.player.info.gridPos} on the grid${cfg.qualiTimes ? ' (qualified)' : ''}`, 4);
     this.hud.showKeyHint(10000, this.input.keys);
@@ -703,6 +704,7 @@ class Game {
     this.screens.innerHTML = '';
     this.hud.show(true); // photo mode and the replay hide the HUD
     this.state = 'race';
+    this.input.pressed.clear(); // a key tapped in the pause menu is not a command for the car
     this.session.paused = false;
     this.lastT = performance.now();
   }

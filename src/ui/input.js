@@ -83,9 +83,9 @@ const dead = (v, d) => {
   return Math.abs(v) < d ? 0 : (v - Math.sign(v) * d) / (1 - d);
 };
 const FORM_TAG = /^(INPUT|TEXTAREA|SELECT)$/;
-const STALE_MS = 500;
+const STALE_MS = 3000;
 
-/** Keys pressed since the last poll. A press that nobody polled for half a second (typed in a menu) is stale and no longer counts. */
+/** Keys pressed since the last poll. A press nobody polled for three seconds is stale and no longer counts (a session start also clears the set). */
 class Pressed extends Map {
   has(code) {
     const t = super.get(code);
