@@ -302,7 +302,7 @@ function computeRacingLine(track, margin = 1.1, lengthWeight = 0.04, smoothLen =
       rhs[j] -= co[p] * (nx[j] * a0x[m] + ny[j] * a0y[m]);
       for (let q = p; q < 3; q++) {
         const k = idx[q];
-        const v = co[p] * co[q] * dotN(j, k) * (p === q ? 1 : 1);
+        const v = co[p] * co[q] * dotN(j, k);
         if (k === j) B0[j] += v;
         else if (k - j === 1) B1[j] += v;
         else if (k - j === 2) B2[j] += v;
@@ -422,7 +422,8 @@ export class Track {
 
     // Roll so s = 0 is the start/finish line, then decimate to ~2 m spacing.
     const N1 = lay.N;
-    let shift = Math.round(startAt / lay.step);
+    if (!Number.isFinite(startAt)) throw new Error(`track '${def.id}' has no usable start position`);
+    let shift = mod(Math.round(startAt / lay.step), lay.N);
     shift -= shift % 2;
     const N = N1 / 2;
     this.N = N;
@@ -749,7 +750,7 @@ export class Track {
     const boxStart = p.boxStart ?? 60, boxSpacing = p.boxSpacing ?? 15;
     this.pit = {
       start: mod(p.in, L), // arc length of the entry ramp start
-      len: Math.max(p.out - p.in, rampIn + boxStart + 9 * boxSpacing + 30 + rampOut),
+      len: Math.max(mod(p.out - p.in, L), rampIn + boxStart + 9 * boxSpacing + 30 + rampOut),
       rampIn,
       rampOut,
       offset,
@@ -845,7 +846,7 @@ export class Track {
     this.cpCount = Math.round(L / this.cpSpacing);
   }
 
-  /** DRS zones from the geometry: every straight longer than ~450 m opens 25 m after the corner exit and closes 150 m before the next corner. */
+  /** DRS zones from the geometry: every straight longer than 480 m opens 25 m after the corner exit and closes 160 m before the next corner. */
   autoDrsZones() {
     const N = this.N, ds = this.ds, L = this.length;
     const straight = (i) => Math.abs(this.curv[i % N]) < 1 / 1200;
@@ -881,7 +882,7 @@ export class Track {
   _finishLine() {
     // Grid slots: pole is slot 0, two columns, 8 m apart, behind the line.
     this.gridSlot = (k) => ({
-      s: mod(-9 - 8 * k - (k % 2) * 0, this.length),
+      s: mod(-9 - 8 * k, this.length),
       d: k % 2 === 0 ? 3.3 : -3.3,
     });
   }
