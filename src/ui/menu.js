@@ -3,6 +3,7 @@ import { TEAMS } from '../sim/teams.js';
 import { DIFFICULTIES } from '../sim/race.js';
 import { COMPOUNDS, COMPOUND_IDS } from '../sim/carspec.js';
 import { formatTime } from '../util/math.js';
+import { drawLineChart } from './charts.js';
 import { CHAMP_CAL, sanitizeCareer, UPGRADE_KEYS, UPGRADE_INFO, UPGRADE_MAX, upgradeCost, objectiveFor, DISTANCES, seasonDone, driverStandings, constructorStandings, lapsFor, teamRank } from '../sim/career.js';
 
 export const SAVE_KEY = 'apex-grand-prix.v1';
@@ -29,13 +30,13 @@ export const DEFAULT_CONFIG = {
   frontWing: null,
   rearWing: null,
   brakeBias: 0.58,
-  assists: { abs: true, tc: 2, steer: true, stability: 1, autoGear: true, pitAuto: true },
+  assists: { abs: true, tc: 2, steer: true, stability: 1, autoGear: true, pitAuto: true, pitGame: true },
 };
 const ASSIST_PRESETS = {
-  Beginner: { abs: true, tc: 3, steer: true, stability: 3, autoGear: true, pitAuto: true },
-  Intermediate: { abs: true, tc: 2, steer: true, stability: 1, autoGear: true, pitAuto: true },
-  Pro: { abs: true, tc: 1, steer: false, stability: 0, autoGear: true, pitAuto: true },
-  Simulator: { abs: false, tc: 0, steer: false, stability: 0, autoGear: false, pitAuto: false },
+  Beginner: { abs: true, tc: 3, steer: true, stability: 3, autoGear: true, pitAuto: true, pitGame: false },
+  Intermediate: { abs: true, tc: 2, steer: true, stability: 1, autoGear: true, pitAuto: true, pitGame: true },
+  Pro: { abs: true, tc: 1, steer: false, stability: 0, autoGear: true, pitAuto: true, pitGame: true },
+  Simulator: { abs: false, tc: 0, steer: false, stability: 0, autoGear: false, pitAuto: false, pitGame: true },
 };
 const TC_NAMES = ['Off', 'Low', 'Medium', 'High'];
 
@@ -79,6 +80,7 @@ export function sanitizeConfig(raw) {
       stability: Math.round(num(ra.stability, 0, 3, D.assists.stability)),
       autoGear: bool(ra.autoGear, D.assists.autoGear),
       pitAuto: bool(ra.pitAuto, D.assists.pitAuto),
+      pitGame: bool(ra.pitGame, D.assists.pitGame),
     },
   };
 }
@@ -193,7 +195,30 @@ export class Menu {
     this.afterRender(name);
   }
 
+  drawTelemetry() {
+    const d = this.lastData;
+    if (!d || !d.race || !d.player) return;
+    const { race, player, cls } = d;
+    const me = player.rs;
+    const winner = cls ? (cls[0] && cls[0].car !== player ? cls[0].car : cls[1] ? cls[1].car : null) : null;
+    const fl = race.fastest && race.fastest.car && race.fastest.car !== player && race.fastest.car !== winner ? race.fastest.car : null;
+    const cars = [{ car: player, name: 'You', color: '#ff4d4d', width: 3 }];
+    if (winner) cars.push({ car: winner, name: winner.info.code + (cls[0].car === winner ? ' (winner)' : ' (P2)'), color: '#31d17a', dash: true });
+    if (fl) cars.push({ car: fl, name: fl.info.code + ' (fastest lap)', color: '#4aa3ff', dash: true });
+    const laps = Math.max(1, me.tele.length);
+    const xt = Array.from({ length: Math.min(laps, 10) }, (_, i) => Math.round(1 + (i * (laps - 1)) / Math.max(1, Math.min(laps, 10) - 1)));
+    const markers = me.stopLaps.map((l) => ({ x: l, label: 'PIT' }));
+    const canv = (n) => this.root.querySelector(`canvas[data-chart="${n}"]`);
+    const best = Math.min(...me.tele.map((t) => t.time).filter(Number.isFinite), Infinity);
+    const mk = (fn) => cars.map((c) => ({ name: c.name, color: c.color, dash: c.dash, width: c.width, pts: c.car.rs.tele.map((t) => ({ x: t.lap, y: fn(t) })) }));
+    if (canv('laps')) drawLineChart(canv('laps'), mk((t) => t.time), { title: 'Lap time', fmtY: (v) => formatTime(v, 1), xTicks: xt, markers, yMin: Number.isFinite(best) ? best * 0.985 : undefined, yMax: Number.isFinite(best) ? best * 1.3 : undefined });
+    if (canv('fuel')) drawLineChart(canv('fuel'), mk((t) => t.fuel), { title: 'Fuel load (kg)', fmtY: (v, span) => v.toFixed(span < 8 ? 1 : 0), minSpan: 3, xTicks: xt, markers });
+    if (canv('wear')) drawLineChart(canv('wear'), mk((t) => Math.min(100, t.wear * 100)), { title: 'Tyre wear (%)', fmtY: (v) => v.toFixed(0), xTicks: xt, markers, yMin: 0 });
+    if (canv('top')) drawLineChart(canv('top'), mk((t) => t.topSpeed * 3.6), { title: 'Top speed (km/h)', fmtY: (v) => v.toFixed(0), minSpan: 40, xTicks: xt, markers });
+  }
+
   afterRender(name) {
+    if (name === 'results') requestAnimationFrame(() => this.drawTelemetry());
     if (name === 'setup' && this.hooks.previewTeam) this.hooks.previewTeam(this.config.team);
     const f = this.root.querySelector('.btn.primary, .btn');
     if (f && name === 'main') f.focus({ preventScroll: true });
@@ -320,6 +345,7 @@ export class Menu {
       ${this.toggle('a.steer', 'Steering assist', 'Limits steering lock so the front tyres don\'t scrub away', a.steer)}
       ${this.toggle('a.autoGear', 'Automatic gearbox', 'Manual: Q / E or paddles', a.autoGear)}
       ${this.toggle('a.pitAuto', 'Pit lane autopilot', 'The car drives itself through the pits once you commit', a.pitAuto)}
+      ${this.toggle('a.pitGame', 'Interactive pit stops', 'Time your button press (Space) on each wheel nut: a clean stop takes 2.5 s, a cross-threaded nut costs 0.9 s', a.pitGame)}
     </div><div class="panel"><h3>Stability</h3>
       <div class="field"><label>Traction control</label>${this.chips('tc', TC_NAMES.map((n, i) => ({ value: i, label: n })), a.tc)}</div>
       <div class="field"><label>Stability control (counter-steer help)</label>${this.chips('stability', TC_NAMES.map((n, i) => ({ value: i, label: n })), a.stability)}</div>
@@ -400,6 +426,7 @@ export class Menu {
       ${me ? `<div class="hint" style="text-align:center">You finished <b>P${me.pos}</b>${me.penalty ? ` (includes ${me.penalty}s of penalties)` : ''} · best lap ${me.best < Infinity ? formatTime(me.best) : '—'}</div>` : ''}
       ${careerRes ? `<div class="panel"><h3>Career</h3><div class="hint">Finished <b style="color:#fff">P${careerRes.pos}</b> · objective P${careerRes.objective} ${careerRes.met ? '<b style="color:#31d17a">achieved</b>' : '<b style="color:#ff6b6b">missed</b>'} · prize money <b style="color:#ffd24a">+${careerRes.prize}</b>${careerRes.fastest ? ' (fastest lap bonus)' : ''} · budget now <b style="color:#ffd24a">${careerRes.budget}</b></div></div>` : ''}
       <div class="grid2" style="grid-template-columns:${season ? '2fr 1fr' : '1fr'}"><div class="panel" style="overflow:auto"><table class="results"><tr><th>Pos</th><th>Driver</th><th>Team</th><th>Time</th><th>Gap</th><th>Pen</th><th>Best lap</th><th>Stops</th><th>Grid</th><th>Pts</th></tr>${rows}</table></div>${seasonHtml}</div>
+      <div class="panel telemetry"><h3>Race telemetry</h3><div class="charts"><canvas data-chart="laps"></canvas><canvas data-chart="fuel"></canvas><canvas data-chart="wear"></canvas><canvas data-chart="top"></canvas></div></div>
       <div class="footer"><button class="btn sm" data-act="quit">Main menu</button><div class="row">
         ${careerRes ? '<button class="btn primary" data-act="careercontinue">Continue career ▶</button>' : `<button class="btn ${season && !final ? '' : 'primary'}" data-act="restart">Race again</button>`}
         ${season && !final ? '<button class="btn primary" data-act="nextround">Next round ▶</button>' : ''}

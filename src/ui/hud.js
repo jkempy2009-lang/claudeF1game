@@ -48,6 +48,7 @@ export class HUD {
       </div>
       <div id="minimap" class="hud-box"><canvas width="380" height="260"></canvas></div>
       <div id="lights" class="hud-box hidden"><i></i><i></i><i></i><i></i><i></i></div>
+      <div id="pitgame" class="hud-box hidden"><div class="pgt">Pit stop · press <kbd>Space</kbd> with the marker in the green</div><div class="pgw">${['FL', 'FR', 'RL', 'RR'].map((n) => `<div class="nut"><div class="trk"><i class="gd"></i><i class="pf"></i><b></b></div><span>${n}</span></div>`).join('')}</div><div class="pgr"></div></div>
       <div id="msgs"></div>
       <div id="radio" class="hud-box hidden"><b>Radio</b><span id="radio-t"></span></div>
       <div id="pit" class="hud-box hidden"></div>
@@ -76,7 +77,7 @@ export class HUD {
       <div class="touch" id="touch"><button class="l" data-k="left">◀</button><button class="r" data-k="right">▶</button><button class="b" data-k="brake">BRK</button><button class="g" data-k="throttle">GAS</button></div>
     `;
     this.el = {
-      twRows: $('#tw-rows'), twLap: $('#tw-lap'), tbLap: $('#tb-lap'), tbClock: $('#tb-clock'), tbWx: $('#tb-wx'),
+      twRows: $('#tw-rows'), twLap: $('#tw-lap'), tbLap: $('#tb-lap'), tbClock: $('#tb-clock'), tbWx: $('#tb-wx'), pitgame: $('#pitgame'),
       cur: $('#t-cur'), delta: $('#t-delta'), last: $('#t-last'), best: $('#t-best'), fast: $('#t-fast'), sec: $('#t-sec'),
       mini: $('#minimap canvas'), lights: $('#lights'), msgs: $('#msgs'), radio: $('#radio'), radioT: $('#radio-t'), pit: $('#pit'),
       revs: $('#revs'), soc: $('#d-soc'), socb: $('#d-socb'), drs: $('#d-drs'), boost: $('#d-boost'), gap: $('#d-gap'),
@@ -394,6 +395,29 @@ export class HUD {
     }
 
     // pit panel
+    // interactive pit stop
+    const pgEl = el.pitgame;
+    const pg = rs.service && rs.service.pg;
+    if (pg) {
+      pgEl.classList.remove('hidden');
+      const nuts = pgEl.querySelectorAll('.nut');
+      pg.w.forEach((w, k) => {
+        const n = nuts[k];
+        const m = n.querySelector('b');
+        m.style.left = clamp(w.p, 0, 1) * 100 + '%';
+        const c = w.res ? 'r-' + w.res : w.p >= 0 ? 'live' : '';
+        if (n._c !== c) {
+          n._c = c;
+          n.className = 'nut ' + c;
+        }
+      });
+      const msg = pg.done ? (pg.misses ? `${pg.misses} cross-threaded: ${pg.dur.toFixed(1)} s` : pg.goods ? `Clean stop: ${pg.dur.toFixed(1)} s` : 'Perfect stop: 2.5 s') : '';
+      if (pgEl._m !== msg) {
+        pgEl._m = msg;
+        pgEl.querySelector('.pgr').textContent = msg;
+      }
+    } else if (!pgEl.classList.contains('hidden')) pgEl.classList.add('hidden');
+
     const pitEl = el.pit;
     if (rs.service) {
       pitEl.classList.remove('hidden');

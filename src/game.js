@@ -866,6 +866,18 @@ class Game {
             hud.radio(`Penalty: ${e.reason}. ${e.secs} seconds added to your race time.`, 6);
           }
           break;
+        case 'pitStopStart':
+          if (e.car === player && e.game && !s._pgTip) {
+            s._pgTip = true;
+            hud.radio('Pit stop: press Space as each marker enters the green. Perfect timing on all four wheels is a 2.5 second stop.', 7);
+          } else if (e.car === player) hud.radio('Box, box — hold position, tyres going on.', 3);
+          break;
+        case 'pitWheel':
+          if (e.car === player) this.audio.ui(e.res === 'perfect' ? 'good' : e.res === 'good' ? 'click' : 'bad');
+          break;
+        case 'pitGameDone':
+          if (e.car === player) hud.message(e.misses ? 'Cross-threaded wheel nut' : e.perfects === 4 ? 'Perfect pit stop' : 'Clean pit stop', e.misses ? 'bad' : '', `${e.dur.toFixed(1)} seconds`, 3);
+          break;
         case 'scDeploy':
           hud.flag('SAFETY CAR', '#ffc400', 6, 'sc');
           hud.radio('Safety car, safety car. Stay in position behind the pace car. No overtaking.', 7);
@@ -903,9 +915,6 @@ class Game {
           break;
         case 'pitEntry':
           if (e.car === player) hud.message('Pit lane', '', '80 km/h limit', 2.5);
-          break;
-        case 'pitStopStart':
-          if (e.car === player) hud.radio('Box, box — hold position, tyres going on.', 3);
           break;
         case 'pitStopEnd':
           if (e.car === player) {

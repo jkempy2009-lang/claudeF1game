@@ -6,6 +6,7 @@ import { collideCars, collideWalls } from './collision.js';
 import { TEAMS, DRIVERS } from './teams.js';
 import { SURF } from './track.js';
 import { upgradeEffects } from './career.js';
+import { makePitGame, stepPitGame } from './pitgame.js';
 import { clamp, loopDelta, mod, mulberry32 } from '../util/math.js';
 
 export const DT = 1 / 240;
@@ -37,7 +38,7 @@ export const DEFAULT_OPTIONS = {
   mandatoryStop: false,
   compound: 'medium',
   setup: { frontWing: null, rearWing: null, brakeBias: 0.58 },
-  assists: { abs: true, tc: 2, steer: 1, stability: 1, autoGear: true, pitAuto: true },
+  assists: { abs: true, tc: 2, steer: 1, stability: 1, autoGear: true, pitAuto: true, pitGame: true },
   seed: 1,
 };
 
@@ -231,6 +232,8 @@ export class Race {
       laps: 0,
       lapStart: 0,
       lapTimes: [],
+      tele: [], // per-lap telemetry for the results screen
+      stopLaps: [],
       last: null,
       best: Infinity,
       sectorIdx: 2,
@@ -366,6 +369,7 @@ export class Race {
       inp.gearUp = !!p.gearUp;
       inp.gearDown = !!p.gearDown;
       inp.pitLimit = 0;
+      if (p.drsPress && rs.service && rs.service.pg) rs.pitAct = true; // DRS key doubles as the wheel-nut button
       inp.aiDriven = !!p.aiDriven;
       inp.allowReverse = this.phase === 'racing' && !this.opt.noReverse;
       // autopilot through the pit lane
@@ -463,6 +467,7 @@ export class Race {
       return;
     }
     rs.dist += delta;
+    if (car.speed > (rs.lapTop || 0)) rs.lapTop = car.speed;
     const prevMax = rs.maxDist;
     if (rs.dist > rs.maxDist) rs.maxDist = rs.dist;
     if (rs.finished && !car.driver && !car.info.isPlayer) return;
@@ -523,6 +528,9 @@ export class Race {
     if (rs.laps >= 1) {
       rs.last = lapTime;
       rs.lapTimes.push(lapTime);
+      const ts = car.tyreSummary();
+      rs.tele.push({ lap: rs.laps, time: lapTime, fuel: car.fuel, wear: ts.wear, temp: ts.temp, compound: car.compound.letter, topSpeed: rs.lapTop || 0, wet: this.wet });
+      rs.lapTop = 0;
       const counts = rs.laps >= 2 || this.totalLaps === 1;
       const valid = !rs.invalidLap && counts;
       if (valid && lapTime < rs.best) {
@@ -714,10 +722,26 @@ export class Race {
       let dur = 2.3 + this.rng() * (1.1 + (1 - this.opt.level) * 1.2);
       if ((car.damageFront || 0) > 0.15) dur += 3.5;
       rs.service = { t: 0, dur };
-      this.pushEvent({ type: 'pitStopStart', car, dur });
+      if (car === this.player && this.opt.assists.pitGame && this.opt.mode === 'race') {
+        rs.service.pg = makePitGame(); // the player's crew needs the right timing on each wheel nut
+        rs.service.dur = Infinity;
+        rs.pitAct = false;
+        dur = 2.5;
+      }
+      this.pushEvent({ type: 'pitStopStart', car, dur, game: !!rs.service.pg });
     }
     if (rs.service) {
       rs.service.t += dt;
+      const pg = rs.service.pg;
+      if (pg) {
+        const press = rs.pitAct;
+        rs.pitAct = false;
+        for (const r of stepPitGame(pg, rs.service.t, press)) this.pushEvent({ type: 'pitWheel', car, k: r.k, res: r.res });
+        if (pg.done && rs.service.dur === Infinity) {
+          rs.service.dur = pg.dur;
+          this.pushEvent({ type: 'pitGameDone', car, dur: pg.dur, perfects: pg.perfects, misses: pg.misses });
+        }
+      }
       if (rs.service.t >= rs.service.dur) {
         let next = rs.nextCompound;
         if (!next) {
@@ -731,6 +755,7 @@ export class Race {
         rs.nextCompound = null;
         rs.compounds.push(next);
         rs.stops++;
+        rs.stopLaps.push(rs.laps);
         rs.service = null;
         rs.pitRequested = false;
         rs.boxLatch = true;

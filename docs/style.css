@@ -264,3 +264,24 @@ table.results .tc { display: inline-block; width: 4px; height: 1em; vertical-ali
 .bigstats div { display: flex; flex-direction: column; }
 .bigstats small { color: var(--dim); text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.7rem; }
 .bigstats b { font-size: 2rem; font-style: italic; }
+
+/* interactive pit stop */
+#pitgame { left: 50%; bottom: 31%; transform: translateX(-50%); padding: 0.7em 1.1em; text-align: center; min-width: 26em; }
+#pitgame .pgt { font-size: 0.85em; color: var(--dim); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.6em; }
+#pitgame .pgw { display: flex; gap: 0.7em; justify-content: center; }
+#pitgame .nut { flex: 1; }
+#pitgame .nut span { display: block; font-weight: 800; font-size: 0.9em; margin-top: 0.25em; opacity: 0.7; }
+#pitgame .trk { position: relative; height: 1.5em; background: rgba(255,255,255,0.1); border: 1px solid var(--line); overflow: hidden; }
+#pitgame .trk .gd { position: absolute; top: 0; bottom: 0; left: 55%; width: 34%; background: rgba(255,210,74,0.35); }
+#pitgame .trk .pf { position: absolute; top: 0; bottom: 0; left: 65%; width: 14%; background: rgba(49,209,122,0.75); }
+#pitgame .trk b { position: absolute; top: 0; bottom: 0; width: 4px; margin-left: -2px; background: #fff; box-shadow: 0 0 8px #fff; opacity: 0; }
+#pitgame .nut.live b { opacity: 1; }
+#pitgame .nut.r-perfect .trk { outline: 2px solid #31d17a; }
+#pitgame .nut.r-good .trk { outline: 2px solid #ffd24a; }
+#pitgame .nut.r-miss .trk { outline: 2px solid #ff4b4b; background: rgba(255,60,60,0.28); }
+#pitgame .nut.r-perfect b, #pitgame .nut.r-good b, #pitgame .nut.r-miss b { opacity: 1; }
+#pitgame .pgr { margin-top: 0.6em; font-weight: 800; font-size: 1.15em; min-height: 1.4em; }
+
+/* telemetry */
+.telemetry .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); gap: 0.8rem; }
+.telemetry canvas { width: 100%; height: 11.5rem; background: rgba(255,255,255,0.03); border: 1px solid var(--line); }

@@ -101,6 +101,16 @@ export class CameraRig {
       const R = lerp(12, 6.5, clamp(t / 12, 0, 1));
       const h = 1.5 + 0.9 * Math.sin(t * 0.45) + clamp(t / 20, 0, 1) * 0.6;
       const want = v3.set(carPos.x + Math.cos(a) * R, carPos.y + h, carPos.z + Math.sin(a) * R);
+      // stay inside the barriers: never film from the back of an advertising board
+      const pr = this._pr || (this._pr = { i: 0, t: 0, s: 0, d: 0, dist: 0 });
+      track.project(want.x, -want.z, this._hint ?? -1, pr);
+      this._hint = pr.i;
+      const wl = track.wallDist(pr.i, 1) - 1.4, wr = track.wallDist(pr.i, -1) - 1.4;
+      if (pr.d > wl || pr.d < -wr) {
+        const dd = Math.min(wl, Math.max(-wr, pr.d)) - pr.d;
+        want.x += track.nx[pr.i] * dd;
+        want.z -= track.ny[pr.i] * dd;
+      }
       if (!this.init) this.pos.copy(want);
       this.pos.lerp(want, 1 - Math.exp(-dt * 6));
       cam.position.copy(this.pos);
