@@ -58,6 +58,7 @@ export const TRACK_DEFS = [
   {
     id: 'rade',
     setup: { front: 9, rear: 9 },
+    aiPace: 0.955, // street circuit: AI keeps a margin to the walls (calibrated against human lap times)
     name: 'Circuit de la Rade',
     country: 'Monaco-style harbour',
     blurb: 'Tight street circuit between the barriers. No room for error. Run maximum downforce.',

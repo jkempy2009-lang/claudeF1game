@@ -59,6 +59,6 @@ const cls = race.classification();
 ok('race ends with a classification of 20 cars', race.phase === 'finished' && cls.length === 20);
 ok('every car finished 2 laps', cls.filter((e) => e.time != null && e.laps >= 2).length >= 19, `(${cls.filter((e) => e.time != null).length}/20)`);
 ok('winner is from a front-grid slot or a top team', cls[0].gridPos <= 8);
-ok('lap times are plausible (80-130 s)', cls.every((e) => e.best === Infinity || (e.best > 80 && e.best < 130)));
+ok('lap times are plausible (60-130 s)', cls.every((e) => e.best === Infinity || (e.best > 60 && e.best < 130)));
 console.log(failed ? `\n${failed} FAILED` : '\nALL TESTS PASSED');
 process.exit(failed ? 1 : 0);

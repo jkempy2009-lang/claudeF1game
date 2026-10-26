@@ -128,7 +128,7 @@ export class Menu {
         <button class="btn" data-act="season">Championship<small>${s ? `Round ${Math.min(s.round + 1, TRACK_DEFS.length)} of ${TRACK_DEFS.length} in progress` : '4 rounds, points, a title to win'}</small></button>
         <div class="row"><button class="btn sm grow" data-act="controls">Controls</button><button class="btn sm grow" data-act="settings">Settings</button></div>
       </div>
-      <div class="version">v1.0 · WASD / arrows to drive · works with gamepads</div>
+      <div class="version">v1.1 · WASD / arrows to drive · works with gamepads</div>
     </section>`;
   }
 
@@ -273,7 +273,8 @@ export class Menu {
         <button class="btn" data-act="restart">Restart session</button>
         <button class="btn" data-act="pausecam">Camera: <span id="camname"></span></button>
         <button class="btn" data-act="pausesettings">Settings</button>
-        <button class="btn" data-act="quit">Quit to menu</button></div></section>`;
+        <button class="btn" data-act="quit">Quit to menu</button>
+        <div class="hint" style="margin-top:.8rem">Racing line guide: <kbd>L</kbd> · Camera: <kbd>C</kbd> · Reset to track: <kbd>R</kbd> · Autopilot: <kbd>G</kbd></div></div></section>`;
   }
 
   screen_results(data) {
@@ -304,7 +305,7 @@ export class Menu {
       ${me ? `<div class="hint" style="text-align:center">You finished <b>P${me.pos}</b>${me.penalty ? ` (includes ${me.penalty}s of penalties)` : ''} · best lap ${me.best < Infinity ? formatTime(me.best) : '—'}</div>` : ''}
       <div class="grid2" style="grid-template-columns:${season ? '2fr 1fr' : '1fr'}"><div class="panel" style="overflow:auto"><table class="results"><tr><th>Pos</th><th>Driver</th><th>Team</th><th>Time</th><th>Gap</th><th>Pen</th><th>Best lap</th><th>Stops</th><th>Grid</th><th>Pts</th></tr>${rows}</table></div>${seasonHtml}</div>
       <div class="footer"><button class="btn sm" data-act="quit">Main menu</button><div class="row">
-        <button class="btn" data-act="restart">Race again</button>
+        <button class="btn ${season && !final ? '' : 'primary'}" data-act="restart">Race again</button>
         ${season && !final ? '<button class="btn primary" data-act="nextround">Next round ▶</button>' : ''}
         ${final ? '<button class="btn primary" data-act="endseason">Finish season</button>' : ''}</div></div></section>`;
   }

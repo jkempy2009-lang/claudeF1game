@@ -291,6 +291,31 @@ export class AudioEngine {
     this.blip(n >= 5 ? 880 : 660, 0.18, 0.12, 'sine');
   }
 
+  /** Crowd roar swelling and fading over a few seconds. */
+  cheer(strength = 1) {
+    if (!this.started) return;
+    const ctx = this.ctx, t = ctx.currentTime;
+    const n = this.makeNoise(false);
+    const f = ctx.createBiquadFilter();
+    f.type = 'bandpass';
+    f.frequency.setValueAtTime(700, t);
+    f.frequency.linearRampToValueAtTime(1500, t + 1.2);
+    f.Q.value = 0.5;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.35 * strength, t + 0.9);
+    g.gain.exponentialRampToValueAtTime(0.0008, t + 4.5);
+    n.connect(f);
+    f.connect(g);
+    g.connect(this.master);
+    n.start(t, Math.random());
+    n.stop(t + 4.6);
+  }
+
+  fanfare() {
+    [[523.25, 0], [659.25, 0.16], [783.99, 0.32], [1046.5, 0.5]].forEach(([f, d]) => setTimeout(() => this.blip(f, 0.45, 0.08, 'triangle'), d * 1000));
+  }
+
   go() {
     this.blip(1320, 0.45, 0.14, 'sine');
   }

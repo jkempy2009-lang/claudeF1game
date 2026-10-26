@@ -1,6 +1,6 @@
 {
   "name": "apex-grand-prix",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Apex Grand Prix - a 3D Formula-style racing game with a real tyre/aero/powertrain model, AI field and adjustable difficulty.",
   "type": "module",
   "private": true,

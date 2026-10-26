@@ -42,7 +42,17 @@ class Game {
     this.input = new Input();
     this.audio = new AudioEngine();
     this.lastT = performance.now();
-    this.initRenderer();
+    try {
+      this.initRenderer();
+    } catch (e) {
+      document.getElementById('screens').innerHTML = '<section class="screen loading"><div class="logo">Apex <span>GP</span></div><div class="hint" style="max-width:34rem;text-align:center;line-height:1.5">This game needs WebGL, and your browser could not start it. Try a current Chrome, Edge, Firefox or Safari with hardware acceleration enabled.</div></section>';
+      throw e;
+    }
+    this.canvas.addEventListener('webglcontextlost', (ev) => {
+      ev.preventDefault();
+      this.toast('Graphics context lost: reloading…');
+      setTimeout(() => location.reload(), 1200);
+    });
     this.hud = new HUD(document.getElementById('hud'));
     this.screens = document.getElementById('screens');
     this.menu = new Menu(this.screens, this.save, this.hooks());
@@ -52,7 +62,11 @@ class Game {
     window.addEventListener('keydown', (e) => {
       this.audio.start();
       this.audio.resume();
-      if (this.state === 'menu' && e.code === 'Enter') {
+      if (this.state === 'menu' && e.code === 'Escape' && this.menu.current && this.menu.current !== 'main') {
+        if (this.menu.current === 'settings' && this.session) this.menu.show('pause');
+        else this.toMain();
+      }
+      if ((this.state === 'menu' || this.state === 'results') && e.code === 'Enter') {
         const b = this.screens.querySelector('.btn.primary');
         if (b && document.activeElement === document.body) b.click();
       }
@@ -65,6 +79,9 @@ class Game {
       if (document.hidden && this.state === 'race') this.pause();
     });
     this.setupTouch();
+    document.getElementById('hud').addEventListener('click', (e) => {
+      if (e.target.closest('#finish') && this.session && this.session.fin) this.session.finConfirm = true;
+    });
     this.boot();
   }
 
@@ -270,7 +287,6 @@ class Game {
 
   async buildSession(cfg) {
     const track = this.tracks[cfg.trackId];
-    const season = !!(this.save.season && cfg.season !== false && this.menu.current === 'setup' && false);
     const race = new Race(track, {
       mode: cfg.mode,
       laps: cfg.laps,
@@ -390,7 +406,6 @@ class Game {
       race.step(DT, pin);
       if (pred()) break;
     }
-    race.events.length = 0;
     s.introT = 99;
     return pred();
   }
@@ -510,7 +525,7 @@ class Game {
     const input = this.input;
     const pin = input.poll(dt, player.speed);
     if (pin.pause) return this.pause();
-    if (pin.camera) {
+    if (pin.camera && !s.fin) {
       this.cycleCamera();
       s.introCancelled = true;
       camRig.init = false;
@@ -527,8 +542,18 @@ class Game {
       this.toast('Racing line guide ' + (this.save.settings.line ? 'on' : 'off'));
     }
     camRig.lookBack = pin.lookBack;
+    if (s.fin) {
+      s.fin.t += dt;
+      if (((pin.confirm || s.finConfirm) && s.fin.t > 1.5) || s.fin.t > 40) {
+        if (!s.skipToResults) {
+          s.skipToResults = true;
+          this.hud.hideFinish();
+          this.hud.message('Finishing the classification…', '', 'Waiting for the rest of the field', 3);
+        }
+      }
+    }
     if (pin.autoToggle) this.toggleAutopilot();
-    if (s.auto && race.phase === 'racing') {
+    if (s.auto && (race.phase === 'racing' || (s.fin && race.phase === 'finished'))) {
       const ai = s.pilot.update(DT, race);
       pin.throttle = ai.throttle;
       pin.brake = ai.brake;
@@ -554,7 +579,7 @@ class Game {
     }
 
     // fixed-step physics
-    const ff = race.phase === 'racing' && player.rs.finished && race.phase !== 'finished';
+    const ff = !!s.skipToResults && race.phase !== 'finished';
     const frameSteps = ff ? 40 : 1;
     let n = 0;
     s.acc += dt;
@@ -609,7 +634,7 @@ class Game {
       }
     }
     effects.update(dt, this.pointScale);
-    s.guide.setVisible(this.save.settings.line !== false && race.phase !== 'grid' && !player.rs.inPitLane);
+    s.guide.setVisible(this.save.settings.line !== false && race.phase !== 'grid' && !player.rs.inPitLane && !s.fin);
     s.guide.update(player);
     // ghost
     if (s.ghostView) {
@@ -659,9 +684,9 @@ class Game {
     this.audio.update(player, others, lst, dt, false);
 
     // results
-    if (race.phase === 'finished' && !s.finishedShown) {
+    if (race.phase === 'finished' && !s.finishedShown && (!s.fin || s.skipToResults)) {
       s.finishedShown = true;
-      setTimeout(() => this.showResults(), race.opt.mode === 'timetrial' ? 0 : 1500);
+      setTimeout(() => this.showResults(), race.opt.mode === 'timetrial' ? 0 : 600);
     }
   }
 
@@ -742,11 +767,7 @@ class Game {
           hud.flag('Chequered flag', '#fff', 4, 'chequered');
           break;
         case 'finish':
-          if (e.car === player) {
-            const pos = player.rs.pos;
-            hud.message(race.opt.mode === 'race' ? `Finished P${pos}` : 'Session complete', 'good', formatTime(e.time), 5);
-            this.audio.ui('good');
-          }
+          if (e.car === player && race.opt.mode === 'race') this.startFinishScene(s, e);
           break;
         case 'ghost':
           this.saveGhost(s);
@@ -757,6 +778,29 @@ class Game {
       }
     }
     race.events.length = 0;
+  }
+
+  /** The player takes the chequered flag: hand the car to a slow cool-down, run a cinematic camera and show the result. */
+  startFinishScene(s, e) {
+    const { race, player, camRig } = s;
+    if (s.fin) return;
+    s.fin = { t: 0 };
+    const rs = player.rs;
+    const winner = race.cars.find((c) => c.rs.finished && c !== player && c.rs.pos === 1) || null;
+    const gap = winner && rs.pos > 1 ? rs.finishTime - winner.rs.finishTime : null;
+    if (!s.pilot) {
+      const prof = race.getProfile(player.spec, 'pilot');
+      s.pilot = new AIDriver({ car: player, track: s.track, profile: prof, level: 0.6, seed: 4242 });
+      s.pilot.goTime = 0;
+    }
+    s.pilot.paceAdapt = 0.32; // cool-down lap: slow, steady, wave to the crowd
+    s.pilot.offset = 0;
+    s.auto = true;
+    camRig.setMode('finish');
+    this.hud.showFinish({ pos: rs.pos, total: race.cars.length, team: player.info.team, name: player.info.name, time: e.time, gap, best: rs.best, penalty: rs.penalty });
+    this.audio.cheer(rs.pos <= 3 ? 1 : 0.5);
+    if (rs.pos <= 3) this.audio.fanfare();
+    else this.audio.ui('good');
   }
 
   saveGhost(s) {

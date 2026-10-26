@@ -120,10 +120,24 @@ export function envelope(spec, mass) {
   const down = (v) => 0.5 * rho * clA * v * v;
   const drag = (v) => 0.5 * rho * spec.cdA * v * v;
   const wheelLoad = (v) => (mass * G + down(v)) / 4;
-  /** max sustained lateral accel (m/s^2) at speed v, ignoring load transfer asymmetry penalty */
+  // Sustained lateral accel (m/s^2) at speed v: tyre grip falls with load, so the lateral load transfer
+  // (outer tyres gain what inner ones lose) costs grip. Solved by fixed-point iteration and tabulated per m/s.
+  const hHalfTrack = (mass * spec.hCg) / (spec.trackF + spec.trackR);
+  const latTable = new Float64Array(161);
+  for (let k = 0; k < latTable.length; k++) {
+    const fz = wheelLoad(k);
+    let ay = (4 * tyreMu(spec, fz) * fz) / mass;
+    for (let it = 0; it < 6; it++) {
+      const dF = hHalfTrack * ay;
+      const fo = fz + dF, fi = Math.max(fz - dF, 50);
+      ay = (2 * (tyreMu(spec, fo) * fo + tyreMu(spec, fi) * fi)) / mass;
+    }
+    latTable[k] = ay;
+  }
   const latAccel = (v, use = 1) => {
-    const fz = wheelLoad(v);
-    return (4 * tyreMu(spec, fz) * fz * use) / mass;
+    const f = Math.min(Math.max(v, 0), latTable.length - 1.001);
+    const i = Math.floor(f);
+    return (latTable[i] + (latTable[i + 1] - latTable[i]) * (f - i)) * use;
   };
   /** max braking deceleration (m/s^2) at speed v with no lateral load */
   const brakeDecel = (v, use = 1) => {

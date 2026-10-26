@@ -66,6 +66,7 @@ export class CameraRig {
     const beta = clamp(Math.atan2(car.v, Math.max(Math.abs(car.u), 8)), -0.5, 0.5);
     let fovTarget = 62 + clamp(speed * 0.1, 0, 14);
     view.helmet.visible = this.mode !== 'cockpit' && this.mode !== 'tcam';
+    if (this.mode === 'finish' && !this.init) this.fT = 0;
 
     if (this.mode === 'chase' || this.mode === 'close' || this.mode === 'heli') {
       const yawT = th - beta * 0.35 + (this.lookBack ? Math.PI : 0);
@@ -92,6 +93,19 @@ export class CameraRig {
       if (this.lookBack) qTmp.multiply(new THREE.Quaternion().setFromAxisAngle(up, Math.PI));
       cam.quaternion.copy(qTmp);
       fovTarget = this.mode === 'cockpit' ? 76 + clamp(speed * 0.05, 0, 8) : 74;
+    } else if (this.mode === 'finish') {
+      // slow cinematic orbit around the car as it rolls through the cool-down lap
+      this.fT = (this.fT || 0) + dt;
+      const t = this.fT;
+      const a = th + Math.PI * 0.8 + t * 0.32;
+      const R = lerp(12, 6.5, clamp(t / 12, 0, 1));
+      const h = 1.5 + 0.9 * Math.sin(t * 0.45) + clamp(t / 20, 0, 1) * 0.6;
+      const want = v3.set(carPos.x + Math.cos(a) * R, carPos.y + h, carPos.z + Math.sin(a) * R);
+      if (!this.init) this.pos.copy(want);
+      this.pos.lerp(want, 1 - Math.exp(-dt * 6));
+      cam.position.copy(this.pos);
+      cam.lookAt(carPos.x, carPos.y + 0.7, carPos.z);
+      fovTarget = 38;
     } else if (this.mode === 'tv') {
       if (!this.tvPoints) this.buildTv(track);
       // pick the nearest camera that's ahead of the car, keep until the car passes it

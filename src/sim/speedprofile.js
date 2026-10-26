@@ -31,14 +31,17 @@ export function lineGeometry(track) {
 }
 
 export function buildSpeedProfile(track, spec, opts = {}) {
-  const latUse = opts.latUse ?? 0.8;
-  const brakeUse = opts.brakeUse ?? 0.85;
-  const accelUse = opts.accelUse ?? 0.92;
+  const latUse = opts.latUse ?? 0.9;
+  const brakeUse = opts.brakeUse ?? 0.95;
+  const accelUse = opts.accelUse ?? 1.0;
   const mass = spec.dryMass + (opts.fuel ?? 30);
   const env = envelope(spec, mass);
   const { kappa, ds } = opts.geometry || lineGeometry(track);
   const N = track.N;
   const vTop = 110;
+  // high-speed corners get less of the envelope: little steering authority and a car that is a handful on the edge
+  const hs = opts.highSpeedDerate ?? 0.2;
+  const lat = (v) => env.latAccel(v, latUse * (1 - hs * Math.min(1, Math.max(0, (v - 60) / 40))));
 
   // corner limit: m v^2 |k| = latAccel(v)*m  -> solve v by bisection on f(v) = v^2 |k| - ay(v)
   const vCorner = new Float64Array(N);
@@ -51,7 +54,7 @@ export function buildSpeedProfile(track, spec, opts = {}) {
     let lo = 4, hi = vTop;
     for (let it = 0; it < 28; it++) {
       const mid = (lo + hi) / 2;
-      if (mid * mid * k > env.latAccel(mid, latUse)) hi = mid;
+      if (mid * mid * k > lat(mid)) hi = mid;
       else lo = mid;
     }
     vCorner[i] = lo;
@@ -60,7 +63,7 @@ export function buildSpeedProfile(track, spec, opts = {}) {
   // friction circle: how much of the grip budget remains for longitudinal at speed v with curvature k
   const circle = (v, k) => {
     const ay = v * v * Math.abs(k);
-    const lim = env.latAccel(v, latUse);
+    const lim = lat(v);
     const r = Math.min(1, ay / lim);
     return Math.sqrt(Math.max(0.02, 1 - r * r));
   };

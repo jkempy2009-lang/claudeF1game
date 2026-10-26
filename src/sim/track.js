@@ -267,7 +267,7 @@ function solvePenta(d0, d1, d2, b) {
  * banded least-squares problem (curvature + a little path length), with an active-set loop to
  * respect the track limits. Returns lateral offsets (+ left) per sample.
  */
-function computeRacingLine(track, margin = 1.1, lengthWeight = 0.04) {
+function computeRacingLine(track, margin = 1.1, lengthWeight = 0.04, smoothLen = 24) {
   const N = track.N;
   const M = N * 3;
   const cx = new Float64Array(M), cy = new Float64Array(M), nx = new Float64Array(M), ny = new Float64Array(M);
@@ -382,6 +382,32 @@ function computeRacingLine(track, margin = 1.1, lengthWeight = 0.04) {
   }
   const out = new Float64Array(N);
   for (let i = 0; i < N; i++) out[i] = clamp(d[N + i], lo[N + i], hi[N + i]);
+  return smoothLine(out, track.ds, smoothLen);
+}
+
+/**
+ * Gaussian smoothing of the line's lateral offset. Where the optimal line is pinned against a track limit its
+ * path has a corner (the car would have to flick sideways at full speed); averaging can only pull values away from
+ * the limits, so the result stays legal and becomes physically drivable.
+ */
+function smoothLine(d, ds, sigma) {
+  if (!(sigma > 0)) return d;
+  const N = d.length;
+  const sd = sigma / ds;
+  const R = Math.ceil(sd * 3);
+  const w = [];
+  let sum = 0;
+  for (let k = -R; k <= R; k++) {
+    const v = Math.exp(-(k * k) / (2 * sd * sd));
+    w.push(v);
+    sum += v;
+  }
+  const out = new Float64Array(N);
+  for (let i = 0; i < N; i++) {
+    let a = 0;
+    for (let k = -R; k <= R; k++) a += w[k + R] * d[(i + k + N * 4) % N];
+    out[i] = a / sum;
+  }
   return out;
 }
 

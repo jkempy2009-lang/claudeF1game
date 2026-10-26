@@ -7,7 +7,8 @@ const PIT_LIMIT = 22.2;
 export function difficultyParams(level) {
   const L = clamp(level, 0, 1);
   return {
-    pace: 0.76 + 0.245 * Math.pow(L, 0.85), // fraction of the car's limit the AI will use
+    // fraction of the speed profile the AI drives: Legend = 100 % (about the pace of a very good human lap), Rookie ~ 21 % slower
+    pace: 0.8 + 0.2 * Math.pow(L, 0.8),
     mistakesPerLap: 1.4 * (1 - L) ** 2 + 0.03,
     reaction: 0.55 - 0.38 * L,
     aggression: 0.2 + 0.7 * L,
@@ -57,6 +58,7 @@ export class AIDriver {
   setLevel(level) {
     this.level = level;
     this.dp = difficultyParams(level);
+    this.dp.pace *= this.track.def?.aiPace ?? 1; // per-circuit calibration (see trackdefs)
     this.react = this.dp.reaction * (0.7 + 0.6 * this.rng());
   }
 
@@ -141,7 +143,7 @@ export class AIDriver {
     this.offset += clamp(this.offTarget - this.offset, -dt * 3.2, dt * 3.2);
 
     // --- steering: feed-forward from path curvature + Stanley feedback in Frenet coordinates
-    const sf = s + clamp(V * 0.04, 1, 4);
+    const sf = s + clamp(V * 0.09, 1, 9); // preview distance: the car takes ~0.1 s to respond to steering
     const D0 = this.pathD(s), Df = this.pathD(sf);
     const DD = (this.pathD(s + 4) - 2 * this.pathD(s) + this.pathD(s - 4)) / 16;
     const kt = tr.at(tr.curv, sf);
@@ -195,7 +197,7 @@ export class AIDriver {
     {
       const paceTot = vt / Math.max(1, prof.v[idx]);
       const capBrake = Math.max(15, prof.env.brakeDecel(Math.max(V, 5), 0.92));
-      const maxDist = (V * V) / (2 * 22) + 40;
+      const maxDist = (V * V) / (2 * 0.4 * capBrake) + 40;
       let aReq = 0;
       const step = Math.max(1, Math.round(6 / prof.ds));
       const base = tr.idx(s);
@@ -210,7 +212,10 @@ export class AIDriver {
       const aDrag = (car.aeroDrag + 0.014 * car.mass * 9.81) / car.mass;
       const errNow = vt - V;
       const brakeFromErr = errNow < -1.5 ? (-errNow - 1.5) * 2.2 : 0;
-      const aBrake = Math.max(aReq - aDrag * 0.9, brakeFromErr);
+      // brake late: only once the stopping demand approaches what the brakes (plus drag) can do; until then follow
+      // the target speed. Lower levels leave a bigger margin (brakeBias).
+      const aLate = 0.78 * this.dp.brakeBias * (capBrake + aDrag * 0.9);
+      const aBrake = Math.max(aReq > aLate ? aReq - aDrag * 0.9 : 0, brakeFromErr);
       if (aBrake > 1.2) {
         brk = clamp(aBrake / capBrake, 0, 1);
       } else {

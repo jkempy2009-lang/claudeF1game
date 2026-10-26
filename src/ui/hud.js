@@ -66,6 +66,8 @@ export class HUD {
       <div id="gmeter" class="hud-box"><canvas width="200" height="200"></canvas></div>
       <div id="flag"></div>
       <div id="keyhint" class="hud-box"></div>
+      <canvas id="confetti"></canvas>
+      <div id="finish" class="hidden"></div>
       <div class="touch" id="touch"><button class="l" data-k="left">◀</button><button class="r" data-k="right">▶</button><button class="b" data-k="brake">BRK</button><button class="g" data-k="throttle">GAS</button></div>
     `;
     this.el = {
@@ -75,7 +77,7 @@ export class HUD {
       revs: $('#revs'), soc: $('#d-soc'), socb: $('#d-socb'), drs: $('#d-drs'), boost: $('#d-boost'), gap: $('#d-gap'),
       gear: $('#d-gear'), spd: $('#d-spd'), unit: $('#d-unit'), thr: $('#p-thr'), brk: $('#p-brk'), rpm: $('#d-rpm'),
       tyreBoxes: [...root.querySelectorAll('#tyres .tyre')], tyB: $('#ty-b'), tyN: $('#ty-n'), tyW: $('#ty-w'), tyT: $('#ty-t'), tyF: $('#ty-f'), tyD: $('#ty-d'),
-      g: $('#gmeter canvas'), flag: $('#flag'), keyhint: $('#keyhint'), tower: $('#tower'), minimap: $('#minimap'), touch: $('#touch'),
+      g: $('#gmeter canvas'), flag: $('#flag'), keyhint: $('#keyhint'), finish: $('#finish'), confetti: $('#confetti'), tower: $('#tower'), minimap: $('#minimap'), touch: $('#touch'),
     };
     this.rev = [...this.el.revs.children];
     this.rev.forEach((el, i) => el.classList.add(i < 5 ? 'g' : i < 10 ? 'r' : 'b'));
@@ -153,6 +155,83 @@ export class HUD {
     this.mapBase = c;
     this.mapPx = px;
     this.mapPy = py;
+  }
+
+  /** Full-screen finish banner. info: {pos, total, team, time, gap, best, points, winner, penalties} */
+  showFinish(info) {
+    const o = (n) => n + (['th', 'st', 'nd', 'rd'][n % 100 > 10 && n % 100 < 14 ? 0 : n % 10 < 4 ? n % 10 : 0]);
+    const p = info.pos;
+    const [title, tone] = p === 1 ? ['Victory', 'gold'] : p <= 3 ? ['Podium', 'podium'] : p <= 10 ? ['Points finish', 'points'] : ['Chequered flag', 'plain'];
+    const gap = p === 1 ? 'Winner' : info.gap != null ? `+${info.gap.toFixed(3)} s to the winner` : '';
+    this.el.finish.className = 'tone-' + tone;
+    this.el.finish.style.setProperty('--c', info.team.color);
+    this.el.finish.innerHTML = `
+      <div class="eyebrow">${info.name} · ${info.team.name}</div>
+      <div class="big"><span class="pos">${p}</span><span class="ord">${o(p).replace(/^\d+/, '')}</span></div>
+      <div class="title">${title}</div>
+      <div class="facts"><div><span>Race time</span><b>${formatTime(info.time)}</b></div><div><span>Gap</span><b>${gap}</b></div><div><span>Best lap</span><b>${info.best < Infinity ? formatTime(info.best) : '—'}</b></div></div>
+      ${info.penalty ? `<div class="hint">Includes pending time penalties (+${info.penalty}s) when classified</div>` : ''}
+      <div class="cont" id="fin-cont">Press <kbd>Enter</kbd> or click for the results</div>`;
+    this.el.finish.classList.remove('hidden');
+    document.getElementById('hud').classList.add('cine');
+    if (p <= 3) this.startConfetti(p === 1 ? 260 : 150);
+    this._finT = setTimeout(() => {
+      const c = document.getElementById('fin-cont');
+      if (c) c.classList.add('show');
+    }, 3000);
+  }
+
+  hideFinish() {
+    this.el.finish.classList.add('hidden');
+    document.getElementById('hud').classList.remove('cine');
+    clearTimeout(this._finT);
+    this.stopConfetti();
+  }
+
+  startConfetti(count) {
+    const c = this.el.confetti;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    c.width = window.innerWidth * dpr;
+    c.height = window.innerHeight * dpr;
+    c.style.display = 'block';
+    const g = c.getContext('2d');
+    const cols = ['#ff2a2a', '#ffb400', '#f4f4f4', '#31d17a', '#3b9bff', '#b36bff'];
+    const parts = Array.from({ length: count }, () => ({
+      x: Math.random() * c.width, y: -Math.random() * c.height * 0.6, vx: (Math.random() - 0.5) * 160 * dpr, vy: (120 + Math.random() * 220) * dpr,
+      w: (6 + Math.random() * 8) * dpr, h: (4 + Math.random() * 6) * dpr, r: Math.random() * 6.28, vr: (Math.random() - 0.5) * 10, col: cols[Math.floor(Math.random() * cols.length)], ph: Math.random() * 6,
+    }));
+    let last = performance.now(), t0 = last;
+    this._confetti = true;
+    const tick = (now) => {
+      if (!this._confetti) return;
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      g.clearRect(0, 0, c.width, c.height);
+      const el = (now - t0) / 1000;
+      for (const q of parts) {
+        q.x += (q.vx + Math.sin(el * 2 + q.ph) * 40 * dpr) * dt;
+        q.y += q.vy * dt;
+        q.r += q.vr * dt;
+        if (q.y > c.height + 20 && el < 7) { q.y = -20; q.x = Math.random() * c.width; }
+        g.save();
+        g.translate(q.x, q.y);
+        g.rotate(q.r);
+        g.fillStyle = q.col;
+        g.globalAlpha = el > 8 ? Math.max(0, 1 - (el - 8) / 2) : 1;
+        g.fillRect(-q.w / 2, -q.h / 2, q.w, q.h * Math.abs(Math.cos(q.r * 2)));
+        g.restore();
+      }
+      if (el < 10) requestAnimationFrame(tick);
+      else this.stopConfetti();
+    };
+    requestAnimationFrame(tick);
+  }
+
+  stopConfetti() {
+    this._confetti = false;
+    const c = this.el.confetti;
+    c.style.display = 'none';
+    c.getContext('2d').clearRect(0, 0, c.width, c.height);
   }
 
   showKeyHint(ms = 9000) {
@@ -252,7 +331,7 @@ export class HUD {
 
     // top bar
     const total = race.totalLaps;
-    const lap = Math.min(total, Math.max(1, rs.laps + 1 - (rs.finished ? 1 : 0) + (rs.maxDist < 0 ? 0 : 0)));
+    const lap = Math.min(total, Math.max(1, rs.laps + 1));
     const lapHtml = race.opt.mode === 'timetrial' ? `<small>Lap</small>${Math.max(1, rs.laps + 1)}` : `<small>Lap</small>${rs.finished ? total : lap}/${total}`;
     if (this._lapHtml !== lapHtml) {
       this._lapHtml = lapHtml;
@@ -288,7 +367,6 @@ export class HUD {
       const opt = comp.tOpt;
       const dt = temp - opt;
       // blue = cold, green = in window, red = overheated
-      const hue = dt < -comp.tRange * 0.5 ? 205 : dt > comp.tRange * 0.5 ? 0 : 130 - Math.max(0, (Math.abs(dt) / (comp.tRange * 0.5))) * 40 * Math.sign(dt || 1) * -1 * 0 + 0;
       tb.style.background = `hsl(${dt < -comp.tRange * 0.5 ? 205 : dt > comp.tRange * 0.5 ? 2 : 128}, 70%, 42%)`;
       tb.firstElementChild.style.height = clamp(p.wear[w], 0, 1) * 100 + '%';
     }

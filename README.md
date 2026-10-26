@@ -28,6 +28,19 @@ npm test             # physics validation + headless AI race
 
 **Difficulty** – five presets (Rookie → Legend) plus a continuous 0–100 % slider. Difficulty changes how much of the *same* physical limit the AI uses, how often it makes mistakes, how early it brakes, how much of the track it uses, how aggressively it overtakes and its reaction time at the start. Optional adaptive pace nudges the AI ±3–5 % depending on the gap to you. Nothing is "cheated": AI cars run the identical car model.
 
+Reference clean-lap pace of the best car at each level (medium tyres, DRS on the straights):
+
+| | Rookie | Amateur | Pro | Elite | Legend |
+|---|---|---|---|---|---|
+| Autodromo del Vettore | 1:22.0 | 1:16.9 | 1:12.9 | 1:09.8 | 1:08.0 |
+| Circuit de la Rade | 1:20.6 | 1:15.2 | 1:10.8 | 1:07.5 | 1:05.3 |
+| Circuit des Hautes-Fagnes | 1:34.0 | 1:27.8 | 1:23.0 | 1:19.4 | 1:17.8 |
+| Northfield Grand Prix Circuit | 1:39.1 | 1:32.8 | 1:27.9 | 1:24.2 | 1:22.3 |
+
+Legend is calibrated to be about as quick as a strong human lap (Vettore 1:08.5, Rade 1:06.4, Hautes-Fagnes 1:19); in a race the field is spread a further ~3 % by car and driver ratings, tyres, fuel and traffic.
+
+**Finish** – take the flag and the game plays a finish scene: your car cools down on autopilot under a cinematic camera, with a Victory / Podium / Points banner (confetti and fanfare for the top three). Press Enter or click to see the full classification.
+
 **Racing line guide** – a ribbon on the road ahead, coloured from the braking envelope of the circuit: green keep going, yellow ease off, red brake now. Toggle with L or in Settings.
 
 **Driver aids** – ABS, traction control (4 levels), stability control, steering-lock assist, automatic/manual gearbox, pit autopilot; presets from Beginner to Simulator. Keyboard, gamepad and basic touch controls.

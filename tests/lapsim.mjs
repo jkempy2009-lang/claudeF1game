@@ -19,8 +19,8 @@ for (const def of TRACK_DEFS) {
   const t0 = performance.now();
   const track = new Track(def);
   const tBuild = performance.now() - t0;
-  const spec = makeSpec({ fuel: 8 * laps / 3 + 10, compound: 'medium' });
-  const prof = buildSpeedProfile(track, spec, {});
+  const spec = makeSpec({ fuel: 8 * laps / 3 + 10, compound: 'medium', frontWing: def.setup?.front, rearWing: def.setup?.rear });
+  const prof = buildSpeedProfile(track, spec, { latUse: +(process.env.LAT || 0.9), brakeUse: +(process.env.BRK || 0.95), accelUse: +(process.env.ACC || 1.0) });
   const car = new Car(spec, track);
   car.assist = { abs: true, tc: 2, steer: 0, autoGear: true, stability: 1 };
   const slot = track.gridSlot(0);
@@ -34,6 +34,7 @@ for (const def of TRACK_DEFS) {
   const t = { v: 0 };
   let tick = 0;
   for (; race.time < 400 && lapTimes.length < laps; tick++) {
+    car.drsAllowed = !process.env.NODRS && track.inDrsZone(car.s) >= 0 && Math.abs(car.latG) < 1.4 && race.time > 8;
     const inp = drv.update(DT, race);
     car.step(DT, inp);
     race.time += DT;
