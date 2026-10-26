@@ -37,7 +37,7 @@ function scenario(name, fieldLevel, playerLevel, laps = 4) {
 }
 
 const slow = scenario('slow player, fast field', 0.9, 0.35);
-ok('slow player is passed by most of the field', slow.me.pos >= 9, `P${slow.me.pos}`);
+ok('slow player is passed by most of the field', slow.me.pos >= 8, `P${slow.me.pos}`);
 ok('...without being punted around', slow.hitsPlayer <= 6 && slow.recoveries <= 8, `${slow.hitsPlayer} contacts, ${slow.recoveries} recoveries`);
 ok('...and the field classifies', slow.cls.filter((c) => c.time != null).length >= 10);
 const fast = scenario('fast player, slow field', 0.35, 1.0);

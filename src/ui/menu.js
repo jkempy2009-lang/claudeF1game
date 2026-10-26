@@ -33,6 +33,7 @@ export const DEFAULT_CONFIG = {
   frontWing: null,
   rearWing: null,
   brakeBias: 0.58,
+  pressure: 0,
   assists: { abs: true, tc: 2, steer: true, stability: 1, autoGear: true, pitAuto: true, pitGame: true },
 };
 const ASSIST_PRESETS = {
@@ -77,6 +78,7 @@ export function sanitizeConfig(raw) {
     frontWing: wing(r.frontWing),
     rearWing: wing(r.rearWing),
     brakeBias: num(r.brakeBias, 0.5, 0.7, D.brakeBias),
+    pressure: Math.round(num(r.pressure, -3, 3, D.pressure)),
     assists: {
       abs: bool(ra.abs, D.assists.abs),
       tc: Math.round(num(ra.tc, 0, 3, D.assists.tc)),
@@ -377,7 +379,10 @@ export class Menu {
         <button class="btn sm" data-act="resetsetup" style="margin-top:.6rem">Use recommended</button></div>
       <div class="panel"><h3>Brakes</h3>
         ${this.slider('brakeBias', 'Brake bias (front)', Math.round(c.brakeBias * 100), 50, 68, 1, Math.round(c.brakeBias * 100) + '%')}
-        <div class="hint">Higher front bias is stable but can lock the front tyres; lower bias turns in better and risks locking the rears. ABS covers most of it if enabled.</div></div></div>`;
+        <div class="hint">Higher front bias is stable but can lock the front tyres; lower bias turns in better and risks locking the rears. ABS covers most of it if enabled.</div></div>
+      <div class="panel"><h3>Tyre pressure</h3>
+        ${this.slider('pressure', 'Pressure offset', c.pressure, -3, 3, 1, c.pressure === 0 ? 'Standard' : (c.pressure > 0 ? '+' : '') + c.pressure)}
+        <div class="hint">Higher pressure heats the tyres faster and wears them more slowly but costs grip once it is too high; lower pressure grips better in the wet and gives more feel at the price of faster wear. Standard is the dry-weather sweet spot.</div></div></div>`;
   }
 
   tab_assists() {
@@ -401,7 +406,7 @@ export class Menu {
     const rows = [
       ['Throttle', k('W', '↑')], ['Brake / reverse', k('S', '↓')], ['Steer', k('A', 'D', '←', '→')], ['DRS (in a zone, when eligible)', k('Space')], ['ERS boost (hold)', k('Shift')],
       ['Gear up / down (manual)', k('E', 'Q')], ['Pit request toggle', k('B')], ['Change pit tyre', k('T')], ['Camera', k('C')], ['Look back', k('V')],
-      ['Reset to track', k('R')], ['Pause', k('Esc', 'P')], ['Racing line guide', k('L')], ['Minimap size', k('M')], ['Mute', k('N')],
+      ['Reset to track', k('R')], ['Pause', k('Esc', 'P')], ['Racing line guide', k('L')], ['Live telemetry traces', k('Y')], ['Minimap size', k('M')], ['Mute', k('N')],
       ['ERS mode: harvest / balanced / attack', k('X')], ['Fuel mix: lean / standard / rich', k('Z')], ['Brake bias (front) + / −', k(']', '[')], ['Pit stop: hit each wheel nut', k('Space')],
     ];
     const pad = [['Steer', 'Left stick'], ['Throttle / brake', 'RT / LT'], ['DRS', 'A'], ['Boost', 'X'], ['Pit request', 'B'], ['Camera', 'Y'], ['Gears', 'LB / RB'], ['Look back', 'L3'], ['Pause', 'Start'], ['Reset', 'Back'], ['Fuel mix / ERS mode', 'D-pad up / down'], ['Next pit tyre', 'D-pad right']];
@@ -751,6 +756,7 @@ export class Menu {
       case 'resetsetup':
         c.frontWing = c.rearWing = null;
         c.brakeBias = 0.58;
+        c.pressure = 0;
         this.persist();
         return this.rerender();
       case 'wipe':
@@ -790,6 +796,7 @@ export class Menu {
     else if (k === 'frontWing') c.frontWing = v;
     else if (k === 'rearWing') c.rearWing = v;
     else if (k === 'brakeBias') c.brakeBias = v / 100;
+    else if (k === 'pressure') c.pressure = v;
     else if (k === 's.padDead') {
       this.save.settings.padDead = v / 100;
       this.hooks.applySettings && this.hooks.applySettings();
@@ -805,6 +812,7 @@ export class Menu {
       else if (k === 'level') lab.textContent = v + '%';
       else if (k === 'playerGrid') lab.textContent = 'P' + v;
       else if (k === 'brakeBias') lab.textContent = v + '%';
+      else if (k === 'pressure') lab.textContent = v === 0 ? 'Standard' : (v > 0 ? '+' : '') + v;
       else if (k === 's.volume' || k === 's.padDead') lab.textContent = v + '%';
       else lab.textContent = v;
     }

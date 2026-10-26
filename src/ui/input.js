@@ -19,6 +19,7 @@ export const DEFAULT_KEYS = {
   mute: ['KeyN'],
   auto: ['KeyG'],
   line: ['KeyL'],
+  tele: ['KeyY'],
   ersMode: ['KeyX'],
   fuelMode: ['KeyZ'],
   bbUp: ['BracketRight', 'Equal'],
@@ -86,7 +87,7 @@ export class Input {
 
   /** Called once per rendered frame with the frame dt and the player's speed (m/s). */
   poll(dt, speed) {
-    const out = { throttle: 0, brake: 0, steer: 0, boost: false, gearUp: false, gearDown: false, drsPress: false, pitToggle: false, tyreCycle: false, camera: false, reset: false, pause: false, lookBack: false, map: false, mute: false, autoToggle: false, line: false, confirm: false, ersCycle: false, fuelCycle: false, bbDelta: 0 };
+    const out = { throttle: 0, brake: 0, steer: 0, boost: false, gearUp: false, gearDown: false, drsPress: false, pitToggle: false, tyreCycle: false, camera: false, reset: false, pause: false, lookBack: false, map: false, mute: false, autoToggle: false, line: false, tele: false, confirm: false, ersCycle: false, fuelCycle: false, bbDelta: 0 };
     // keyboard ramps
     const kThr = this.isDown('throttle') || this.touch.throttle;
     const kBrk = this.isDown('brake') || this.touch.brake;
@@ -118,6 +119,7 @@ export class Input {
     out.mute = this.wasPressed('mute');
     out.autoToggle = this.wasPressed('auto');
     out.line = this.wasPressed('line');
+    out.tele = this.wasPressed('tele');
     out.confirm = this.wasPressed('confirm');
     out.ersCycle = this.wasPressed('ersMode');
     out.fuelCycle = this.wasPressed('fuelMode');

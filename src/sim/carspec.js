@@ -111,6 +111,7 @@ export function makeSpec(setup = {}) {
     maxSteer: 0.36,
     // tyre compound
     compound: COMPOUNDS[setup.compound || 'medium'],
+    pressure: clamp(Math.round(setup.pressure ?? 0), -3, 3),
     fuelKg: setup.fuel ?? 40,
   };
   spec.gearRatios = GEAR_TOP_SPEED.map((v) => ((14600 * 2 * Math.PI) / 60) * wheelR / v);

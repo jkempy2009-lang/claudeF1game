@@ -492,7 +492,7 @@ class Game {
       mandatoryStop: cfg.mandatoryStop,
       pitCalls: cfg.pitCalls,
       compound: cfg.compound,
-      setup: { frontWing: cfg.frontWing, rearWing: cfg.rearWing, brakeBias: cfg.brakeBias },
+      setup: { frontWing: cfg.frontWing, rearWing: cfg.rearWing, brakeBias: cfg.brakeBias, pressure: cfg.pressure },
       assists: { ...cfg.assists, stability: cfg.assists.stability, tc: cfg.assists.tc, steer: cfg.assists.steer },
       seed: cfg.seed ?? ((Math.random() * 1e6) | 0),
       qualiTimes: cfg.mode === 'race' ? cfg.qualiTimes || null : null,
@@ -846,6 +846,7 @@ class Game {
       this.toast(this.audio.enabled ? 'Sound on' : 'Sound off');
     }
     if (pin.map) this.hud.el.minimap.classList.toggle('hidden');
+    if (pin.tele) this.toast('Live telemetry ' + (this.hud.toggleTele() ? 'on' : 'off'));
     if (pin.line) {
       this.save.settings.line = !(this.save.settings.line !== false);
       s.guide.setVisible(this.save.settings.line);

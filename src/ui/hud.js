@@ -39,6 +39,8 @@ export class HUD {
     this.msgs = [];
     this.lastTower = 0;
     this.lastMini = 0;
+    this.teleOn = false;
+    this.teleBuf = { t: new Float32Array(240), b: new Float32Array(240), s: new Float32Array(240), v: new Float32Array(240), n: 0, last: 0, draw: 0 };
     root.innerHTML = `
       <div id="tower" class="hud-box"><div class="hd"><span>Race</span><span id="tw-lap"></span></div><div id="tw-rows"></div></div>
       <div id="topbar" class="hud-box"><div class="lap" id="tb-lap"></div><div class="clock" id="tb-clock"></div><div class="wx" id="tb-wx"></div></div>
@@ -51,6 +53,7 @@ export class HUD {
       <div id="lights" class="hud-box hidden"><i></i><i></i><i></i><i></i><i></i></div>
       <div id="pitgame" class="hud-box hidden"><div class="pgt">Pit stop · press <kbd>Space</kbd> with the marker in the green</div><div class="pgw">${['FL', 'FR', 'RL', 'RR'].map((n) => `<div class="nut"><div class="trk"><i class="gd"></i><i class="pf"></i><b></b></div><span>${n}</span></div>`).join('')}</div><div class="pgr"></div></div>
       <div id="msgs"></div>
+      <canvas id="livetele" class="hud-box hidden" width="440" height="150"></canvas>
       <div id="lesson" class="hud-box hidden"></div>
       <div id="radio" class="hud-box hidden"><b>Radio</b><span id="radio-t"></span></div>
       <div id="pit" class="hud-box hidden"></div>
@@ -81,7 +84,7 @@ export class HUD {
     this.el = {
       twRows: $('#tw-rows'), twLap: $('#tw-lap'), tbLap: $('#tb-lap'), tbClock: $('#tb-clock'), tbWx: $('#tb-wx'), pitgame: $('#pitgame'),
       cur: $('#t-cur'), delta: $('#t-delta'), last: $('#t-last'), best: $('#t-best'), fast: $('#t-fast'), sec: $('#t-sec'),
-      mini: $('#minimap canvas'), lights: $('#lights'), msgs: $('#msgs'), radio: $('#radio'), lesson: $('#lesson'), radioT: $('#radio-t'), pit: $('#pit'),
+      mini: $('#minimap canvas'), lights: $('#lights'), msgs: $('#msgs'), radio: $('#radio'), lesson: $('#lesson'), tele: $('#livetele'), radioT: $('#radio-t'), pit: $('#pit'),
       revs: $('#revs'), soc: $('#d-soc'), socb: $('#d-socb'), drs: $('#d-drs'), boost: $('#d-boost'), gap: $('#d-gap'),
       gear: $('#d-gear'), spd: $('#d-spd'), unit: $('#d-unit'), thr: $('#p-thr'), brk: $('#p-brk'), rpm: $('#d-rpm'),
       tyreBoxes: [...root.querySelectorAll('#tyres .tyre')], tyB: $('#ty-b'), tyN: $('#ty-n'), tyW: $('#ty-w'), tyT: $('#ty-t'), tyF: $('#ty-f'), tyD: $('#ty-d'),
@@ -299,8 +302,52 @@ export class HUD {
   }
 
   /** Frame update. race: Race, p: player car, pin: current input. */
+  toggleTele() {
+    this.teleOn = !this.teleOn;
+    this.el.tele.classList.toggle('hidden', !this.teleOn);
+    return this.teleOn;
+  }
+
+  /** Live traces of the last 12 seconds: throttle, brake, steering and speed. 20 samples a second, drawn 10 times a second. */
+  tele(p, now) {
+    const T = this.teleBuf;
+    if (now - T.last >= 50) {
+      T.last = now;
+      const i = T.n % 240;
+      T.t[i] = p.throttle; T.b[i] = p.brake; T.s[i] = p.steer; T.v[i] = p.speed;
+      T.n++;
+    }
+    if (!this.teleOn || now - T.draw < 100) return;
+    T.draw = now;
+    const cv = this.el.tele, g = cv.getContext('2d');
+    const W = cv.width, H = cv.height;
+    g.clearRect(0, 0, W, H);
+    g.fillStyle = 'rgba(8,10,16,0.62)';
+    g.fillRect(0, 0, W, H);
+    const n = Math.min(T.n, 240), start = T.n - n;
+    const plot = (arr, y0, h, color, lo, hi, fill) => {
+      g.beginPath();
+      for (let k = 0; k < n; k++) {
+        const v = (arr[(start + k) % 240] - lo) / (hi - lo);
+        const x = ((240 - n + k) / 239) * W, y = y0 + h - clamp(v, 0, 1) * h;
+        k ? g.lineTo(x, y) : g.moveTo(x, y);
+      }
+      g.strokeStyle = color; g.lineWidth = 2; g.stroke();
+      if (fill) { g.lineTo(W, y0 + h); g.lineTo(((240 - n) / 239) * W, y0 + h); g.fillStyle = fill; g.fill(); }
+    };
+    plot(T.v, 8, 62, '#e8ecf4', 0, 100); // 360 km/h
+    plot(T.t, 78, 28, '#3ddc84', 0, 1, 'rgba(61,220,132,0.16)');
+    plot(T.b, 78, 28, '#ff4b4b', 0, 1, 'rgba(255,75,75,0.16)');
+    g.strokeStyle = 'rgba(255,255,255,0.18)'; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(0, 128); g.lineTo(W, 128); g.stroke();
+    plot(T.s, 112, 32, '#58a6ff', -1, 1);
+    g.fillStyle = 'rgba(255,255,255,0.6)'; g.font = '11px sans-serif';
+    g.fillText('SPEED', 6, 18); g.fillText('THROTTLE / BRAKE', 6, 92); g.fillText('STEER', 6, 124);
+  }
+
   update(race, p, pin, now) {
     const el = this.el;
+    this.tele(p, now);
     const rs = p.rs;
     const mph = this.units === 'mph';
     const speed = p.speed * (mph ? 2.23694 : 3.6);

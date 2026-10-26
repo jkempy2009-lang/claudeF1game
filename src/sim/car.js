@@ -319,6 +319,11 @@ export class Car {
     const cosT = Math.cos(this.theta), sinT = Math.sin(this.theta);
     const R = sp.wheelR;
     const mu0 = sp.mu0;
+    // tyre pressure offset (-3..+3 steps): the grip peak sits at 0 when dry and moves lower in the wet; higher pressure heats faster and wears slower
+    const pr = sp.pressure || 0;
+    const pressureGrip = 1 - 0.0045 * (pr + 2 * (this.wetness || 0)) ** 2;
+    const pressureHeat = 1 + 0.06 * pr;
+    const pressureWear = 1 - 0.05 * pr;
     const comp = sp.compound;
     let sumFx = 0, sumFy = 0, sumMz = 0;
     let kerbHit = 0, grassHit = 0;
@@ -359,7 +364,7 @@ export class Car {
       const wearF = 1 - 0.06 * wearW - 0.2 * smoothstep(0.62, 1.0, wearW);
       let mu = Math.max(0.7, mu0 - sp.loadSens * (Fz - sp.fz0)) * comp.mu * tempF * wearF * surf.grip * (front ? sp.frontGrip : sp.rearGrip);
       if (this.puncture[w] > 0) mu *= 1 - 0.55 * this.puncture[w];
-      mu *= (1 - 0.16 * this.flat[w]) * wetGripFactor(comp, this.wetness) * (sf === SURF.KERB ? 1 - 0.14 * this.wetness : 1);
+      mu *= pressureGrip * (1 - 0.16 * this.flat[w]) * wetGripFactor(comp, this.wetness) * (sf === SURF.KERB ? 1 - 0.14 * this.wetness : 1);
       const sx = kap / sp.kappaPeak;
       const sy = Math.tan(al) / Math.tan(sp.alphaPeak);
       const s = Math.hypot(sx, sy) + 1e-9;
@@ -416,7 +421,7 @@ export class Car {
       const slideLat = Math.max(absVl, 2) * Math.tan(Math.abs(al));
       const P = Math.abs(FxW * slideLong) + Math.abs(FyW) * slideLat;
       const Prr = 0.02 * Fz * absVl;
-      this.temp[w] += ((TUNE.heat * (comp.wetTyre ? 0.55 : 1) * (P + Prr)) / TYRE_HEAT_CAP - (this.temp[w] - AMBIENT) * (TUNE.coolBase + TUNE.coolSpeed * V) * (1 + 0.6 * this.wetness)) * dt;
+      this.temp[w] += ((TUNE.heat * (comp.wetTyre ? 0.55 : 1) * pressureHeat * (P + Prr)) / TYRE_HEAT_CAP - (this.temp[w] - AMBIENT) * (TUNE.coolBase + TUNE.coolSpeed * V) * (1 + 0.6 * this.wetness)) * dt;
       // a locked wheel scrubs the same patch of rubber: the surface temperature spikes, a flat spot forms and wear races ahead
       const locked = absVl > 6 && kap < -0.6;
       if (locked) {
@@ -424,7 +429,7 @@ export class Car {
         this.flat[w] = Math.min(1, this.flat[w] + dt * 0.5);
       }
       const overheat = Math.max(0, this.temp[w] - comp.tOpt - comp.tRange * 0.9) / 30;
-      this.wear[w] = Math.min(1.2, this.wear[w] + ((P * dt) / (comp.wearLaps * WEAR_REF_J)) * (this.wearMult ?? 1) * (1 + 3 * overheat + (locked ? 5 : 0) + (comp.wetTyre ? 2.5 * (1 - smoothstep(0.05, 0.4, this.wetness)) : 0)) * dens);
+      this.wear[w] = Math.min(1.2, this.wear[w] + ((P * dt) / (comp.wearLaps * WEAR_REF_J)) * (this.wearMult ?? 1) * pressureWear * (1 + 3 * overheat + (locked ? 5 : 0) + (comp.wetTyre ? 2.5 * (1 - smoothstep(0.05, 0.4, this.wetness)) : 0)) * dens);
 
       // to body frame
       const Fxb = FxW * cd - FyW * sd;

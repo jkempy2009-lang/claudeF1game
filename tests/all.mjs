@@ -11,6 +11,7 @@ const suites = [
   ['DRS rules', 'tests/drs.mjs'],
   ['idle player ends session', 'tests/idle.mjs'],
   ['driving school', 'tests/school.mjs'],
+  ['setup: tyre pressure', 'tests/setup.mjs'],
   ['pit-wall strategy', 'tests/strategy.mjs'],
   ['racecraft scenarios', 'tests/racecraft.mjs'],
   ['interactive pit stop', 'tests/pitgame.mjs'],

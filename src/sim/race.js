@@ -38,7 +38,7 @@ export const DEFAULT_OPTIONS = {
   mandatoryStop: false,
   pitCalls: 'radio', // pit wall: 'off' | 'radio' (advice) | 'auto' (calls you in)
   compound: 'medium',
-  setup: { frontWing: null, rearWing: null, brakeBias: 0.58 },
+  setup: { frontWing: null, rearWing: null, brakeBias: 0.58, pressure: 0 },
   assists: { abs: true, tc: 2, steer: 1, stability: 1, autoGear: true, pitAuto: true, pitGame: true },
   seed: 1,
 };
@@ -110,7 +110,7 @@ export class Race {
     const rating = opt.equalCars ? 1 : team.rating;
     const grip = 0.985 + 0.015 * rating;
     const setup = isPlayer
-      ? { frontWing: opt.setup.frontWing ?? rec.front, rearWing: opt.setup.rearWing ?? rec.rear, brakeBias: opt.setup.brakeBias }
+      ? { frontWing: opt.setup.frontWing ?? rec.front, rearWing: opt.setup.rearWing ?? rec.rear, brakeBias: opt.setup.brakeBias, pressure: opt.setup.pressure }
       : { frontWing: rec.front, rearWing: rec.rear };
     const spec = makeSpec({ ...setup, compound, performance: 0.972 + 0.028 * rating, fuel });
     spec.frontGrip *= grip;
