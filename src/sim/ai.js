@@ -129,7 +129,10 @@ export class AIDriver {
         g += tf * wf;
       }
       g /= 4;
-      const want = Math.sqrt(clamp(g / 0.96, 0.6, 1));
+      // a broken wing, floor or punctured tyre costs grip as well: drive to what the car has left
+      const punct = Math.max(car.puncture[0], car.puncture[1], car.puncture[2], car.puncture[3]);
+      g *= 1 - clamp(0.4 * (car.damageFront || 0) + 0.15 * (car.damageRear || 0) + 0.2 * (car.damageFloor || 0) + 0.35 * punct, 0, 0.6);
+      const want = Math.sqrt(clamp(g / 0.96, 0.35, 1));
       this.gripAdapt += (Math.min(1, want) - this.gripAdapt) * 0.5;
     }
 
@@ -164,7 +167,8 @@ export class AIDriver {
     const look = clamp(V * 0.09, 2, 14);
     const idx = tr.idx(s + look);
     const idx1 = (idx + 1) % tr.N;
-    let vt = prof.v[idx] * this.dp.pace * this.skill * this.paceAdapt * this.gripAdapt * (this.mistake && this.mistake.active ? this.mistake.factor : 1);
+    const air = 1 - 0.06 * (car.dirtyAir || 0); // following closely costs front downforce: take the corners a touch slower
+    let vt = prof.v[idx] * this.dp.pace * this.skill * this.paceAdapt * this.gripAdapt * air * (this.mistake && this.mistake.active ? this.mistake.factor : 1);
     // slope of the profile: are we expected to accelerate / brake?
         // off-track: slow down and return
     const surfNow = car.surf[0] + car.surf[1] + car.surf[2] + car.surf[3];
@@ -203,7 +207,7 @@ export class AIDriver {
       const base = tr.idx(s);
       for (let k = 1, dist = 0; dist < maxDist; k += step) {
         dist = k * prof.ds;
-        const vj = prof.v[(base + k) % tr.N] * this.dp.pace * this.skill * this.paceAdapt * this.gripAdapt;
+        const vj = prof.v[(base + k) % tr.N] * this.dp.pace * this.skill * this.paceAdapt * this.gripAdapt * air;
         if (V > vj) {
           const a = (V * V - vj * vj) / (2 * Math.max(dist - 2, 1));
           if (a > aReq) aReq = a;
@@ -215,7 +219,17 @@ export class AIDriver {
       // brake late: only once the stopping demand approaches what the brakes (plus drag) can do; until then follow
       // the target speed. Lower levels leave a bigger margin (brakeBias).
       const aLate = 0.78 * this.dp.brakeBias * (capBrake + aDrag * 0.9);
-      const aBrake = Math.max(aReq > aLate ? aReq - aDrag * 0.9 : 0, brakeFromErr);
+      // traffic: deceleration needed to stop behind a car in our lane that is slower than us or braking
+      let aTraffic = 0;
+      for (const n of this.neigh) {
+        if (n.ds <= 0 || n.ds > 90 || Math.abs(n.dd) > 2.6) continue;
+        const closing = V - n.v;
+        if (closing <= 0) continue;
+        const gap = Math.max(n.ds - CAR_LEN - 4, 0.8);
+        const aLead = Math.max(0, -(n.c.axF || 0)) * 0.7;
+        aTraffic = Math.max(aTraffic, aLead + (closing * closing) / (2 * gap));
+      }
+      const aBrake = Math.max(aReq > aLate ? aReq - aDrag * 0.9 : 0, aTraffic > 0.5 * aLate ? aTraffic - aDrag * 0.5 : 0, brakeFromErr);
       if (aBrake > 1.2) {
         brk = clamp(aBrake / capBrake, 0, 1);
       } else {

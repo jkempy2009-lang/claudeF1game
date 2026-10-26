@@ -9,6 +9,7 @@
 - Subtler pitch and roll; smoother, quieter engine, wind and tyre sounds; lower default volume.
 - DRS zones are derived from the track geometry and cancelled under heavy cornering load.
 - AI recalibrated against human lap times (Hautes-Fagnes 1:19, Vettore 1:08.5, Rade 1:06.4). The AI brakes late and hard instead of bleeding speed over a long distance (it was only using ~2 g of a 5 g braking capability), the speed envelope accounts for lateral load transfer, the racing line is smoothed so it can be driven at 340 km/h without a sideways flick, and the steering preview is longer. Legend now laps at about 1:08.0 (Vettore), 1:05.3 (Rade), 1:17.8 (Hautes-Fagnes), 1:22.3 (Northfield) on a clean lap, roughly 0-2 % faster than those reference laps. Elite is about 3 % slower, Pro 7 %, Amateur 13 %, Rookie 20 %.
+- Racing safety for the faster AI: cars brake early enough to stop behind a slower or braking car in their lane, take corners slightly slower in dirty air, and drive to what a damaged or punctured car has left. Full 20-car Legend races are back to near-zero marshal recoveries on every circuit.
 - Basics: WebGL check with a friendly message, context-loss recovery, Escape goes back in menus, social/theme meta tags, pause menu key reminders.
 
 ## 1.0

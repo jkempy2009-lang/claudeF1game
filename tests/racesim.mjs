@@ -11,7 +11,7 @@ const laps = +(process.argv[3] || 3);
 const level = +(process.argv[4] ?? 0.8);
 const field = +(process.argv[5] || 20);
 const track = new Track(TRACK_DEFS.find((d) => d.id === id));
-const race = new Race(track, { laps, level, fieldSize: field, playerGrid: 8, tyreWear: 3, mandatoryStop: false, seed: 5 });
+const race = new Race(track, { laps, level, fieldSize: field, playerGrid: 8, tyreWear: 3, mandatoryStop: false, seed: +(process.env.SEED || 5) });
 // AI-driven "player"
 const pcar = race.player;
 const prof = race.getProfile(pcar.spec, 'pilotbot');
@@ -25,6 +25,7 @@ while (race.phase !== 'finished' && sim < 60 * 20) {
   const inp = race.phase === 'racing' || race.phase === 'countdown' ? bot.update(DT, race) : { throttle: 0, brake: 1, steer: 0 };
   const pin = { throttle: inp.throttle, brake: inp.brake, steer: inp.steer, boost: inp.boost, drsPress: inp.drs };
   race.step(DT, pin);
+  if (process.env.DBG) for (const c of race.cars) { if (c.driver && !c._off && Math.abs(c.d) > track.wl[c.i] + 2.5 && race.phase === 'racing') { c._off = true; const d = c.driver; log(`  OFF ${c.info.code} t=${(race.time - race.t0).toFixed(1)} s=${c.s.toFixed(0)} d=${c.d.toFixed(1)} V=${(c.speed*3.6).toFixed(0)} tgt=${(c.driver.profile.v[c.i]*d.dp.pace*3.6).toFixed(0)} dirty=${(c.dirtyAir||0).toFixed(2)} mistake=${d.mistake&&d.mistake.active} pit=${d.pitState} grip=${d.gripAdapt.toFixed(2)} slipR=${Math.max(Math.abs(c.alpha[2]),Math.abs(c.alpha[3])).toFixed(2)} T=${c.temp[0].toFixed(0)} dmgF=${(c.damageFront||0).toFixed(1)} dmgFl=${(c.damageFloor||0).toFixed(1)} punct=${c.punct||''}`); } if (c._off && Math.abs(c.d) < 3) c._off = false; }
   if (bot.stuckT > 5) { bot.stuckT = 0; race.resetToTrack(pcar); }
   sim += DT;
   for (const e of race.events) {
