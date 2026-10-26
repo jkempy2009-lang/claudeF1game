@@ -1,5 +1,6 @@
 import { formatTime, clamp } from '../util/math.js';
 import { COMPOUNDS } from '../sim/carspec.js';
+const escHtml = (t) => String(t ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 import { DEFAULT_KEYS, keyLabel } from './input.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -177,9 +178,9 @@ export class HUD {
     const [title, tone] = p === 1 ? ['Victory', 'gold'] : p <= 3 ? ['Podium', 'podium'] : p <= 10 ? ['Points finish', 'points'] : ['Chequered flag', 'plain'];
     const gap = p === 1 ? 'Winner' : info.gap != null ? `+${info.gap.toFixed(3)} s to the winner` : '';
     this.el.finish.className = 'tone-' + tone;
-    this.el.finish.style.setProperty('--c', info.team.color);
+    this.el.finish.style.setProperty('--c', String(info.team.color).replace(/[^#0-9a-zA-Z(),. %]/g, ''));
     this.el.finish.innerHTML = `
-      <div class="eyebrow">${info.name} · ${info.team.name}</div>
+      <div class="eyebrow">${escHtml(info.name)} · ${escHtml(info.team.name)}</div>
       <div class="big"><span class="pos">${p}</span><span class="ord">${o(p).replace(/^\d+/, '')}</span></div>
       <div class="title">${title}</div>
       <div class="facts"><div><span>Race time</span><b>${formatTime(info.time)}</b></div><div><span>Gap</span><b>${gap}</b></div><div><span>Best lap</span><b>${info.best < Infinity ? formatTime(info.best) : '—'}</b></div></div>
@@ -187,6 +188,8 @@ export class HUD {
       <div class="cont" id="fin-cont">Press <kbd>Enter</kbd> or click for the results</div>`;
     this.el.finish.classList.remove('hidden');
     document.getElementById('hud').classList.add('cine');
+    clearTimeout(this._finT);
+    this.stopConfetti();
     if (p <= 3) this.startConfetti(p === 1 ? 260 : 150);
     this._finT = setTimeout(() => {
       const c = document.getElementById('fin-cont');
@@ -254,14 +257,22 @@ export class HUD {
     this.el.keyhint.classList.remove('hidden');
     this.el.keyhint.style.opacity = 1;
     clearTimeout(this._khT);
+    clearTimeout(this._khT2);
     this._khT = setTimeout(() => {
       this.el.keyhint.style.opacity = 0;
-      setTimeout(() => this.el.keyhint.classList.add('hidden'), 600);
+      this._khT2 = setTimeout(() => this.el.keyhint.classList.add('hidden'), 600);
     }, ms);
   }
 
   show(on) {
     this.root.classList.toggle('hidden', !on);
+    if (on) {
+      // a new session never inherits the last one's finish banner, confetti, lights or telemetry trace
+      this.hideFinish();
+      clearTimeout(this._lightT);
+      this.teleBuf.n = 0;
+      this.teleBuf.last = 0;
+    }
   }
 
   message(text, kind = '', sub = '', ttl = 3.2) {
@@ -302,7 +313,8 @@ export class HUD {
   setLights(n, out = false) {
     this.el.lights.classList.toggle('hidden', n === 0 && !out);
     this.lightEls.forEach((el, i) => el.classList.toggle('on', i < n));
-    if (out) setTimeout(() => this.el.lights.classList.add('hidden'), 700);
+    clearTimeout(this._lightT);
+    if (out) this._lightT = setTimeout(() => this.el.lights.classList.add('hidden'), 700);
   }
 
   /** Frame update. race: Race, p: player car, pin: current input. */
@@ -476,7 +488,7 @@ export class HUD {
           n.className = 'nut ' + c;
         }
       });
-      const msg = pg.done ? (pg.misses ? `${pg.misses} cross-threaded: ${pg.dur.toFixed(1)} s` : pg.goods ? `Clean stop: ${pg.dur.toFixed(1)} s` : 'Perfect stop: 2.5 s') : '';
+      const msg = pg.done ? (pg.misses ? `${pg.misses} cross-threaded: ${pg.dur.toFixed(1)} s` : pg.goods ? `Clean stop: ${pg.dur.toFixed(1)} s` : `Perfect stop: ${pg.dur.toFixed(1)} s`) : '';
       if (pgEl._m !== msg) {
         pgEl._m = msg;
         pgEl.querySelector('.pgr').textContent = msg;
@@ -487,11 +499,13 @@ export class HUD {
     if (rs.service) {
       pitEl.classList.remove('hidden');
       pitEl.classList.add('service');
-      pitEl.innerHTML = `<div class="big">${Math.max(0, rs.service.dur - rs.service.t).toFixed(1)}</div>Pit stop in progress`;
+      const svcHtml = `<div class="big">${Number.isFinite(rs.service.dur) ? Math.max(0, rs.service.dur - rs.service.t).toFixed(1) : '…'}</div>Pit stop in progress`;
+      if (pitEl._h !== svcHtml) { pitEl._h = svcHtml; pitEl.innerHTML = svcHtml; }
     } else if (rs.pitRequested && race.track.pit) {
       pitEl.classList.remove('hidden', 'service');
       const next = rs.nextCompound || '(auto)';
-      pitEl.innerHTML = `<div class="big">Box, box</div>Entering pits this lap · next tyre <b>${next.toUpperCase()}</b> <span class="hint">[${this.keyNames.tyre}] to change · [${this.keyNames.pit}] cancel</span>`;
+      const reqHtml = `<div class="big">Box, box</div>Entering pits this lap · next tyre <b>${next.toUpperCase()}</b> <span class="hint">[${this.keyNames.tyre}] to change · [${this.keyNames.pit}] cancel</span>`;
+      if (pitEl._h !== reqHtml) { pitEl._h = reqHtml; pitEl.innerHTML = reqHtml; }
     } else pitEl.classList.add('hidden');
 
     // throttled things
