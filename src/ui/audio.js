@@ -14,7 +14,21 @@ export class AudioEngine {
   }
 
   start() {
-    if (this.started) return;
+    if (this.started || this.failed) return;
+    try {
+      this._build();
+    } catch (e) {
+      // an old or restricted browser: the game runs silently rather than throwing on every race start
+      console.warn('audio unavailable', e);
+      this.failed = true;
+      this.started = false;
+      this.master = null;
+      try { if (this.ctx) this.ctx.close(); } catch { /* already gone */ }
+      this.ctx = null;
+    }
+  }
+
+  _build() {
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
     this.ctx = new AC();
@@ -159,7 +173,6 @@ export class AudioEngine {
     this.sprayGain.connect(this.master);
     sn.start();
     this.sprayFilter = sf;
-    this.weather = { rain: 0, wet: 0 };
 
     // ---- crowd / ambience bed
     const cn = noise();
@@ -185,7 +198,7 @@ export class AudioEngine {
       const f = ctx.createBiquadFilter();
       f.type = 'lowpass';
       f.frequency.value = 600;
-      const pan = ctx.createStereoPanner();
+      const pan = ctx.createStereoPanner ? ctx.createStereoPanner() : Object.assign(ctx.createGain(), { pan: { setTargetAtTime() {} } });
       o1.connect(f);
       o2.connect(f);
       f.connect(g);
@@ -193,7 +206,7 @@ export class AudioEngine {
       pan.connect(this.master);
       o1.start();
       o2.start();
-      this.voices.push({ o1, o2, g, f, pan, car: null });
+      this.voices.push({ o1, o2, g, f, pan, car: null, d2: 0 });
     }
     this.started = true;
   }
@@ -216,7 +229,8 @@ export class AudioEngine {
   update(player, others, listener, dt, paused) {
     if (!this.started) return;
     const t = this.ctx.currentTime;
-    const set = (param, v, tc = 0.03) => param.setTargetAtTime(v, t, tc);
+    // a non-finite value (a physics blow-up) must never throw inside the frame loop
+    const set = (param, v, tc = 0.03) => { if (Number.isFinite(v)) param.setTargetAtTime(v, t, tc); };
     if (paused) {
       set(this.eng.gain, 0, 0.1);
       set(this.windGain.gain, 0, 0.1);
@@ -224,7 +238,9 @@ export class AudioEngine {
       set(this.rumbleGain.gain, 0, 0.1);
       set(this.rainGain.gain, 0, 0.1);
       set(this.sprayGain.gain, 0, 0.1);
-      for (const v of this.voices) set(v.g.gain, 0, 0.1);
+      for (const v of this.voices) { set(v.g.gain, 0, 0.1); v.car = null; }
+      this.lastGear = player.gear;
+      this.prevThr = player.throttle;
       return;
     }
     const rpm = player.rpm;
@@ -263,25 +279,40 @@ export class AudioEngine {
     }
     // other cars: nearest 6 audible
     const lp = listener.pos, lr = listener.right, lv = listener.vel;
-    const list = others
-      .map((c) => {
-        const dx = c.wx - lp.x, dz = c.wz - lp.z;
-        return { c, d2: dx * dx + dz * dz, dx, dz };
-      })
-      .sort((a, b) => a.d2 - b.d2)
-      .slice(0, this.voices.length);
-    this.voices.forEach((v, i) => {
-      const e = list[i];
-      if (!e || e.d2 > 250 * 250) {
-        set(v.g.gain, 0, 0.1);
-        return;
+    // each car keeps its voice while it stays among the nearest, so two cars trading places in the pack do not swap pitch and pan
+    const nv = this.voices.length, sel = this._sel || (this._sel = []);
+    sel.length = 0;
+    for (const c of others) {
+      const dx = c.wx - lp.x, dz = c.wz - lp.z;
+      c.d2 = dx * dx + dz * dz;
+      if (c.d2 > 250 * 250) continue;
+      if (sel.length < nv) sel.push(c);
+      else {
+        let far = 0;
+        for (let k = 1; k < nv; k++) if (sel[k].d2 > sel[far].d2) far = k;
+        if (c.d2 < sel[far].d2) sel[far] = c;
       }
-      const car = e.c.car;
+    }
+    // (the records are reused frame to frame, so a voice remembers the physics car, not the record)
+    for (const v of this.voices) if (v.car && !sel.some((c) => c.car === v.car)) { v.car = null; set(v.g.gain, 0, 0.1); }
+    for (const c of sel) {
+      if (this.voices.some((v) => v.car === c.car)) continue;
+      const free = this.voices.find((v) => !v.car);
+      if (free) free.car = c.car;
+    }
+    for (const v of this.voices) {
+      const e = v.car ? sel.find((c) => c.car === v.car) : null;
+      if (!e) {
+        v.car = null;
+        set(v.g.gain, 0, 0.1);
+        continue;
+      }
+      const car = e.car;
+      const dx = e.wx - lp.x, dz = e.wz - lp.z;
       const d = Math.sqrt(e.d2) + 1;
-      const rv = (car.u * (e.dx * Math.cos(car.theta) - e.dz * Math.sin(car.theta) * 0) + 0) * 0;
       // radial speed for Doppler (approx): relative velocity along the line of sight
-      const vx = e.c.vx - lv.x, vz = e.c.vz - lv.z;
-      const radial = (vx * e.dx + vz * e.dz) / d;
+      const vx = e.vx - lv.x, vz = e.vz - lv.z;
+      const radial = (vx * dx + vz * dz) / d;
       const dop = 1 / (1 + clamp(radial, -90, 90) / 340);
       const f = (car.rpm / 60) * 3 * dop;
       set(v.o1.frequency, f, 0.04);
@@ -289,8 +320,8 @@ export class AudioEngine {
       set(v.f.frequency, 220 + car.rpm * 0.09, 0.1);
       const att = 1 / (1 + (d / 18) ** 1.6);
       set(v.g.gain, 0.07 * att * (0.4 + 0.6 * car.throttle), 0.08);
-      set(v.pan.pan, clamp((e.dx * lr.x + e.dz * lr.z) / d, -1, 1), 0.05);
-    });
+      set(v.pan.pan, clamp((dx * lr.x + dz * lr.z) / d, -1, 1), 0.05);
+    }
   }
 
   /** A run of short, sharp exhaust bangs: `n` pops, `strength` 0..1. */
@@ -330,9 +361,10 @@ export class AudioEngine {
     }
   }
 
-  blip(freq, dur = 0.1, gain = 0.1, type = 'sine', slide = 0) {
+  /** delay: seconds from now, on the audio clock (so a busy frame cannot bunch up an arpeggio). */
+  blip(freq, dur = 0.1, gain = 0.1, type = 'sine', slide = 0, delay = 0) {
     if (!this.started) return;
-    const ctx = this.ctx, t = ctx.currentTime;
+    const ctx = this.ctx, t = ctx.currentTime + delay;
     const o = ctx.createOscillator(), g = ctx.createGain();
     o.type = type;
     o.frequency.setValueAtTime(freq, t);
@@ -371,7 +403,7 @@ export class AudioEngine {
   cheer(strength = 1) {
     if (!this.started) return;
     const ctx = this.ctx, t = ctx.currentTime;
-    const n = this.makeNoise(false);
+    const n = this.makeNoise(true); // the roar outlasts the 2 s noise buffer
     const f = ctx.createBiquadFilter();
     f.type = 'bandpass';
     f.frequency.setValueAtTime(700, t);
@@ -389,7 +421,7 @@ export class AudioEngine {
   }
 
   fanfare() {
-    [[523.25, 0], [659.25, 0.16], [783.99, 0.32], [1046.5, 0.5]].forEach(([f, d]) => setTimeout(() => this.blip(f, 0.45, 0.08, 'triangle'), d * 1000));
+    [[523.25, 0], [659.25, 0.16], [783.99, 0.32], [1046.5, 0.5]].forEach(([f, d]) => this.blip(f, 0.45, 0.08, 'triangle', 0, d));
   }
 
   go() {
@@ -398,10 +430,9 @@ export class AudioEngine {
 
   /** Team-radio squelch: a short burst of band-passed noise, then a two-tone chirp. */
   radioClick() {
-    if (!this.started || !this.noiseBuf) return;
+    if (!this.started) return;
     const ctx = this.ctx, t = ctx.currentTime;
-    const src = ctx.createBufferSource();
-    src.buffer = this.noiseBuf;
+    const src = this.makeNoise(false);
     const bp = ctx.createBiquadFilter();
     bp.type = 'bandpass';
     bp.frequency.value = 1900;
@@ -415,15 +446,15 @@ export class AudioEngine {
     g.connect(this.master);
     src.start(t);
     src.stop(t + 0.2);
-    setTimeout(() => this.blip(1500, 0.05, 0.035, 'square'), 170);
-    setTimeout(() => this.blip(1180, 0.05, 0.03, 'square'), 235);
+    this.blip(1500, 0.05, 0.035, 'square', 0, 0.17);
+    this.blip(1180, 0.05, 0.03, 'square', 0, 0.235);
   }
 
   ui(kind = 'click') {
     if (kind === 'click') this.blip(720, 0.05, 0.05, 'triangle');
     else if (kind === 'good') {
       this.blip(660, 0.1, 0.07, 'triangle');
-      setTimeout(() => this.blip(990, 0.14, 0.07, 'triangle'), 90);
+      this.blip(990, 0.14, 0.07, 'triangle', 0, 0.09);
     } else if (kind === 'bad') this.blip(180, 0.25, 0.1, 'sawtooth', -60);
     else if (kind === 'radio') this.radioClick();
   }
