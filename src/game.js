@@ -218,22 +218,25 @@ class Game {
   }
 
   applySettings() {
-    persist(this.save);
+    clearTimeout(this._saveT); // a slider fires this dozens of times: the save is written once it settles
+    this._saveT = setTimeout(() => persist(this.save), 250);
     this.audio.setVolume(this.save.settings.volume);
     Object.assign(this.input.opts, { steerSpeed: this.save.settings.steerSpeed, padDead: this.save.settings.padDead, rumble: this.save.settings.rumble !== false });
     this.input.keys = mergeKeys(this.save.settings.keys);
     const pgk = this.hud.el.pitgame && this.hud.el.pitgame.querySelector('.pgt kbd');
     if (pgk) pgk.textContent = this.kn('drs');
     this.hud.keyNames = { pit: this.kn('pit'), tyre: this.kn('tyre') };
-    const pgKey = document.getElementById('pg-key');
-    if (pgKey) pgKey.textContent = this.kn('drs'); // the pit-stop game uses the DRS button
     this.hud.setUnits(this.save.settings.units);
     this.hud.el.minimap.classList.toggle('hidden', !this.save.settings.minimap);
     if (this.session && this.session.guide) this.session.guide.setVisible(this.save.settings.line !== false);
     this.hud.el.tower.classList.toggle('force-hide', !this.save.settings.tower);
     const tw = this.hud.el.tower;
     tw.style.visibility = this.save.settings.tower ? '' : 'hidden';
-    this.resize();
+    const rk = `${this.save.settings.quality}|${this.resScale || 1}|${window.innerWidth}x${window.innerHeight}`;
+    if (rk !== this._resizeKey) {
+      this._resizeKey = rk;
+      this.resize();
+    }
     if (this.session && this.session.camRig) this.session.camRig.shakeOn = this.save.settings.shake && !this.save.settings.calm;
     if (this.session && this.session.guide) this.session.guide.cbSafe = !!this.save.settings.cbSafe;
     VIEW_OPTS.calm = !!this.save.settings.calm;

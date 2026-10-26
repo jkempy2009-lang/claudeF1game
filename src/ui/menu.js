@@ -46,7 +46,7 @@ const ASSIST_PRESETS = {
 const TC_NAMES = ['Off', 'Low', 'Medium', 'High'];
 
 const isObj = (o) => o && typeof o === 'object' && !Array.isArray(o);
-const num = (v, lo, hi, d) => (Number.isFinite(+v) && v !== null && v !== '' ? Math.min(hi, Math.max(lo, +v)) : d);
+const num = (v, lo, hi, d) => ((typeof v === 'number' || (typeof v === 'string' && v.trim() !== '')) && Number.isFinite(+v) ? Math.min(hi, Math.max(lo, +v)) : d);
 const oneOf = (v, list, d) => (list.includes(v) ? v : d);
 const bool = (v, d) => (typeof v === 'boolean' ? v : d);
 /** A timing-tower code: two or three capital letters / digits. */
@@ -145,7 +145,7 @@ function sanitizeSeason(raw) {
   const calendar = Array.isArray(raw.calendar) ? raw.calendar.filter((id) => ids.includes(id)) : CHAMP_CAL.slice();
   if (!calendar.length) return null;
   const round = Math.round(num(raw.round, 0, calendar.length, 0));
-  return { calendar, round, points: cleanNumMap(raw.points), teamPoints: cleanNumMap(raw.teamPoints), teamOf: cleanStrMap(raw.teamOf), results: cleanResults(raw.results), weather: Array.isArray(raw.weather) ? raw.weather.filter((w) => WEATHER_IDS.includes(w)).slice(0, calendar.length) : undefined };
+  return { calendar, round, points: cleanNumMap(raw.points), teamPoints: cleanNumMap(raw.teamPoints), teamOf: cleanStrMap(raw.teamOf), results: cleanResults(raw.results), weather: Array.isArray(raw.weather) && raw.weather.length >= calendar.length ? raw.weather.slice(0, calendar.length).map((w) => (WEATHER_IDS.includes(w) ? w : 'dry')) : undefined };
 }
 
 function sanitizeStats(raw) {
@@ -260,6 +260,7 @@ export class Menu {
   }
 
   show(name, data) {
+    this._wipeAt = 0; // an armed 'clear records' confirmation does not survive a screen change
     if (name !== 'controls') this.rebinding = null; // leaving the controls screen cancels a pending rebind
     this.current = name;
     this.lastData = data;
@@ -302,7 +303,12 @@ export class Menu {
 
   afterRender(name) {
     if (name === 'results') requestAnimationFrame(() => this.drawTelemetry());
-    if (name === 'setup' && this.hooks.previewTeam) this.hooks.previewTeam(this.config.team);
+    // the showroom car is rebuilt when the setup screen is entered or the team changes, not on every tab or chip click
+    if (name === 'setup' && this.hooks.previewTeam && (this._lastShown !== 'setup' || this._previewTeam !== this.config.team)) {
+      this._previewTeam = this.config.team;
+      this.hooks.previewTeam(this.config.team);
+    }
+    this._lastShown = name;
     const f = this.root.querySelector('.btn.primary, .btn');
     if (f && name === 'main') f.focus({ preventScroll: true });
   }
@@ -513,7 +519,7 @@ export class Menu {
       </div><div class="panel"><h3>Audio &amp; units</h3>
         ${this.slider('s.volume', 'Master volume', Math.round(s.volume * 100), 0, 100, 1, Math.round(s.volume * 100) + '%')}
         <div class="field"><label>Speed units</label>${this.chips('units', [{ value: 'kmh', label: 'km/h' }, { value: 'mph', label: 'mph' }], s.units)}</div>
-        <div class="field"><label>Default camera</label>${this.chips('camera', [['chase', 'Chase'], ['close', 'Low chase'], ['cockpit', 'Cockpit'], ['tcam', 'T-cam'], ['tv', 'TV']].map(([v, l]) => ({ value: v, label: l })), s.camera)}</div>
+        <div class="field"><label>Default camera</label>${this.chips('camera', [['chase', 'Chase'], ['close', 'Low chase'], ['cockpit', 'Cockpit'], ['tcam', 'T-cam'], ['heli', 'Helicopter'], ['tv', 'TV']].map(([v, l]) => ({ value: v, label: l })), s.camera)}</div>
         <div class="field"><label>Keyboard steering speed</label>${this.chips('steerSpeed', [{ value: 0.7, label: 'Gentle' }, { value: 1, label: 'Normal' }, { value: 1.4, label: 'Quick' }], s.steerSpeed)}<div class="hint">How fast A / D turn the wheel. Gamepads and wheels are not affected.</div></div>
         ${this.slider('s.padDead', 'Gamepad stick deadzone', Math.round(s.padDead * 100), 0, 30, 1, Math.round(s.padDead * 100) + '%')}
         ${this.toggle('s.rumble', 'Gamepad vibration', 'Kerbs, grass, tyre slip and impacts', s.rumble !== false)}
@@ -597,7 +603,7 @@ export class Menu {
         <div class="panel"><h3>AI difficulty</h3>${this.chips('cn.level', DIFFICULTIES.map((d) => ({ value: d.level, label: d.name })), diff.level)}<div class="hint">${esc(diff.blurb)}. It rises a little every season.</div></div>
         <div class="panel"><h3>Season</h3><div class="field"><label>Calendar</label>${this.chips('cn.rounds', [{ value: 4, label: '4 rounds' }, { value: 8, label: TRACK_DEFS.length + ' rounds (all circuits)' }], n.rounds)}</div>
         <div class="field"><label>Race distance</label>${this.chips('cn.distance', DISTANCES.map((d) => ({ value: d.id, label: `${d.name} · ${d.km} km` })), n.distance)}</div></div></div>
-      <div class="footer"><button class="btn sm" data-act="main">◀ Back</button><div class="hint">${esc(TEAMS[n.team].name)} · ${n.rounds} rounds · ${esc(diff.name)}</div><button class="btn primary" data-act="careerstart">Start career</button></div></section>`;
+      <div class="footer"><button class="btn sm" data-act="main">◀ Back</button><div class="hint">${esc(TEAMS[n.team].name)} · ${n.rounds >= 8 ? TRACK_DEFS.length : n.rounds} rounds · ${esc(diff.name)}</div><button class="btn primary" data-act="careerstart">Start career</button></div></section>`;
   }
 
   screen_career_hub() {
@@ -708,8 +714,7 @@ export class Menu {
     if (t.dataset.team != null && t.dataset.team !== '') {
       this.config.team = +t.dataset.team;
       this.persist();
-      H.previewTeam && H.previewTeam(this.config.team);
-      return this.rerender();
+      return this.rerender(); // afterRender rebuilds the preview for the new team
     }
     if (t.dataset.rebind) {
       this.rebinding = this.rebinding === t.dataset.rebind ? null : t.dataset.rebind;
@@ -773,7 +778,7 @@ export class Menu {
       case 'quick':
         c.mode = 'race';
         this.persist();
-        return H.startRace({ ...c, __season: false });
+        return H.startRace({ ...c, qualify: false, __season: false }); // straight to the race, whatever the setup screen last asked for
       case 'setup':
         c.mode = t.dataset.mode;
         if (t.dataset.qualify != null) c.qualify = t.dataset.qualify === '1';
@@ -906,6 +911,7 @@ export class Menu {
       // typed text is kept loosely while editing; the saved value is always valid (see sanitizeSettings)
       if (field === 'driverCode') s.driverCode = cleanCode(t.value, s.driverCode);
       else if (field === 'driverNumber') s.driverNumber = Math.round(num(t.value, 1, 99, s.driverNumber));
+      if (field === 'driverCode') t.onchange = () => { t.value = s.driverCode; }; // show what was kept once typing stops
       clearTimeout(this._persistT);
       this._persistT = setTimeout(() => this.persist(), 300);
       return;
