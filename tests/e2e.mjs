@@ -84,6 +84,21 @@ for (const [name, bad] of [
   await page.waitForSelector('[data-act=resume]');
   await page.click('[data-act=resume]');
   step('pause / settings / resume', await page.evaluate(() => window.apex.state === 'race'));
+  // instant replay from the pause menu
+  await page.evaluate(() => { const a = window.apex, s = a.session; a.debugSkip(6); for (let k = 0; k < 60; k++) { a.debugSkip(0.4); s.rec.record(s.race.cars, s.race, s.track); } });
+  await page.keyboard.down('Escape');
+  await page.waitForTimeout(2500);
+  await page.keyboard.up('Escape');
+  await page.waitForSelector('[data-act=replay]', { timeout: 20000 });
+  await page.click('[data-act=replay]');
+  await page.waitForSelector('#replay:not(.hidden)', { timeout: 20000 });
+  step('instant replay opens', await page.evaluate(() => window.apex.state === 'replay'));
+  await page.waitForTimeout(2500);
+  await page.click('#replay [data-r=cam]');
+  await page.click('#replay [data-r=exit]');
+  await page.waitForSelector('[data-act=resume]', { timeout: 20000 });
+  step('replay returns to the pause menu', await page.evaluate(() => window.apex.state === 'paused'));
+  await page.click('[data-act=resume]');
   const done = await page.evaluate(() => { const a = window.apex; return a.debugUntil(() => a.session.player.rs.finished, 400); });
   step('player finishes', done === true || done === undefined, String(done));
   await page.waitForFunction(() => window.apex.session.fin && window.apex.session.fin.t > 2, null, { timeout: 120000 });

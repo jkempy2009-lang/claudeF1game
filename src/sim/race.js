@@ -656,6 +656,7 @@ export class Race {
       const rel = loopDelta(car.s, z.detect, tr.length);
       if (rel >= 0 && rel < Math.max(8, car.speed * 0.06)) {
         rs.drsEligible[k] = this.opt.mode === 'timetrial' || this.isQuali || (car.gapAhead != null && car.gapAhead < 1.0);
+        (rs.drsGap || (rs.drsGap = []))[k] = car.gapAhead; // the gap measured at the detection line
       }
       if (zone !== k && rs.drsEligible[k] && loopDelta(car.s, z.end, tr.length) > 10 && loopDelta(car.s, z.end, tr.length) < 200) rs.drsEligible[k] = false;
     }
@@ -697,7 +698,7 @@ export class Race {
         if (rs.plannedStop != null && !done && rs.laps >= rs.plannedStop) drv.wantsPit = true;
         if (ts.wear > 0.72 && !done) drv.wantsPit = true;
         if (ts.wear > 0.88) drv.wantsPit = true;
-        if (car.damageFront > 0.45 && lapsLeft > 2) drv.wantsPit = true;
+        if (car.damageSummary().severity > 0.4 && lapsLeft > 2) drv.wantsPit = true;
         // weather: wets once the track is properly wet, slicks once it dries out
         if (this.track.pit && lapsLeft > 1) {
           if (this.wet > 0.4 && !car.compound.wetTyre) {
@@ -711,6 +712,16 @@ export class Race {
         if (this.sc.state === 'deployed' && ts.wear > 0.4 && rs.stops === 0 && lapsLeft > 3 && rs.plannedStop != null) drv.wantsPit = true; // a cheap stop
       }
     }
+    // heavy damage: the pit wall calls the player in (B cancels it)
+    if (car === this.player && this.opt.mode === 'race' && tr.pit && this.phase === 'racing') {
+      const sv = car.damageSummary().severity;
+      if (sv > 0.5 && !rs.damageBoxed && !rs.pitRequested && this.totalLaps - rs.laps > 1) {
+        rs.damageBoxed = true;
+        rs.pitRequested = true;
+        this.pushEvent({ type: 'damageBox', car });
+      }
+      if (sv < 0.1) rs.damageBoxed = false;
+    }
     // player: stopped in the box?
     if (rs.boxLatch && car.speed > 3) rs.boxLatch = false;
     if (car === this.player && !rs.service && !rs.boxLatch && rs.inPitLane && car.speed < 0.7) {
@@ -720,8 +731,10 @@ export class Race {
     // service
     if (car.pitStopped && !rs.service) {
       let dur = 2.3 + this.rng() * (1.1 + (1 - this.opt.level) * 1.2);
-      if ((car.damageFront || 0) > 0.15) dur += 3.5;
-      rs.service = { t: 0, dur };
+      const dm = car.damageSummary();
+      const repair = 4 * dm.fw + 2.5 * (dm.sideL + dm.sideR) + 2 * dm.rw + 1.5 * dm.floor;
+      dur += repair;
+      rs.service = { t: 0, dur, repair };
       if (car === this.player && this.opt.assists.pitGame && this.opt.mode === 'race') {
         rs.service.pg = makePitGame(); // the player's crew needs the right timing on each wheel nut
         rs.service.dur = Infinity;
@@ -738,7 +751,7 @@ export class Race {
         rs.pitAct = false;
         for (const r of stepPitGame(pg, rs.service.t, press)) this.pushEvent({ type: 'pitWheel', car, k: r.k, res: r.res });
         if (pg.done && rs.service.dur === Infinity) {
-          rs.service.dur = pg.dur;
+          rs.service.dur = pg.dur + (rs.service.repair || 0); // bodywork repairs run alongside the wheels but take longer than a clean stop
           this.pushEvent({ type: 'pitGameDone', car, dur: pg.dur, perfects: pg.perfects, misses: pg.misses });
         }
       }
@@ -935,6 +948,10 @@ export class Race {
     sc.pseudo.speed = sc.v;
     sc.ahead = this.player ? this.player.ahead : null;
     this.yellow = false;
+    for (const c of this.cars) {
+      c.drsAllowed = false; // DRS is shut off the moment the pace car is out
+      c.rs.drsEligible = [];
+    }
     this.pushEvent({ type: 'scDeploy' });
   }
 

@@ -136,7 +136,7 @@ export class AIDriver {
       // a broken wing, floor or punctured tyre costs grip as well: drive to what the car has left
       const punct = Math.max(car.puncture[0], car.puncture[1], car.puncture[2], car.puncture[3]);
       g *= wetGripFactor(comp, car.wetness || 0);
-      g *= 1 - clamp(0.4 * (car.damageFront || 0) + 0.15 * (car.damageRear || 0) + 0.2 * (car.damageFloor || 0) + 0.35 * punct, 0, 0.6);
+      g *= 1 - clamp(0.4 * (car.damageFront || 0) + 0.15 * (car.damageRear || 0) + 0.2 * (car.damageFloor || 0) + 0.12 * ((car.damageSideL || 0) + (car.damageSideR || 0)) + 0.35 * punct, 0, 0.6);
       const want = Math.sqrt(clamp(g / 0.96, 0.35, 1));
       this.gripAdapt += (Math.min(1, want) - this.gripAdapt) * 0.5;
     }

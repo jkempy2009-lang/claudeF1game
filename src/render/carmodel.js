@@ -173,6 +173,7 @@ export class CarView {
     // ---------------- bodywork
     const paint = [];
     const carbon = [];
+    const podParts = [];
     const nose = loft(
       [
         { x: 3.0, w: 0.03, yb: 0.16, yt: 0.2 },
@@ -216,7 +217,7 @@ export class CarView {
         ],
         14
       );
-      paint.push(colorize(pod, livery(team, 'side')));
+      podParts.push({ geo: colorize(pod, livery(team, 'side')), side });
       // sidepod inlet (dark)
       carbon.push(box(0.9, 1.0, 0.2, 0.42, side * 0.5 - 0.17, side * 0.5 + 0.17));
     }
@@ -292,6 +293,14 @@ export class CarView {
     const bodyMat = new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.28, metalness: 0.35, clearcoat: 1.0, clearcoatRoughness: 0.08 });
     this.bodyMat = bodyMat;
     this.model.add(new THREE.Mesh(mergeClean(paint), bodyMat), new THREE.Mesh(mergeClean(carbon), S.carbon), this.frontWing, this.rearWing);
+    // sidepods are separate meshes so they can crumple on their own when the car is hit from the side
+    this.pods = podParts.map(({ geo, side }) => {
+      const g = mergeClean([geo]);
+      const m = new THREE.Mesh(g, bodyMat);
+      m.userData = { base: g.attributes.position.array.slice(), side, d: 0 };
+      this.model.add(m);
+      return m;
+    });
 
     // helmet
     const helmetColor = new THREE.Color().setHSL(((info.number * 53) % 360) / 360, 0.8, 0.5);
@@ -421,11 +430,46 @@ export class CarView {
     const strobe = car.harvesting && !br ? (Math.floor(this.harvT * 9) % 2 ? 0xffa010 : 0xff2010) : null;
     this.brakeLight.material.color.setHex(strobe ?? (br ? 0xff1010 : car.harvesting ? 0xff6a10 : 0x400000));
     const df = car.damageFront || 0, dr = car.damageRear || 0;
-    this.frontWingR.visible = df < 0.8;
+    this.frontWingR.visible = df < 0.85;
+    this.frontWingL.visible = df < 0.97;
     this.frontWingL.rotation.z = -df * 0.25;
+    this.frontWingL.rotation.x = df * 0.2;
     this.frontWingL.position.y = -df * 0.04;
-    this.rearWing.visible = dr < 0.9;
+    this.frontWingR.rotation.z = -df * 0.12;
+    this.frontWingR.rotation.x = -df * 0.3;
+    this.frontWingR.position.y = -df * 0.06;
+    this.rearWing.visible = dr < 0.92;
     this.rearWing.rotation.z = dr * 0.12;
+    this.rearWing.rotation.x = dr * 0.12;
+    // crumpled sidepods (left pod is the -Z side of the model)
+    const sd = [car.damageSideR || 0, car.damageSideL || 0];
+    for (let k = 0; k < 2; k++) {
+      const m = this.pods[k];
+      if (m && Math.abs(sd[k] - m.userData.d) > 0.03) this.crumple(m, sd[k]);
+    }
+  }
+
+  /** Pushes a sidepod's outer skin inwards with noisy dents, in proportion to the damage d (0..1). */
+  crumple(mesh, d) {
+    const { base, side } = mesh.userData;
+    const pos = mesh.geometry.attributes.position;
+    const a = pos.array;
+    const hash = (x, y) => {
+      const v = Math.sin(x * 127.1 + y * 311.7 + side * 17.3) * 43758.5453;
+      return v - Math.floor(v);
+    };
+    for (let i = 0; i < a.length; i += 3) {
+      const x = base[i], y = base[i + 1], z = base[i + 2];
+      const outer = Math.max(0, (z * side - 0.18) / 0.2); // skin facing outwards
+      const n = 0.4 + 0.6 * hash(Math.round(x * 4), Math.round(y * 8));
+      const dent = d * outer * n * 0.17;
+      a[i] = x + (hash(y * 9, x * 3) - 0.5) * d * 0.05 * outer;
+      a[i + 1] = y - d * 0.05 * outer * n;
+      a[i + 2] = z - side * dent;
+    }
+    pos.needsUpdate = true;
+    mesh.geometry.computeVertexNormals();
+    mesh.userData.d = d;
   }
 
   setShadow(on) {

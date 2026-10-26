@@ -8,6 +8,7 @@ const up = new THREE.Vector3(0, 1, 0);
 const qTmp = new THREE.Quaternion();
 const qY = new THREE.Quaternion().setFromAxisAngle(up, -Math.PI / 2);
 const v1 = new THREE.Vector3(), v2 = new THREE.Vector3(), v3 = new THREE.Vector3();
+const qBack = new THREE.Quaternion().setFromAxisAngle(up, Math.PI);
 
 export class CameraRig {
   constructor(camera) {
@@ -90,7 +91,7 @@ export class CameraRig {
       cam.position.copy(local);
       view.model.getWorldQuaternion(qTmp);
       qTmp.multiply(qY);
-      if (this.lookBack) qTmp.multiply(new THREE.Quaternion().setFromAxisAngle(up, Math.PI));
+      if (this.lookBack) qTmp.multiply(qBack);
       cam.quaternion.copy(qTmp);
       fovTarget = this.mode === 'cockpit' ? 76 + clamp(speed * 0.05, 0, 8) : 74;
     } else if (this.mode === 'finish') {

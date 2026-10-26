@@ -12,6 +12,7 @@ import { PitCrew } from './render/crew.js';
 import { Guideline } from './render/guideline.js';
 import { PostFX } from './render/postfx.js';
 import { Rain } from './render/rain.js';
+import { ReplayBuffer, makeReplayCars } from './render/replay.js';
 import { Effects } from './render/effects.js';
 import { CameraRig, CAMERA_MODES, CAMERA_NAMES } from './render/camera.js';
 import { Input } from './ui/input.js';
@@ -20,6 +21,25 @@ import { HUD } from './ui/hud.js';
 import { Menu, loadSave, persist, sanitizeConfig } from './ui/menu.js';
 import * as Career from './sim/career.js';
 import { clamp, formatTime, lerp } from './util/math.js';
+
+/** Frees everything a session put on the GPU: geometries, materials, their textures, instancing buffers and the environment map. */
+function disposeScene(scene) {
+  const seen = new Set();
+  const texKeys = ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap', 'alphaMap', 'bumpMap', 'envMap', 'lightMap'];
+  scene.traverse((o) => {
+    if (o.geometry) o.geometry.dispose();
+    if (o.isInstancedMesh) o.dispose();
+    const mats = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : [];
+    for (const m of mats) {
+      if (seen.has(m)) continue;
+      seen.add(m);
+      for (const k of texKeys) if (m[k] && m[k].dispose) m[k].dispose();
+      if (m.uniforms) for (const u of Object.values(m.uniforms)) if (u.value && u.value.isTexture) u.value.dispose();
+      m.dispose();
+    }
+  });
+  if (scene.environment && scene.environment.dispose) scene.environment.dispose();
+}
 
 const nextFrame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
 
@@ -65,6 +85,16 @@ class Game {
     window.addEventListener('keydown', (e) => {
       this.audio.start();
       this.audio.resume();
+      if (this.state === 'replay') {
+        const r = this.session && this.session.replay;
+        if (e.code === 'Space') { e.preventDefault(); this.replayAction('play'); }
+        else if (e.code === 'KeyN') this.replayAction('car');
+        else if (e.code === 'KeyS') this.replayAction('slow');
+        else if (e.code === 'KeyF') this.replayAction('normal');
+        else if (e.code === 'ArrowLeft' && r) r.t = Math.max(0, r.t - 2);
+        else if (e.code === 'ArrowRight' && r) r.t = Math.min(this.session.rec.duration, r.t + 2);
+        return;
+      }
       if (this.state === 'paused' && e.code === 'Escape' && this.menu.current === 'settings') {
         this.input.pressed.delete('Escape'); // back to the pause menu, not out of it
         this.menu.show('pause');
@@ -107,6 +137,7 @@ class Game {
       applySettings: () => this.applySettings(),
       previewTeam: (i) => this.previewTeam(i),
       openSeason: () => this.openSeason(),
+      replay: (from) => this.startReplay(from),
       openCareer: () => this.openCareer(),
       careerStart: (o) => this.careerStart(o),
       careerRace: (q) => this.careerRace(q),
@@ -452,6 +483,7 @@ class Game {
       acc: 0, alpha: 0, intro: 4.2, introT: 0, paused: false, finishedShown: false, radioT: 0, fast: false,
       player: race.player, pin: null, sunDir: world.sunDir, stopTimer: 0, lastEventCar: null, seasonRound: this.save.season ? this.save.season.round : null,
       useSeason: cfg.__season,
+      rec: new ReplayBuffer(race.cars.length, 30, 30), replayCars: makeReplayCars(race.cars),
     };
     this.hud.setTrack(track);
     this.hud.setUnits(this.save.settings.units);
@@ -468,9 +500,11 @@ class Game {
   endSession() {
     const s = this.session;
     if (!s) return;
-    s.scene.traverse((o) => {
-      if (o.geometry) o.geometry.dispose();
-    });
+    disposeScene(s.scene);
+    if (s.rain) s.rain.dispose();
+    if (s.rec) s.rec.data = null;
+    if (this._replayUI) this._replayUI.classList.add('hidden');
+    this.renderer.renderLists.dispose();
     this.session = null;
     this.audio.update({ rpm: 0, throttle: 0, speed: 0, slipVis: [0, 0, 0, 0], kerbShake: 0, gear: 1 }, [], { pos: new THREE.Vector3(), right: new THREE.Vector3(1, 0, 0), vel: new THREE.Vector3() }, 0.016, true);
   }
@@ -612,6 +646,10 @@ class Game {
       this.post.render(s.scene, this.camera, 0);
       return;
     }
+    if (this.state === 'replay') {
+      this.runReplay(s, dt);
+      return;
+    }
     if (this.state === 'race') this.runSession(s, dt);
     this.post.render(s.scene, this.camera, this.speedBlur(s));
   }
@@ -646,8 +684,10 @@ class Game {
 
   listener() {
     const cam = this.camera;
-    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
-    return { pos: cam.position, right, vel: this._lv || (this._lv = new THREE.Vector3()) };
+    const L = this._listener || (this._listener = { pos: cam.position, right: new THREE.Vector3(), vel: new THREE.Vector3() });
+    L.pos = cam.position;
+    L.right.set(1, 0, 0).applyQuaternion(cam.quaternion);
+    return L;
   }
 
   runSession(s, dt) {
@@ -727,6 +767,7 @@ class Game {
     if (ff && race.phase !== 'finished') s.acc = 0;
 
     this.processEvents(s);
+    if (race.phase !== 'grid' && race.phase !== 'countdown') s.rec.tick(dt, race.cars, race, s.track);
 
     this.updateSafetyCarView(s, dt);
     // views
@@ -815,15 +856,22 @@ class Game {
     // HUD + audio
     this.hud.update(race, player, pin, performance.now());
     this.radioTick(s, dt);
-    const others = [];
+    // reuse the audio source records every frame (no per-frame allocation)
+    const others = s._others || (s._others = []);
+    let no = 0;
     for (const car of race.cars) {
       if (car === player) continue;
       const g = views.get(car).group.position;
-      others.push({ car, wx: g.x, wz: g.z, vx: car.u * Math.cos(car.theta), vz: -car.u * Math.sin(car.theta) });
+      const o = others[no] || (others[no] = { car: null, wx: 0, wz: 0, vx: 0, vz: 0 });
+      o.car = car; o.wx = g.x; o.wz = g.z; o.vx = car.u * Math.cos(car.theta); o.vz = -car.u * Math.sin(car.theta);
+      no++;
     }
+    others.length = no;
     const lst = this.listener();
     const pg = views.get(player).group.position;
     lst.vel.set(player.u * Math.cos(player.theta), 0, -player.u * Math.sin(player.theta));
+    this.audio.weather.rain = race.rain;
+    this.audio.weather.wet = race.wet;
     this.audio.update(player, others, lst, dt, false);
 
     // results
@@ -871,6 +919,13 @@ class Game {
             s._pgTip = true;
             hud.radio('Pit stop: press Space as each marker enters the green. Perfect timing on all four wheels is a 2.5 second stop.', 7);
           } else if (e.car === player) hud.radio('Box, box — hold position, tyres going on.', 3);
+          break;
+        case 'damageBox':
+          if (e.car === player) {
+            hud.message('Box for repairs', 'bad', 'Heavy damage: pit request set (B to cancel)', 4);
+            hud.radio('Box, box. You have heavy damage: we need to repair the car. Pit this lap.', 6);
+            this.audio.ui('bad');
+          }
           break;
         case 'pitWheel':
           if (e.car === player) this.audio.ui(e.res === 'perfect' ? 'good' : e.res === 'good' ? 'click' : 'bad');
@@ -977,6 +1032,146 @@ class Game {
   }
 
   /** Qualifying is over for the player: cool-down lap on autopilot, then the grid. */
+  // ---- replay ---------------------------------------------------------------------------------------------------
+  startReplay(from) {
+    const s = this.session;
+    if (!s || !s.rec || s.rec.count < 20) return this.toast('Nothing to replay yet');
+    this.replayFrom = from;
+    this.state = 'replay';
+    this.screens.innerHTML = '';
+    this.hud.show(false);
+    const rig = new CameraRig(this.camera);
+    rig.shakeOn = false;
+    rig.setMode('tv');
+    s.replay = { t: 0, playing: true, speed: 1, rig, modeIdx: 0, follow: s.race.cars.indexOf(s.player), endHold: 0 };
+    s.guide.setVisible(false);
+    const ui = this.replayUI();
+    ui.classList.remove('hidden');
+    this.updateReplayUI();
+  }
+
+  replayUI() {
+    if (this._replayUI) return this._replayUI;
+    const el = document.createElement('div');
+    el.id = 'replay';
+    el.className = 'hidden';
+    el.innerHTML = `<div class="rbar"><b>REPLAY</b><span id="r-time">0:00</span>
+      <input id="r-scrub" type="range" min="0" max="1000" value="0">
+      <button data-r="play" title="Play / pause (Space)">⏯</button>
+      <button data-r="slow" title="Slow motion (S)">¼×</button><button data-r="normal" title="Normal speed (F)">1×</button>
+      <button data-r="cam" title="Camera (C)">Camera: <span id="r-cam"></span></button>
+      <button data-r="car" title="Follow another car (N)">Car: <span id="r-car"></span></button>
+      <button data-r="exit" class="exit" title="Back (Esc)">Done</button></div>`;
+    document.body.appendChild(el);
+    el.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-r]');
+      if (b) this.replayAction(b.dataset.r);
+    });
+    el.querySelector('#r-scrub').addEventListener('input', (e) => {
+      const s = this.session;
+      if (!s || !s.replay) return;
+      s.replay.t = (+e.target.value / 1000) * s.rec.duration;
+      s.replay.playing = false;
+    });
+    this._replayUI = el;
+    return el;
+  }
+
+  replayAction(a) {
+    const s = this.session;
+    if (!s || !s.replay) return;
+    const r = s.replay;
+    if (a === 'play') {
+      if (r.t >= s.rec.duration - 0.05) r.t = 0;
+      r.playing = !r.playing;
+    } else if (a === 'slow') r.speed = 0.25;
+    else if (a === 'normal') r.speed = 1;
+    else if (a === 'cam') {
+      const modes = ['tv', 'chase', 'close', 'heli', 'cockpit', 'tcam'];
+      r.modeIdx = (r.modeIdx + 1) % modes.length;
+      r.rig.setMode(modes[r.modeIdx]);
+    } else if (a === 'car') {
+      const sorted = [...s.race.sorted];
+      const cur = sorted.indexOf(s.race.cars[r.follow]);
+      r.follow = s.race.cars.indexOf(sorted[(cur + 1) % sorted.length]);
+      r.rig.init = false;
+    } else if (a === 'exit') return this.endReplay();
+    this.updateReplayUI();
+  }
+
+  updateReplayUI() {
+    const s = this.session;
+    const ui = this._replayUI;
+    if (!s || !s.replay || !ui) return;
+    const r = s.replay;
+    ui.querySelector('#r-cam').textContent = CAMERA_NAMES[r.rig.mode];
+    ui.querySelector('#r-car').textContent = s.race.cars[r.follow].info.code;
+    ui.querySelector('#r-time').textContent = `-${Math.max(0, s.rec.duration - r.t).toFixed(1)} s`;
+    const sl = ui.querySelector('#r-scrub');
+    if (document.activeElement !== sl) sl.value = Math.round((r.t / Math.max(0.01, s.rec.duration)) * 1000);
+  }
+
+  endReplay() {
+    const s = this.session;
+    if (this._replayUI) this._replayUI.classList.add('hidden');
+    if (!s) return;
+    s.replay = null;
+    s.guide.setVisible(this.save.settings.line !== false);
+    s.camRig.init = false;
+    for (const v of s.views.values()) v.group.visible = true;
+    if (s.scView) s.scView.group.visible = s.race.sc.state !== 'none';
+    if (this.replayFrom === 'results') {
+      this.state = 'results';
+      this.menu.show('results', this.menu.lastData);
+    } else {
+      this.state = 'paused';
+      this.menu.show('pause');
+      const el = document.getElementById('camname');
+      if (el) el.textContent = CAMERA_NAMES[s.camRig.mode];
+    }
+  }
+
+  runReplay(s, dt) {
+    const r = s.replay;
+    if (!r) return;
+    const rec = s.rec;
+    const input = this.input.poll(dt, 0);
+    if (input.pause || input.confirm) return this.endReplay();
+    if (input.camera) this.replayAction('cam');
+    if (r.playing) {
+      r.t += dt * r.speed;
+      if (r.t >= rec.duration) {
+        r.t = rec.duration;
+        r.endHold += dt;
+        if (r.endHold > 1.5) {
+          r.playing = false;
+          r.endHold = 0;
+        }
+      }
+    }
+    rec.sample(r.t, s.replayCars);
+    const cars = s.race.cars;
+    for (let i = 0; i < cars.length; i++) {
+      const v = s.views.get(cars[i]);
+      v.group.visible = true;
+      v.update(s.replayCars[i], 1, dt);
+    }
+    if (s.scView) {
+      const p = rec.scPose;
+      s.scView.group.visible = !!p;
+      if (p) s.scView.setPose(p.x, p.y, p.theta, s.track.at(s.track.z, 0));
+    }
+    const fCar = s.replayCars[r.follow];
+    r.rig.update(dt, s.views.get(cars[r.follow]), fCar, s.track);
+    s.world.focusShadow(s.views.get(cars[r.follow]).group.position);
+    s.world.update(dt, performance.now() / 1000);
+    s.effects.update(dt, this.pointScale);
+    s.rain.update(dt, this.camera.position, s.race.rain);
+    this.audio.update(s.player, [], this.listener(), dt, true);
+    this.updateReplayUI();
+    this.post.render(s.scene, this.camera, 0);
+  }
+
   /** The pace car: a yellow car with a flashing light bar, created when it is first needed. */
   ensureSafetyCar(s) {
     if (s.scView) return;

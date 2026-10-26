@@ -391,6 +391,7 @@ export class Menu {
     return `<section class="screen full" style="align-items:center;justify-content:center">
       <div class="menu-col" style="align-items:stretch"><div class="logo" style="font-size:2.6rem">Paused</div>
         <button class="btn primary" data-act="resume">Resume</button>
+        <button class="btn" data-act="replay">Instant replay<small>The last 30 seconds from trackside cameras</small></button>
         <button class="btn" data-act="restart">Restart session</button>
         <button class="btn" data-act="pausecam">Camera: <span id="camname"></span></button>
         <button class="btn" data-act="pausesettings">Settings</button>
@@ -428,6 +429,7 @@ export class Menu {
       <div class="grid2" style="grid-template-columns:${season ? '2fr 1fr' : '1fr'}"><div class="panel" style="overflow:auto"><table class="results"><tr><th>Pos</th><th>Driver</th><th>Team</th><th>Time</th><th>Gap</th><th>Pen</th><th>Best lap</th><th>Stops</th><th>Grid</th><th>Pts</th></tr>${rows}</table></div>${seasonHtml}</div>
       <div class="panel telemetry"><h3>Race telemetry</h3><div class="charts"><canvas data-chart="laps"></canvas><canvas data-chart="fuel"></canvas><canvas data-chart="wear"></canvas><canvas data-chart="top"></canvas></div></div>
       <div class="footer"><button class="btn sm" data-act="quit">Main menu</button><div class="row">
+        <button class="btn" data-act="replay">Watch replay</button>
         ${careerRes ? '<button class="btn primary" data-act="careercontinue">Continue career ▶</button>' : `<button class="btn ${season && !final ? '' : 'primary'}" data-act="restart">Race again</button>`}
         ${season && !final ? '<button class="btn primary" data-act="nextround">Next round ▶</button>' : ''}
         ${final ? '<button class="btn primary" data-act="endseason">Finish season</button>' : ''}</div></div></section>`;
@@ -650,6 +652,7 @@ export class Menu {
         H.toast && H.toast('Saved records cleared');
         return;
       case 'resume': return H.resume();
+      case 'replay': return H.replay(this.current === 'pause' ? 'pause' : 'results');
       case 'restart': return H.restart();
       case 'quit': return H.toMain(true);
       case 'pausecam': return H.cycleCamera && H.cycleCamera();

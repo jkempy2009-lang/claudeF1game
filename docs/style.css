@@ -285,3 +285,14 @@ table.results .tc { display: inline-block; width: 4px; height: 1em; vertical-ali
 /* telemetry */
 .telemetry .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); gap: 0.8rem; }
 .telemetry canvas { width: 100%; height: 11.5rem; background: rgba(255,255,255,0.03); border: 1px solid var(--line); }
+
+/* replay */
+#replay { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; padding: 0 0 max(14px, env(safe-area-inset-bottom)); display: flex; justify-content: center; pointer-events: none; }
+#replay.hidden { display: none; }
+#replay .rbar { pointer-events: auto; display: flex; gap: 0.6rem; align-items: center; background: rgba(8,10,14,0.82); border: 1px solid var(--line); padding: 0.55rem 0.9rem; backdrop-filter: blur(8px); max-width: 96vw; flex-wrap: wrap; justify-content: center; }
+#replay b { color: var(--accent); letter-spacing: 0.12em; font-style: italic; }
+#replay span { font-variant-numeric: tabular-nums; color: var(--dim); font-size: 0.85rem; }
+#replay input[type=range] { width: min(26rem, 40vw); }
+#replay button { background: rgba(255,255,255,0.08); border: 1px solid var(--line); color: #fff; padding: 0.35rem 0.7rem; font-weight: 700; font-size: 0.85rem; }
+#replay button:hover { background: rgba(255,255,255,0.18); }
+#replay button.exit { background: var(--accent); border-color: transparent; }

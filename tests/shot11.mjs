@@ -1,0 +1,30 @@
+// Damaged car visuals + DRS markers. Usage: node tests/shot11.mjs outdir [trackId]
+import { createRequire } from 'node:module';
+import fs from 'node:fs';
+const require = createRequire(import.meta.url);
+const { chromium } = require('playwright');
+const [out, track = 'vettore'] = process.argv.slice(2);
+fs.mkdirSync(out, { recursive: true });
+const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--enable-webgl'] });
+const page = await browser.newPage({ viewport: { width: 1120, height: 630 } });
+const logs = [];
+page.on('console', (m) => { if (m.type() === 'error') logs.push(m.text()); });
+page.on('pageerror', (e) => logs.push('[pageerror] ' + e.message + '\n' + (e.stack || '').split('\n').slice(0, 4).join('\n')));
+await page.addInitScript((t) => localStorage.setItem('apex-grand-prix.v1', JSON.stringify({ config: { trackId: t, laps: 6, level: 0.5, fieldSize: 6, playerGrid: 3, team: 1, mode: 'race', weather: 'dry' }, settings: { quality: 'medium', camera: 'heli' } })), track);
+await page.goto('http://localhost:8099/index.html');
+await page.waitForTimeout(4000);
+await page.click('[data-act=quick]');
+await page.waitForSelector('#hud:not(.hidden)', { timeout: 180000 });
+await page.waitForTimeout(500);
+await page.evaluate(() => { const a = window.apex; a.session.introCancelled = true; a.debugSkip(2); a.session.player.speed; });
+await page.waitForTimeout(2500);
+await page.screenshot({ path: `${out}/clean-heli.png`, timeout: 180000 });
+await page.evaluate(() => { const p = window.apex.session.player; p.damageFront = 0.75; p.damageSideL = 0.85; p.damageSideR = 0.5; p.damageRear = 0.45; p.damageFloor = 0.4; window.apex.session.camRig.setMode('close'); });
+await page.waitForTimeout(3500);
+await page.screenshot({ path: `${out}/damaged-close.png`, timeout: 180000 });
+// drive toward the first DRS detection line
+await page.evaluate(() => { const a = window.apex, s = a.session; s.camRig.setMode('chase'); const z = s.track.drs[0]; const car = s.player; const p = s.track.pointAt(z.detect - 22, 0); car.reset(p.x, p.y, p.heading, 3); car.locate && car.locate(); });
+await page.waitForTimeout(3500);
+await page.screenshot({ path: `${out}/drs-markers.png`, timeout: 180000 });
+console.log(logs.join('\n') || 'no errors');
+await browser.close();

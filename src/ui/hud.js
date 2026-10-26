@@ -381,9 +381,10 @@ export class HUD {
     el.tyW.textContent = `Wear ${Math.round(ts.wear * 100)}%`;
     el.tyT.textContent = `Temp ${Math.round(ts.temp)}°C`;
     el.tyF.textContent = `Fuel ${p.fuel.toFixed(1)} kg`;
-    const dmg = Math.max(p.damageFront || 0, p.damageRear || 0, p.damageFloor || 0);
+    const dm = p.damageSummary();
+    const dmg = dm.worst;
     const flat = Math.max(p.flat[0], p.flat[1], p.flat[2], p.flat[3]);
-    el.tyD.textContent = dmg > 0.05 ? `Damage ${Math.round(dmg * 100)}%` : flat > 0.2 ? 'Flat spots' : '';
+    el.tyD.textContent = dmg > 0.05 ? `FW ${Math.round(dm.fw * 100)}% · SP ${Math.round(Math.max(dm.sideL, dm.sideR) * 100)}% · RW ${Math.round(dm.rw * 100)}% · downforce −${Math.round(dm.aeroLoss * 100)}%` : flat > 0.2 ? 'Flat spots' : '';
     for (let w = 0; w < 4; w++) {
       const tb = el.tyreBoxes[w];
       const temp = p.temp[w];

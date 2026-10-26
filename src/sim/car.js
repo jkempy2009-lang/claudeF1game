@@ -120,14 +120,15 @@ export class Car {
     const q = 0.5 * AIR_DENSITY * V * V;
     const dmgF = 1 - 0.55 * (this.damageFront || 0);
     const dmgR = 1 - 0.55 * (this.damageRear || 0);
-    const dmgFloor = 1 - 0.3 * (this.damageFloor || 0);
+    const sideAvg = ((this.damageSideL || 0) + (this.damageSideR || 0)) / 2;
+    const dmgFloor = 1 - 0.3 * (this.damageFloor || 0) - 0.2 * sideAvg;
     const drs = this.drsPos;
     const dirty = this.dirtyAir || 0;
     const yawLoss = 1 - 0.45 * smoothstep(0.05, 0.4, Math.abs(beta));
     const clF = sp.clAf * dmgF * (1 - 0.32 * dirty) * dmgFloor * yawLoss;
     const clR = sp.clAr * dmgR * (1 - 0.14 * dirty) * (1 - sp.drsLiftCut * drs) * dmgFloor * yawLoss;
     const slip = this.slipstream || 0;
-    const cd = sp.cdA * (1 - sp.drsDragCut * drs) * (1 - 0.28 * slip) * (1 + 0.12 * (this.damageFront || 0) + 0.1 * (this.damageRear || 0));
+    const cd = sp.cdA * (1 - sp.drsDragCut * drs) * (1 - 0.28 * slip) * (1 + 0.12 * (this.damageFront || 0) + 0.1 * (this.damageRear || 0) + 0.08 * sideAvg);
     return { q, downF: q * clF, downR: q * clR, drag: q * cd };
   }
 
@@ -513,15 +514,32 @@ export class Car {
     const e = energy / 55000; // ~55 kJ ~ a destroyed wing
     if (lx > 1.5) this.damageFront = Math.min(1, (this.damageFront || 0) + e * (0.8 + Math.abs(ly) * 0.2));
     else if (lx < -1.2) this.damageRear = Math.min(1, (this.damageRear || 0) + e);
-    else this.damageFloor = Math.min(1, (this.damageFloor || 0) + e * 0.5);
+    else if (Math.abs(ly) > 0.55) {
+      // a side hit crumples the sidepod on that side (physics y is left); some of it reaches the floor
+      if (ly > 0) this.damageSideL = Math.min(1, (this.damageSideL || 0) + e * 0.9);
+      else this.damageSideR = Math.min(1, (this.damageSideR || 0) + e * 0.9);
+      this.damageFloor = Math.min(1, (this.damageFloor || 0) + e * 0.25);
+    } else this.damageFloor = Math.min(1, (this.damageFloor || 0) + e * 0.5);
     if (e > 0.5) {
       const w = lx > 0 ? (ly > 0 ? FL : FR) : ly > 0 ? RL : RR;
       if (Math.random() < Math.min(0.5, e * 0.4)) this.puncture[w] = 1;
     }
   }
 
+  /** Structural health for the HUD (0..1 damage per component) and the downforce lost to it. */
+  damageSummary() {
+    const sp = this.spec;
+    const dF = this.damageFront || 0, dR = this.damageRear || 0, dFl = this.damageFloor || 0, sL = this.damageSideL || 0, sR = this.damageSideR || 0;
+    const sideAvg = (sL + sR) / 2;
+    const fl = 1 - 0.3 * dFl - 0.2 * sideAvg;
+    const full = sp.clAf + sp.clAr;
+    const now = sp.clAf * (1 - 0.55 * dF) * fl + sp.clAr * (1 - 0.55 * dR) * fl;
+    const worst = Math.max(dF, dR, dFl, sL, sR);
+    return { fw: dF, rw: dR, floor: dFl, sideL: sL, sideR: sR, aeroLoss: 1 - now / full, worst, severity: Math.max(dF * 0.9, sL * 0.7, sR * 0.7, dR * 0.6, dFl * 0.7) };
+  }
+
   repair() {
-    this.damageFront = this.damageRear = this.damageFloor = 0;
+    this.damageFront = this.damageRear = this.damageFloor = this.damageSideL = this.damageSideR = 0;
     this.puncture.fill(0);
     this.flat.fill(0);
   }

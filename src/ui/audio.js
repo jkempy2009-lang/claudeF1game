@@ -9,6 +9,8 @@ export class AudioEngine {
     this.voices = [];
     this.started = false;
     this.lastGear = 1;
+    this.prevThr = 0;
+    this.weather = { rain: 0, wet: 0 };
   }
 
   start() {
@@ -134,6 +136,31 @@ export class AudioEngine {
     kn.start();
     this.rumbleFilter = kf;
 
+    // ---- rain on the car and water thrown off the tyres
+    const rn = noise();
+    const rf = ctx.createBiquadFilter();
+    rf.type = 'highpass';
+    rf.frequency.value = 2200;
+    this.rainGain = ctx.createGain();
+    this.rainGain.gain.value = 0;
+    rn.connect(rf);
+    rf.connect(this.rainGain);
+    this.rainGain.connect(this.master);
+    rn.start();
+    const sn = noise();
+    const sf = ctx.createBiquadFilter();
+    sf.type = 'bandpass';
+    sf.frequency.value = 1700;
+    sf.Q.value = 0.7;
+    this.sprayGain = ctx.createGain();
+    this.sprayGain.gain.value = 0;
+    sn.connect(sf);
+    sf.connect(this.sprayGain);
+    this.sprayGain.connect(this.master);
+    sn.start();
+    this.sprayFilter = sf;
+    this.weather = { rain: 0, wet: 0 };
+
     // ---- crowd / ambience bed
     const cn = noise();
     const cf = ctx.createBiquadFilter();
@@ -195,6 +222,8 @@ export class AudioEngine {
       set(this.windGain.gain, 0, 0.1);
       set(this.tyreGain.gain, 0, 0.1);
       set(this.rumbleGain.gain, 0, 0.1);
+      set(this.rainGain.gain, 0, 0.1);
+      set(this.sprayGain.gain, 0, 0.1);
       for (const v of this.voices) set(v.g.gain, 0, 0.1);
       return;
     }
@@ -217,8 +246,18 @@ export class AudioEngine {
     const rumble = player.kerbShake * 0.22 + (player.onGrass ? clamp(V / 60, 0, 1) * 0.2 : 0);
     set(this.rumbleGain.gain, rumble, 0.04);
     set(this.rumbleFilter.frequency, 90 + V * 2.5, 0.1);
+    // weather: rain on the bodywork, spray from the wheels (louder the faster you go)
+    set(this.rainGain.gain, this.weather.rain * 0.05, 0.4);
+    set(this.sprayGain.gain, clamp(this.weather.wet * (V / 80) * 0.11, 0, 0.12), 0.2);
+    set(this.sprayFilter.frequency, 1200 + V * 12, 0.2);
+    // exhaust pops and crackles when the throttle is lifted at high revs; a burble on downshifts
+    const lift = this.prevThr > 0.6 && thr < 0.1 && rpm > 8500 && V > 25;
+    if (lift) this.pops(3 + Math.floor(Math.random() * 5), clamp((rpm - 7000) / 8000, 0.2, 1));
+    else if (thr < 0.05 && rpm > 9500 && V > 40 && Math.random() < dt * 3.2) this.pops(1 + Math.floor(Math.random() * 2), clamp((rpm - 8000) / 7000, 0.15, 0.8));
+    this.prevThr = thr;
     // gear change thump
     if (player.gear !== this.lastGear) {
+      if (player.gear < this.lastGear && thr < 0.3 && rpm > 8000) this.pops(2, 0.7); // downshift burble
       this.lastGear = player.gear;
       this.blip(110, 0.08, 0.035, 'sine');
     }
@@ -252,6 +291,43 @@ export class AudioEngine {
       set(v.g.gain, 0.07 * att * (0.4 + 0.6 * car.throttle), 0.08);
       set(v.pan.pan, clamp((e.dx * lr.x + e.dz * lr.z) / d, -1, 1), 0.05);
     });
+  }
+
+  /** A run of short, sharp exhaust bangs: `n` pops, `strength` 0..1. */
+  pops(n, strength = 0.6) {
+    if (!this.started || !this.enabled) return;
+    const ctx = this.ctx;
+    let at = 0;
+    for (let k = 0; k < n; k++) {
+      at += 0.03 + Math.random() * 0.09;
+      const t = ctx.currentTime + at;
+      const s = this.makeNoise(false);
+      const f = ctx.createBiquadFilter();
+      f.type = 'bandpass';
+      f.frequency.value = 500 + Math.random() * 1400;
+      f.Q.value = 0.9;
+      const g = ctx.createGain();
+      const a = (0.1 + 0.16 * strength) * (0.5 + Math.random() * 0.6);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(a, t + 0.004);
+      g.gain.exponentialRampToValueAtTime(0.0005, t + 0.05 + Math.random() * 0.05);
+      s.connect(f);
+      f.connect(g);
+      g.connect(this.master);
+      s.start(t, Math.random());
+      s.stop(t + 0.14);
+      const o = ctx.createOscillator(), og = ctx.createGain();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(140, t);
+      o.frequency.exponentialRampToValueAtTime(55, t + 0.06);
+      og.gain.setValueAtTime(0.0001, t);
+      og.gain.linearRampToValueAtTime(a * 0.8, t + 0.004);
+      og.gain.exponentialRampToValueAtTime(0.0005, t + 0.08);
+      o.connect(og);
+      og.connect(this.master);
+      o.start(t);
+      o.stop(t + 0.1);
+    }
   }
 
   blip(freq, dur = 0.1, gain = 0.1, type = 'sine', slide = 0) {

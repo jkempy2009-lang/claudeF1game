@@ -87,6 +87,18 @@ function makeSky(theme) {
   return mesh;
 }
 
+
+/** Adverts are printed on the track side only: the back of a board is plain painted metal (no mirrored lettering). */
+function plainBack(mat, grey = 0.68) {
+  mat.onBeforeCompile = (sh) => {
+    const inject = `\n  if (!gl_FrontFacing) diffuseColor.rgb = vec3(${grey.toFixed(2)}, ${(grey + 0.01).toFixed(2)}, ${(grey + 0.03).toFixed(2)});`;
+    if (sh.fragmentShader.includes('#include <map_fragment>')) sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>', '#include <map_fragment>' + inject);
+    else sh.fragmentShader = sh.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>' + inject);
+  };
+  mat.needsUpdate = true;
+  return mat;
+}
+
 // ---- helpers -------------------------------------------------------------------------------
 /** Contiguous index ranges [a, b] (inclusive, may wrap) where pred(i) is true. */
 function ranges(N, pred) {
@@ -138,6 +150,7 @@ export class World {
     this.buildStartLine();
     this.buildScenery();
     if (opts.profile) this.buildBrakeBoards(opts.profile);
+    this.buildDrsMarkers();
     this.buildMountains();
   }
 
@@ -469,7 +482,7 @@ export class World {
   // ---- barriers ----------------------------------------------------------------------------------
   buildBarriers() {
     const tr = this.track, N = tr.N, T = this.tex;
-    const wallMat = new THREE.MeshStandardMaterial({ map: T.barrier, roughness: 0.85, side: THREE.DoubleSide });
+    const wallMat = plainBack(new THREE.MeshStandardMaterial({ map: T.barrier, roughness: 0.85, side: THREE.DoubleSide }));
     const tyreMat = new THREE.MeshStandardMaterial({ map: T.tyres, roughness: 0.95, side: THREE.DoubleSide });
     const wallGeos = [], tyreGeos = [];
     const wallStrip = (a, b, sgn, off, h, vLen, dst) => {
@@ -967,7 +980,7 @@ export class World {
       for (const x of [-5.5, 5.5]) posts.push([pt.x + Math.cos(rot) * x, gy + 2.5, -pt.y - Math.sin(rot) * x]);
     }
     if (!this.billTex) this.billTex = [0, 1, 2, 3, 4, 5].map((i) => TX.billboardTexture(i));
-    for (const [v, list] of byTex) this.group.add(new THREE.Mesh(mergeGeometries(list), new THREE.MeshBasicMaterial({ map: this.billTex[v], side: THREE.DoubleSide })));
+    for (const [v, list] of byTex) this.group.add(new THREE.Mesh(mergeGeometries(list), plainBack(new THREE.MeshBasicMaterial({ map: this.billTex[v], side: THREE.DoubleSide }), 0.8)));
     const im = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.12, 0.12, 5, 6), new THREE.MeshStandardMaterial({ color: 0x555a60, roughness: 0.6, metalness: 0.5 }), posts.length);
     const m = new THREE.Matrix4();
     posts.forEach((p, i) => {
@@ -1051,7 +1064,7 @@ export class World {
     byLabel.forEach((list, k) => {
       if (!list.length) return;
       const tex = TX.labelTexture(String(labels[k]), '#111', '#f4f4f0', 128, 128);
-      this.group.add(new THREE.Mesh(mergeGeometries(list), new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide })));
+      this.group.add(new THREE.Mesh(mergeGeometries(list), plainBack(new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide }), 0.8)));
     });
     if (sticks.length) {
       const im = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.03, 0.03, 1.1, 5), new THREE.MeshStandardMaterial({ color: 0x777777 }), sticks.length);
@@ -1063,6 +1076,60 @@ export class World {
       this.group.add(im);
     }
     this.brakeZones = zones;
+  }
+
+  /** Painted detection / activation lines across the track and the trackside signs of every DRS zone. */
+  buildDrsMarkers() {
+    const tr = this.track;
+    if (!tr.drs || !tr.drs.length) return;
+    const pt = {};
+    const paint = { detect: [], start: [] };
+    const boards = { detect: [], start: [], end: [] };
+    const sticks = [];
+    for (const z of tr.drs) {
+      for (const [kind, s0] of [['detect', z.detect], ['start', z.start], ['end', z.end]]) {
+        const s = mod(s0, tr.length);
+        const i = tr.idx(s);
+        if (kind !== 'end') {
+          // flat strip across the whole width of the road
+          tr.pointAt(s, (tr.wl[i] - tr.wr[i]) / 2, pt);
+          const q = new THREE.PlaneGeometry(1.1, tr.wl[i] + tr.wr[i]);
+          q.rotateX(-Math.PI / 2);
+          q.rotateY(pt.heading);
+          q.translate(pt.x, pt.h + 0.035, -pt.y);
+          paint[kind].push(q);
+        }
+        const lat = Math.min(tr.wl[i] + tr.kl[i] + 1.8, tr.wallDist(i, 1) - 0.6);
+        tr.pointAt(s, lat, pt);
+        const b = new THREE.PlaneGeometry(kind === 'detect' ? 2.6 : 1.7, 0.75);
+        b.translate(0, 1.55, 0);
+        b.rotateY(pt.heading - Math.PI / 2); // faces oncoming traffic
+        b.translate(pt.x, pt.h, -pt.y);
+        boards[kind].push(b);
+        sticks.push([pt.x, pt.h + 0.78, -pt.y]);
+      }
+    }
+    for (const kind of ['detect', 'start']) {
+      if (!paint[kind].length) continue;
+      const mat = new THREE.MeshBasicMaterial({ color: kind === 'detect' ? 0x9ad8ff : 0x37e08a, transparent: true, opacity: 0.85, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4, depthWrite: false });
+      this.group.add(new THREE.Mesh(mergeClean2(paint[kind]), mat));
+    }
+    const texts = { detect: ['DRS DETECTION', '#0b1b2a', '#9ad8ff'], start: ['DRS', '#04210f', '#37e08a'], end: ['DRS END', '#2a0a0a', '#ff6a5c'] };
+    for (const kind of ['detect', 'start', 'end']) {
+      if (!boards[kind].length) continue;
+      const [t, fg, bg] = texts[kind];
+      const tex = TX.labelTexture(t, fg, bg, 256, 96);
+      this.group.add(new THREE.Mesh(mergeGeometries(boards[kind]), plainBack(new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide }), 0.7)));
+    }
+    if (sticks.length) {
+      const im = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.035, 0.035, 1.6, 5), new THREE.MeshStandardMaterial({ color: 0x777777 }), sticks.length);
+      const m = new THREE.Matrix4();
+      sticks.forEach((p, k) => {
+        m.makeTranslation(p[0], p[1], p[2]);
+        im.setMatrixAt(k, m);
+      });
+      this.group.add(im);
+    }
   }
 
   buildMountains() {

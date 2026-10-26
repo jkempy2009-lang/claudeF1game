@@ -118,6 +118,23 @@ function skidpad(R, vStart, vEnd, setup, wetness = 0) {
   check('wet tyres give up some grip on a dry track', dryW.best / dryM.best, 0.7, 0.97, ' ratio');
 }
 
+// ---- slipstream: a car in the wake accelerates harder at speed (about +10 % or more within ~20 m at 270 km/h)
+{
+  const accelAt = (v0, f) => {
+    const car = fresh({ frontWing: 3, rearWing: 3 });
+    car.reset(0, 0, 0, v0);
+    car.gear = [21, 32, 43, 54, 65, 76, 88, 101].findIndex((x) => x > v0 * 1.12) + 1 || 8;
+    car.omega.fill(v0 / 0.35);
+    car.slipstream = f;
+    let a = 0, n = 0;
+    for (let t = 0; t < 1; t += DT) { car.step(DT, { throttle: 1, brake: 0, steer: 0 }); if (t > 0.3) { a += car.axF; n++; } }
+    return a / n;
+  };
+  const alone = accelAt(75, 0), wake12 = accelAt(75, 1 - 12 / 34), wake20 = accelAt(75, 1 - 20 / 34);
+  check('slipstream 12 m behind at 270 km/h: extra acceleration', wake12 / alone, 1.1, 1.4, ' x');
+  check('slipstream 20 m behind at 270 km/h: extra acceleration', wake20 / alone, 1.05, 1.3, ' x');
+}
+
 // ---- tyre temperature, wear are sane
 {
   const car = fresh();
