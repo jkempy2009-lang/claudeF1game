@@ -829,7 +829,7 @@ export class Race {
         rs.pitAct = false;
         for (const r of stepPitGame(pg, rs.service.t, press)) this.pushEvent({ type: 'pitWheel', car, k: r.k, res: r.res });
         if (pg.done && rs.service.dur === Infinity) {
-          rs.service.dur = pg.dur + (rs.service.repair || 0); // bodywork repairs run alongside the wheels but take longer than a clean stop
+          rs.service.dur = pg.dur + (rs.service.repair || 0); // bodywork repair time is added to the wheel work (the crew cannot do both at once)
           if (pg.perfects === 4) rs.perfectStops = (rs.perfectStops || 0) + 1;
           this.pushEvent({ type: 'pitGameDone', car, dur: pg.dur, repair: rs.service.repair || 0, perfects: pg.perfects, misses: pg.misses });
         }

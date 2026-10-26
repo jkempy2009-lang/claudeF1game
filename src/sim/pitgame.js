@@ -24,17 +24,8 @@ const firstOpen = (pg) => pg.w.findIndex((x) => !x.res);
 export function stepPitGame(pg, t, press) {
   const out = [];
   if (pg.done) return out;
-  for (let k = 0; k < 4; k++) {
-    const w = pg.w[k];
-    if (w.res) continue;
-    w.p = (t - (PG.start + k * PG.spacing)) / PG.win;
-    if (w.p >= 1) {
-      w.res = 'miss';
-      w.late = true;
-      pg.misses++;
-      out.push({ k, res: 'miss' });
-    }
-  }
+  for (let k = 0; k < 4; k++) if (!pg.w[k].res) pg.w[k].p = (t - (PG.start + k * PG.spacing)) / PG.win;
+  // a press is judged before the windows expire: one made in time must not lose to a long frame that also ended the sweep
   if (press) {
     const k = firstOpen(pg);
     if (k >= 0) {
@@ -47,6 +38,14 @@ export function stepPitGame(pg, t, press) {
         else pg.misses++;
         out.push({ k, res: w.res });
       }
+    }
+  }
+  for (let k = 0; k < 4; k++) {
+    const w = pg.w[k];
+    if (!w.res && w.p >= 1) {
+      w.res = 'miss';
+      pg.misses++;
+      out.push({ k, res: 'miss' });
     }
   }
   if (pg.w.every((x) => x.res)) {
