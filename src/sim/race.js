@@ -166,6 +166,7 @@ export class Race {
     }
 
     const aiCompounds = ['soft', 'medium', 'hard'];
+    const driverCode = (opt.driver && opt.driver.code) || 'YOU', driverNumber = (opt.driver && opt.driver.number) || 7;
     grid.forEach((g, k) => {
       const { seat, player } = g;
       const team = seat.team;
@@ -184,8 +185,9 @@ export class Race {
       car.reset(pt.x, pt.y, pt.heading, 0);
       car.info = {
         name: player ? 'You' : seat.driver.name,
-        code: player ? 'YOU' : seat.driver.code,
-        number: player ? 7 : seat.driver.number,
+        code: player ? driverCode : seat.driver.code,
+        // the player's chosen number is theirs alone: an AI driver who already wears it takes the standard 7 instead
+        number: player ? driverNumber : seat.driver.number === driverNumber ? 7 : seat.driver.number,
         team,
         teamIdx: seat.ti,
         isPlayer: player,

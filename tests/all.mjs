@@ -19,6 +19,7 @@ const suites = [
   ['racecraft scenarios', 'tests/racecraft.mjs'],
   ['interactive pit stop', 'tests/pitgame.mjs'],
   ['achievements + stats', 'tests/achievements.mjs'],
+  ['driver identity', 'tests/driver.mjs'],
 ];
 let failed = 0;
 for (const [name, file] of suites) {

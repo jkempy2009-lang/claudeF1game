@@ -11,7 +11,7 @@ import { CHAMP_CAL, sanitizeCareer, UPGRADE_KEYS, UPGRADE_INFO, UPGRADE_MAX, upg
 
 export const SAVE_KEY = 'apex-grand-prix.v1';
 
-export const DEFAULT_SETTINGS = { quality: 'high', volume: 0.55, units: 'kmh', line: true, minimap: true, shake: true, camera: 'chase', tower: true, blur: true, steerSpeed: 1, padDead: 0.07, rumble: true, autoQuality: true, cbSafe: false, calm: false, bigHud: false, bloom: true, keys: {} };
+export const DEFAULT_SETTINGS = { quality: 'high', volume: 0.55, units: 'kmh', line: true, minimap: true, shake: true, camera: 'chase', tower: true, blur: true, steerSpeed: 1, padDead: 0.07, rumble: true, autoQuality: true, cbSafe: false, calm: false, bigHud: false, bloom: true, keys: {}, driverCode: 'YOU', driverNumber: 7 };
 export const DEFAULT_CONFIG = {
   mode: 'race',
   trackId: 'northfield',
@@ -49,6 +49,11 @@ const isObj = (o) => o && typeof o === 'object' && !Array.isArray(o);
 const num = (v, lo, hi, d) => (Number.isFinite(+v) && v !== null && v !== '' ? Math.min(hi, Math.max(lo, +v)) : d);
 const oneOf = (v, list, d) => (list.includes(v) ? v : d);
 const bool = (v, d) => (typeof v === 'boolean' ? v : d);
+/** A timing-tower code: two or three capital letters / digits. */
+export const cleanCode = (v, d) => {
+  const c = typeof v === 'string' ? v.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3) : '';
+  return c.length >= 2 ? c : d;
+};
 
 /** Makes any stored/foreign config safe to run: right types, in range, existing ids. */
 export function sanitizeConfig(raw) {
@@ -114,6 +119,8 @@ export function sanitizeSettings(raw) {
     bloom: bool(r.bloom, D.bloom),
     calm: bool(r.calm, D.calm),
     bigHud: bool(r.bigHud, D.bigHud),
+    driverCode: cleanCode(r.driverCode, D.driverCode),
+    driverNumber: Math.round(num(r.driverNumber, 1, 99, D.driverNumber)),
   };
 }
 
@@ -512,6 +519,10 @@ export class Menu {
         ${this.toggle('s.rumble', 'Gamepad vibration', 'Kerbs, grass, tyre slip and impacts', s.rumble !== false)}
         <div class="row"><button class="btn sm" data-act="fullscreen">Toggle full screen</button><button class="btn sm" data-act="wipe">Clear saved records</button></div>
       </div></div>
+      <div class="panel" style="margin-top:1rem"><h3>Your driver</h3>
+        <div class="row"><div class="field grow"><label>Timing-tower code</label><input type="text" class="txt" data-field="driverCode" maxlength="3" value="${esc(s.driverCode)}" autocomplete="off" spellcheck="false"></div>
+        <div class="field grow"><label>Car number</label><input type="number" class="txt" data-field="driverNumber" min="1" max="99" step="1" value="${s.driverNumber}"></div></div>
+        <div class="hint">Shown on your car, the timing tower, radio calls and results. Applies to the next session. A rival who already wears your number takes the standard 7 instead.</div></div>
       <div class="panel" style="margin-top:1rem"><h3>Backup</h3>
         <div class="hint">Your progress lives in this browser. Copy it as text to keep it safe or move it to another device, and paste it back here to restore it.</div>
         <textarea id="save-io" class="saveio" rows="3" spellcheck="false" placeholder="Paste a backup here and press Restore"></textarea>
@@ -889,6 +900,16 @@ export class Menu {
 
   onInput(e) {
     const t = e.target;
+    const field = t.dataset && t.dataset.field;
+    if (field) {
+      const s = this.save.settings;
+      // typed text is kept loosely while editing; the saved value is always valid (see sanitizeSettings)
+      if (field === 'driverCode') s.driverCode = cleanCode(t.value, s.driverCode);
+      else if (field === 'driverNumber') s.driverNumber = Math.round(num(t.value, 1, 99, s.driverNumber));
+      clearTimeout(this._persistT);
+      this._persistT = setTimeout(() => this.persist(), 300);
+      return;
+    }
     const k = t.dataset && t.dataset.slider;
     if (!k) return;
     const v = +t.value;

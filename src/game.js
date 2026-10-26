@@ -301,7 +301,7 @@ class Game {
       sr.scene.remove(sr.view.group);
       sr.view.dispose();
     }
-    sr.view = new CarView(TEAMS[idx], { number: 7, isPlayer: true, code: 'YOU' }, { detail: 'high' });
+    sr.view = new CarView(TEAMS[idx], { number: this.save.settings.driverNumber || 7, isPlayer: true, code: this.save.settings.driverCode || 'YOU' }, { detail: 'high' });
     sr.view.setPose(0, 0, 0, 0);
     sr.view.group.traverse((o) => {
       if (o.isMesh) o.castShadow = true;
@@ -513,6 +513,7 @@ class Game {
       adaptive: cfg.adaptive,
       fieldSize: cfg.fieldSize,
       playerTeam: cfg.team,
+      driver: { code: this.save.settings.driverCode, number: this.save.settings.driverNumber },
       playerGrid: Math.min(cfg.playerGrid, cfg.fieldSize),
       collisions: cfg.collisions,
       damage: cfg.damage,

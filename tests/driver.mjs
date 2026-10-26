@@ -1,0 +1,23 @@
+// Driver identity: the player's chosen tower code and number, with no number shared with a rival.
+import { Track } from '../src/sim/track.js';
+import { TRACK_DEFS } from '../src/sim/trackdefs.js';
+import { Race } from '../src/sim/race.js';
+import { sanitizeSettings, cleanCode } from '../src/ui/menu.js';
+let bad = 0;
+const ok = (n, c, x = '') => { console.log(`${c ? 'PASS' : 'FAIL'}  ${n} ${x}`); if (!c) bad++; };
+const track = new Track(TRACK_DEFS.find((d) => d.id === 'rade'));
+ok('default code and number', sanitizeSettings({}).driverCode === 'YOU' && sanitizeSettings({}).driverNumber === 7);
+ok('code is upper-cased, trimmed and cleaned', cleanCode(' ab-c9 ', 'YOU') === 'ABC');
+ok('a one-letter code is refused', cleanCode('a', 'YOU') === 'YOU');
+ok('junk types fall back', sanitizeSettings({ driverCode: 12, driverNumber: 'x' }).driverCode === 'YOU' && sanitizeSettings({ driverNumber: 'x' }).driverNumber === 7);
+ok('number is clamped to 1-99', sanitizeSettings({ driverNumber: 500 }).driverNumber === 99 && sanitizeSettings({ driverNumber: -4 }).driverNumber === 1);
+const base = new Race(track, { mode: 'race', laps: 2, level: 0.5, fieldSize: 20, playerGrid: 5, seed: 3 });
+const aiNums = base.cars.filter((c) => !c.info.isPlayer).map((c) => c.info.number);
+const taken = aiNums[0];
+const race = new Race(track, { mode: 'race', laps: 2, level: 0.5, fieldSize: 20, playerGrid: 5, seed: 3, driver: { code: 'KEM', number: taken } });
+const me = race.cars.find((c) => c.info.isPlayer);
+ok('player wears the chosen code and number', me.info.code === 'KEM' && me.info.number === taken);
+const nums = race.cars.map((c) => c.info.number);
+ok('no two cars share a number', new Set(nums).size === nums.length, nums.join(','));
+ok('default race still uses YOU / 7', base.cars.find((c) => c.info.isPlayer).info.code === 'YOU' && base.cars.find((c) => c.info.isPlayer).info.number === 7);
+process.exit(bad ? 1 : 0);
