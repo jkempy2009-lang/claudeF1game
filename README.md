@@ -39,14 +39,22 @@ npm run test:leak    # browser: GPU resources across repeated sessions
 
 **AI** – identical cars by default (only the drivers differ), five difficulty presets plus a continuous slider. The drivers draft, pull out to pass, choose the inside of the next corner, defend once, give room, use the wet-weather tyres, take a cheap stop under the safety car and pit for damage. Nothing is cheated: AI cars run the identical car model and Legend laps about as quickly as a strong human lap (Vettore 1:08.0, Rade 1:05.3, Hautes-Fagnes 1:17.8, Northfield 1:22.3).
 
-Reference clean-lap pace of the best car at each level (medium tyres, DRS on the straights):
+**Engineering** – brake discs have their own temperature (cold carbon bites less, above about 880 C it fades, and they glow through the wheels at night); a pit wall that reads your measured tyre wear and calls the stop (radio advice or automatic); tyre-pressure setup; live telemetry traces (Y); bloom at dusk and night; accessibility options (colour-blind-safe racing line, reduced motion, larger HUD); on-screen touch controls with pit, DRS, ERS, camera and pause buttons.
+
+Reference clean-lap pace of the best car at each level (medium tyres; `node tools/pace-table.mjs` regenerates this table). Legend is calibrated to a very good human lap: about 1:19 at Hautes-Fagnes, 1:08.5 at Vettore and 1:06 at La Rade. In a race the top drivers keep about 2 % in hand:
 
 | | Rookie | Amateur | Pro | Elite | Legend |
 |---|---|---|---|---|---|
-| Autodromo del Vettore | 1:22.0 | 1:16.9 | 1:12.9 | 1:09.8 | 1:08.0 |
-| Circuit de la Rade | 1:20.6 | 1:15.2 | 1:10.8 | 1:07.5 | 1:05.3 |
-| Circuit des Hautes-Fagnes | 1:34.0 | 1:27.8 | 1:23.0 | 1:19.4 | 1:17.8 |
-| Northfield Grand Prix Circuit | 1:39.1 | 1:32.8 | 1:27.9 | 1:24.2 | 1:22.3 |
+| Autodromo del Vettore | 1:22.037 | 1:16.883 | 1:12.925 | 1:09.950 | 1:08.550 |
+| Circuit de la Rade | 1:20.529 | 1:15.183 | 1:10.825 | 1:07.508 | 1:05.375 |
+| Northfield Grand Prix Circuit | 1:39.150 | 1:32.792 | 1:27.954 | 1:24.362 | 1:22.675 |
+| Circuit des Hautes-Fagnes | 1:33.642 | 1:27.850 | 1:23.042 | 1:19.537 | 1:18.050 |
+| Autódromo Costa Azul | 1:37.912 | 1:31.283 | 1:26.204 | 1:22.462 | 1:20.704 |
+| Monte Aurora Ring | 1:23.492 | 1:17.517 | 1:13.062 | 1:09.767 | 1:08.179 |
+| Mirage International Circuit | 1:39.417 | 1:32.554 | 1:27.458 | 1:23.692 | 1:22.029 |
+| Parc Lumière | 1:42.054 | 1:34.533 | 1:28.792 | 1:24.587 | 1:21.933 |
+| Porto Vecchio Harbour Circuit | 1:41.458 | 1:34.083 | 1:28.767 | 1:24.654 | 1:22.192 |
+| Sakura Ridge Circuit | 2:01.896 | 1:53.362 | 1:47.183 | 1:42.671 | 1:40.562 |
 
 **After the flag** – a finish scene with a Victory / Podium / Points banner, then the classification with **telemetry charts** (lap time, fuel, tyre wear, top speed against the winner), a 30-second **instant replay** from trackside cameras, and **photo mode** with PNG capture.
 
