@@ -223,6 +223,8 @@ class Game {
     const pgk = this.hud.el.pitgame && this.hud.el.pitgame.querySelector('.pgt kbd');
     if (pgk) pgk.textContent = this.kn('drs');
     this.hud.keyNames = { pit: this.kn('pit'), tyre: this.kn('tyre') };
+    const pgKey = document.getElementById('pg-key');
+    if (pgKey) pgKey.textContent = this.kn('drs'); // the pit-stop game uses the DRS button
     this.hud.setUnits(this.save.settings.units);
     this.hud.el.minimap.classList.toggle('hidden', !this.save.settings.minimap);
     if (this.session && this.session.guide) this.session.guide.setVisible(this.save.settings.line !== false);

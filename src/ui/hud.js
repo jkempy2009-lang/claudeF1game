@@ -30,7 +30,7 @@ const sty = (el, prop, v) => {
 };
 
 const mmss = (t) => {
-  t = Math.ceil(t);
+  t = Math.max(0, Math.ceil(t));
   return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0');
 };
 
@@ -54,7 +54,7 @@ export class HUD {
       </div>
       <div id="minimap" class="hud-box"><canvas width="380" height="260"></canvas></div>
       <div id="lights" class="hud-box hidden"><i></i><i></i><i></i><i></i><i></i></div>
-      <div id="pitgame" class="hud-box hidden"><div class="pgt">Pit stop · press <kbd>Space</kbd> with the marker in the green</div><div class="pgw">${['FL', 'FR', 'RL', 'RR'].map((n) => `<div class="nut"><div class="trk"><i class="gd"></i><i class="pf"></i><b></b></div><span>${n}</span></div>`).join('')}</div><div class="pgr"></div></div>
+      <div id="pitgame" class="hud-box hidden"><div class="pgt">Pit stop · press <kbd id="pg-key">Space</kbd> with the marker in the green</div><div class="pgw">${['FL', 'FR', 'RL', 'RR'].map((n) => `<div class="nut"><div class="trk"><i class="gd"></i><i class="pf"></i><b></b></div><span>${n}</span></div>`).join('')}</div><div class="pgr"></div></div>
       <div id="msgs"></div>
       <canvas id="livetele" class="hud-box hidden" width="440" height="150"></canvas>
       <div id="lesson" class="hud-box hidden"></div>
@@ -217,9 +217,9 @@ export class HUD {
       w: (6 + Math.random() * 8) * dpr, h: (4 + Math.random() * 6) * dpr, r: Math.random() * 6.28, vr: (Math.random() - 0.5) * 10, col: cols[Math.floor(Math.random() * cols.length)], ph: Math.random() * 6,
     }));
     let last = performance.now(), t0 = last;
-    this._confetti = true;
+    const run = (this._confettiRun = {}); // a token per run: a stale animation frame from an earlier run stops itself
     const tick = (now) => {
-      if (!this._confetti) return;
+      if (this._confettiRun !== run) return;
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
       g.clearRect(0, 0, c.width, c.height);
@@ -244,7 +244,7 @@ export class HUD {
   }
 
   stopConfetti() {
-    this._confetti = false;
+    this._confettiRun = null;
     const c = this.el.confetti;
     c.style.display = 'none';
     c.getContext('2d').clearRect(0, 0, c.width, c.height);
@@ -269,7 +269,11 @@ export class HUD {
     if (on) {
       // a new session never inherits the last one's finish banner, confetti, lights or telemetry trace
       this.hideFinish();
-      clearTimeout(this._lightT);
+      this.setLights(0);
+      this.el.msgs.innerHTML = '';
+      this.el.radio.classList.add('hidden');
+      this.el.lesson.classList.add('hidden');
+      this._lessonHtml = '';
       this.teleBuf.n = 0;
       this.teleBuf.last = 0;
     }
@@ -403,7 +407,6 @@ export class HUD {
     const secEls = el.sec.children;
     for (let k = 0; k < 3; k++) {
       const flagOn = rs.sectorFlag && rs.sectorFlag.idx === k ? rs.sectorFlag.kind : '';
-      const done = rs.sectors[k] != null && (k < rs.sectorIdx || (k === 2 && rs.sectorIdx === 0 && false));
       let cls_ = '';
       if (rs.sectors[k] != null) cls_ = rs.sectors[k] <= race.bestSectors[k] + 1e-6 ? 'purple' : rs.sectors[k] <= rs.bestSectors[k] + 1e-6 ? 'green' : 'yellow';
       cls(secEls[k], (k < rs.sectorIdx || (rs.sectorIdx === 0 && k === 2 && rs.sectors[2] != null && rs.laps > 0) ? cls_ : '') + (k === rs.sectorIdx ? ' cur' : ''));
@@ -449,26 +452,26 @@ export class HUD {
     // tyres
     const ts = p.tyreSummary();
     const comp = p.compound;
-    el.tyB.textContent = comp.letter;
-    el.tyB.style.background = comp.color;
-    el.tyN.textContent = comp.name;
+    txt(el.tyB, comp.letter);
+    sty(el.tyB, 'background', comp.color);
+    txt(el.tyN, comp.name);
     const adv = p.rs.advice;
-    el.tyW.textContent = `Wear ${Math.round(ts.wear * 100)}%` + (adv && !p.rs.pitRequested ? ` · box ${adv.thisLap ? 'now' : 'lap ' + adv.lap} (${COMPOUNDS[adv.compound].letter})` : '');
+    txt(el.tyW, `Wear ${Math.round(ts.wear * 100)}%` + (adv && !p.rs.pitRequested ? ` · box ${adv.thisLap ? 'now' : 'lap ' + adv.lap} (${COMPOUNDS[adv.compound].letter})` : ''));
     const bmax = Math.max(p.brakeTemp[0], p.brakeTemp[1], p.brakeTemp[2], p.brakeTemp[3]);
-    el.tyT.textContent = `Temp ${Math.round(ts.temp)}°C · Brakes ${Math.round(bmax / 10) * 10}°${bmax > 1000 ? ' FADE' : ''}`;
-    el.tyF.textContent = `Fuel ${p.fuel.toFixed(1)} kg · ${['LEAN', 'STD', 'RICH'][p.fuelMode]} · ERS ${['HARV', 'BAL', 'ATK'][p.ersMode]} · BB ${Math.round(p.spec.brakeBias * 100)}`;
+    txt(el.tyT, `Temp ${Math.round(ts.temp)}°C · Brakes ${Math.round(bmax / 10) * 10}°${bmax > 1000 ? ' FADE' : ''}`);
+    txt(el.tyF, `Fuel ${p.fuel.toFixed(1)} kg · ${['LEAN', 'STD', 'RICH'][p.fuelMode]} · ERS ${['HARV', 'BAL', 'ATK'][p.ersMode]} · BB ${Math.round(p.spec.brakeBias * 100)}`);
     const dm = p.damageSummary();
     const dmg = dm.worst;
     const flat = Math.max(p.flat[0], p.flat[1], p.flat[2], p.flat[3]);
-    el.tyD.textContent = dmg > 0.05 ? `FW ${Math.round(dm.fw * 100)}% · SP ${Math.round(Math.max(dm.sideL, dm.sideR) * 100)}% · RW ${Math.round(dm.rw * 100)}% · downforce −${Math.round(dm.aeroLoss * 100)}%` : flat > 0.2 ? 'Flat spots' : '';
+    txt(el.tyD, dmg > 0.05 ? `FW ${Math.round(dm.fw * 100)}% · SP ${Math.round(Math.max(dm.sideL, dm.sideR) * 100)}% · RW ${Math.round(dm.rw * 100)}% · downforce −${Math.round(dm.aeroLoss * 100)}%` : flat > 0.2 ? 'Flat spots' : '');
     for (let w = 0; w < 4; w++) {
       const tb = el.tyreBoxes[w];
       const temp = p.temp[w];
       const opt = comp.tOpt;
       const dt = temp - opt;
       // blue = cold, green = in window, red = overheated
-      tb.style.background = `hsl(${dt < -comp.tRange * 0.5 ? 205 : dt > comp.tRange * 0.5 ? 2 : 128}, 70%, 42%)`;
-      tb.firstElementChild.style.height = clamp(p.wear[w], 0, 1) * 100 + '%';
+      sty(tb, 'background', `hsl(${dt < -comp.tRange * 0.5 ? 205 : dt > comp.tRange * 0.5 ? 2 : 128}, 70%, 42%)`);
+      sty(tb.firstElementChild, 'height', Math.round(clamp(p.wear[w], 0, 1) * 1000) / 10 + '%');
     }
 
     // pit panel
@@ -557,10 +560,12 @@ export class HUD {
       else if (rs.lapsDown > 0) g = `+${rs.lapsDown}L`;
       else g = `+${(c.gapAhead ?? 0).toFixed(1)}`;
       if (rs.inPitLane || rs.service) g = '<span class="pit">PIT</span>';
-      row.children[4].innerHTML = `${g}<span class="t" style="background:${c.compound.color}">${c.compound.letter}</span>`;
-      row.children[3].textContent = '';
+      const rh = `${g}<span class="t" style="background:${c.compound.color}">${c.compound.letter}</span>`;
+      if (row._h !== rh) { // rewritten only when the gap or tyre changes
+        row._h = rh;
+        row.children[4].innerHTML = rh;
+      }
     });
-    // second pass: names in column 3 as part of code column: keep simple
   }
 
   drawG(p) {
