@@ -73,6 +73,9 @@ for (const [name, bad] of [
   step('accessibility toggles apply', await page.evaluate(() => document.body.classList.contains('calm') && document.body.classList.contains('bighud') && window.apex.save.settings.calm === true));
   await page.click('[data-toggle="s.calm"]');
   await page.click('[data-toggle="s.bigHud"]');
+  await page.fill('#save-io', JSON.stringify({ app: 'apex-grand-prix', v: 1, save: { school: { launch: true }, stats: { races: 3 } } }));
+  await page.click('[data-act=saverestore]');
+  step('a backup can be restored', await page.evaluate(() => window.apex.save.school.launch === true && window.apex.save.stats.races === 3));
   await page.keyboard.press('Escape');
   await page.waitForSelector('[data-act=quick]');
   step('settings round trip', true);

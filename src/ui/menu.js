@@ -152,13 +152,8 @@ function sanitizeStats(raw) {
   return out;
 }
 
-export function loadSave() {
-  let raw = {};
-  try {
-    raw = JSON.parse(localStorage.getItem(SAVE_KEY) || '{}');
-  } catch (e) {
-    raw = {};
-  }
+/** Turns anything (a parsed localStorage value, an imported backup) into a complete, well-formed save. */
+export function sanitizeSave(raw) {
   if (!isObj(raw)) raw = {};
   const ghosts = {};
   if (isObj(raw.ghosts)) for (const t of TRACK_DEFS) if (isObj(raw.ghosts[t.id])) ghosts[t.id] = raw.ghosts[t.id];
@@ -174,6 +169,34 @@ export function loadSave() {
     school: sanitizeSchool(raw.school),
     achievements: isObj(raw.achievements) ? Object.fromEntries(Object.entries(raw.achievements).filter(([k, v]) => ACHIEVEMENTS.some((a) => a.id === k) && Number.isFinite(+v))) : {},
   };
+}
+
+export function loadSave() {
+  let raw = {};
+  try {
+    raw = JSON.parse(localStorage.getItem(SAVE_KEY) || '{}');
+  } catch (e) {
+    raw = {};
+  }
+  return sanitizeSave(raw);
+}
+
+/** The text a player can copy as a backup of their progress. */
+export function exportSave(save) {
+  return JSON.stringify({ app: 'apex-grand-prix', v: 1, save });
+}
+
+/** Parses a backup text (or a bare save); returns a sanitised save or null if it is not one. */
+export function importSave(text) {
+  try {
+    const j = JSON.parse(String(text).trim());
+    if (!isObj(j)) return null;
+    const raw = isObj(j.save) ? j.save : j;
+    if (!['settings', 'config', 'records', 'career', 'stats', 'achievements', 'season', 'school'].some((k) => k in raw)) return null;
+    return sanitizeSave(raw);
+  } catch (e) {
+    return null;
+  }
 }
 export function persist(save) {
   try {
@@ -473,6 +496,11 @@ export class Menu {
         ${this.toggle('s.rumble', 'Gamepad vibration', 'Kerbs, grass, tyre slip and impacts', s.rumble !== false)}
         <button class="btn sm" data-act="wipe">Clear saved records</button>
       </div></div>
+      <div class="panel" style="margin-top:1rem"><h3>Backup</h3>
+        <div class="hint">Your progress lives in this browser. Copy it as text to keep it safe or move it to another device, and paste it back here to restore it.</div>
+        <textarea id="save-io" class="saveio" rows="3" spellcheck="false" placeholder="Paste a backup here and press Restore"></textarea>
+        <div class="row" style="margin-top:.5rem"><button class="btn sm" data-act="savecopy">Copy my save</button><button class="btn sm" data-act="saverestore">Restore from the box</button></div>
+      </div>
       <div class="footer"><button class="btn sm" data-act="${data.from === 'pause' ? 'pause' : 'back'}">◀ Back</button></div></section>`;
   }
 
@@ -770,6 +798,22 @@ export class Menu {
         c.pressure = 0;
         this.persist();
         return this.rerender();
+      case 'savecopy': {
+        const box = this.root.querySelector('#save-io');
+        const text = exportSave(this.save);
+        if (box) { box.value = text; box.focus(); box.select(); }
+        try { navigator.clipboard.writeText(text).then(() => H.toast && H.toast('Save copied'), () => H.toast && H.toast('Copy it from the box (Ctrl+C)')); } catch (e) { H.toast && H.toast('Copy it from the box (Ctrl+C)'); }
+        return;
+      }
+      case 'saverestore': {
+        const box = this.root.querySelector('#save-io');
+        const next = importSave(box ? box.value : '');
+        if (!next) { H.toast && H.toast('That is not a valid backup'); return; }
+        Object.assign(this.save, next);
+        H.applySettings();
+        H.toast && H.toast('Save restored');
+        return this.rerender();
+      }
       case 'wipe':
         this.save.records = {};
         this.save.ghosts = {};

@@ -12,6 +12,7 @@ const suites = [
   ['idle player ends session', 'tests/idle.mjs'],
   ['driving school', 'tests/school.mjs'],
   ['key rebinding model', 'tests/keys.mjs'],
+  ['save backup / import', 'tests/saves.mjs'],
   ['setup: tyre pressure', 'tests/setup.mjs'],
   ['pit-wall strategy', 'tests/strategy.mjs'],
   ['racecraft scenarios', 'tests/racecraft.mjs'],
