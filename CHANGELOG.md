@@ -60,6 +60,7 @@ Everything below was added or fixed in this release, grouped by area.
 - The main menu no longer overlaps on short windows (scrolls and compacts), Escape in the pause-menu settings returns to the pause menu.
 
 ### Robustness
+- Review fixes: the auto-quality watchdog no longer overwrites your saved blur/bloom settings (it only switches them off for the current page load); championship results keep their standings panel when the results screen is reopened; qualifying stats are counted once; a "pass" now means a place gained on a car that is on the track and moving (not one that pitted or retired), which also feeds the Overtaker achievement and the school lesson; race achievements need a finished race; the school braking lesson counts a lock-up from any speed; a key taken from a single-key action leaves it unbound instead of doubling up.
 - **Save backup**: Settings has a Backup panel: copy your whole save as text, paste it back to restore it (on another device or after clearing the browser). Imports are sanitised exactly like the normal load path and bad text is rejected. `tests/saves.mjs`.
 - **Installable and offline**: a web manifest and icon (add to home screen, fullscreen, landscape) and a network-first service worker that keeps the game working with no connection once it has been loaded. Local development on localhost does not register it.
 - Team-radio messages now play a short squelch and chirp.

@@ -431,7 +431,7 @@ export class Menu {
     const keys = mergeKeys(this.save.settings.keys);
     const rows = KEY_ACTIONS.map(([a, label]) => {
       const waiting = this.rebinding === a;
-      return `<div class="key"><span>${esc(label)}</span><button class="keybtn ${waiting ? 'wait' : ''}" data-rebind="${a}">${waiting ? 'Press a key…' : keys[a].filter((c) => c !== 'Escape' || a === 'pause').map((c) => `<kbd>${esc(keyLabel(c))}</kbd>`).join('')}</button></div>`;
+      return `<div class="key"><span>${esc(label)}</span><button class="keybtn ${waiting ? 'wait' : ''}" data-rebind="${a}">${waiting ? 'Press a key…' : keys[a].filter((c) => c !== 'Escape' || a === 'pause').map((c) => `<kbd>${esc(keyLabel(c))}</kbd>`).join('') || '<kbd>—</kbd>'}</button></div>`;
     });
     const pad = [['Steer', 'Left stick'], ['Throttle / brake', 'RT / LT'], ['DRS', 'A'], ['Boost', 'X'], ['Pit request', 'B'], ['Camera', 'Y'], ['Gears', 'LB / RB'], ['Look back', 'L3'], ['Pause', 'Start'], ['Reset', 'Back'], ['Fuel mix / ERS mode', 'D-pad up / down'], ['Next pit tyre', 'D-pad right']];
     return `<section class="screen panel-screen full"><h2>Con<span>trols</span></h2>
@@ -494,7 +494,7 @@ export class Menu {
         <div class="field"><label>Keyboard steering speed</label>${this.chips('steerSpeed', [{ value: 0.7, label: 'Gentle' }, { value: 1, label: 'Normal' }, { value: 1.4, label: 'Quick' }], s.steerSpeed)}<div class="hint">How fast A / D turn the wheel. Gamepads and wheels are not affected.</div></div>
         ${this.slider('s.padDead', 'Gamepad stick deadzone', Math.round(s.padDead * 100), 0, 30, 1, Math.round(s.padDead * 100) + '%')}
         ${this.toggle('s.rumble', 'Gamepad vibration', 'Kerbs, grass, tyre slip and impacts', s.rumble !== false)}
-        <button class="btn sm" data-act="wipe">Clear saved records</button>
+        <div class="row"><button class="btn sm" data-act="fullscreen">Toggle full screen</button><button class="btn sm" data-act="wipe">Clear saved records</button></div>
       </div></div>
       <div class="panel" style="margin-top:1rem"><h3>Backup</h3>
         <div class="hint">Your progress lives in this browser. Copy it as text to keep it safe or move it to another device, and paste it back here to restore it.</div>
@@ -798,6 +798,15 @@ export class Menu {
         c.pressure = 0;
         this.persist();
         return this.rerender();
+      case 'fullscreen': {
+        try {
+          if (document.fullscreenElement) document.exitFullscreen();
+          else (document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen).call(document.documentElement);
+        } catch (e) {
+          H.toast && H.toast('Full screen is not available here');
+        }
+        return;
+      }
       case 'savecopy': {
         const box = this.root.querySelector('#save-io');
         const text = exportSave(this.save);

@@ -757,8 +757,7 @@ class Game {
     if (p.steps <= 3) this.resScale = [1, 0.85, 0.7, 0.55][p.steps];
     else {
       this.renderer.shadowMap.enabled = false;
-      this.save.settings.blur = false;
-      this.save.settings.bloom = false;
+      this.perfNoFx = true; // for this page load only: the saved settings are left alone
     }
     this.resize();
     this.toast(p.steps <= 3 ? `Frame rate was ${fps.toFixed(0)} fps: lowered the render resolution (Settings > Automatic quality)` : 'Frame rate is still low: shadows and motion blur turned off');
@@ -818,13 +817,13 @@ class Game {
   /** Bloom strength: a whisper by day, a strong glow around lights at dusk and at night. */
   bloomFor(s) {
     const set = this.save.settings;
-    if (set.bloom === false || set.quality === 'low') return 0;
+    if (set.bloom === false || this.perfNoFx || set.quality === 'low') return 0;
     return clamp(0.04 + 0.8 * (s.nightK || 0) + 0.2 * (s.duskK || 0), 0, 0.9);
   }
 
   speedBlur(s) {
     const set = this.save.settings;
-    if (!set.blur || set.calm || set.quality === 'low' || s.camRig.mode === 'tv' || s.paused) return 0;
+    if (!set.blur || this.perfNoFx || set.calm || set.quality === 'low' || s.camRig.mode === 'tv' || s.paused) return 0;
     const p = s.player;
     const x = clamp((p.speed * 3.6 - 140) / 200, 0, 1);
     let k = (Math.exp(3 * x) - 1) / (Math.exp(3) - 1);
@@ -1640,7 +1639,10 @@ class Game {
         if (!rec || me.best < rec.best) this.save.records[track.id] = { best: me.best };
         persist(this.save);
       }
-      this.recordStats({ kind: 'quali', pos: me ? me.pos : 99, km: Math.max(0, player.rs.maxDist) / 1000 });
+      if (!s.qualiRecorded) {
+        s.qualiRecorded = true;
+        this.recordStats({ kind: 'quali', pos: me ? me.pos : 99, km: Math.max(0, player.rs.maxDist) / 1000 });
+      }
       this.menu.show('quali', { q, player, trackName, cfg: s.cfg });
       return;
     }
@@ -1653,7 +1655,7 @@ class Game {
     }
     let season = null;
     const cfg = s.cfg;
-    if (this.save.season && this.save.season.calendar && this.save.season.calendar[this.save.season.round] === track.id && !cfg.career) {
+    if (this.save.season && this.save.season.calendar && !cfg.career && (s.seasonRecorded || this.save.season.calendar[this.save.season.round] === track.id)) {
       season = this.save.season;
       if (!s.seasonRecorded) {
         s.seasonRecorded = true;

@@ -53,7 +53,7 @@ export function sanitizeKeys(raw) {
     const v = raw[a];
     if (!Array.isArray(v)) continue;
     const codes = v.filter((c) => typeof c === 'string' && KEY_CODE.test(c) && !RESERVED.has(c)).slice(0, 3);
-    if (codes.length) out[a] = [...new Set(codes)];
+    if (codes.length || v.length === 0) out[a] = [...new Set(codes)]; // [] = deliberately unbound
   }
   return out;
 }
@@ -75,8 +75,7 @@ export function bindKey(custom, action, code) {
   const merged = mergeKeys(out);
   for (const a of Object.keys(merged)) if (a !== action && merged[a].includes(code)) out[a] = merged[a].filter((c) => c !== code);
   out[action] = [code];
-  for (const a of Object.keys(out)) if (!out[a].length) delete out[a]; // an emptied action falls back to its default
-  return out;
+  return out; // an action that lost its only key stays unbound until the player gives it one (or resets the keys)
 }
 
 const dead = (v, d) => (Math.abs(v) < d ? 0 : (v - Math.sign(v) * d) / (1 - d));

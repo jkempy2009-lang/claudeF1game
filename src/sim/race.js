@@ -484,7 +484,7 @@ export class Race {
     rs.lastFault = this.time;
     rs.faults = (rs.faults || 0) + 1;
     const secs = car.info.isPlayer ? (rs.faults === 1 ? 5 : rs.faults === 2 ? 10 : 20) : 5;
-    this.addPenalty(car, secs, rs.faults >= 3 && car.info.isPlayer ? 'Repeated collisions (drive-through equivalent)' : 'Causing a collision');
+    this.addPenalty(car, secs, rs.faults >= 3 && car.info.isPlayer ? 'Repeated collisions' : 'Causing a collision');
   }
 
   // ---- timing ---------------------------------------------------------------------------------------
@@ -628,7 +628,15 @@ export class Race {
       const rsx = c.rs;
       if (this.phase === 'racing' && this.time - this.t0 > 6 && rsx.pos > i + 1 && !rsx.inPitLane && !rsx.service && this.sc.state === 'none') {
         const prev = rsx.lastRank != null ? rsx.lastRank : rsx.pos;
-        if (prev > i + 1) rsx.passes = (rsx.passes || 0) + (prev - (i + 1)); // net gain on track, not through other cars' pit stops (approximation)
+        if (prev > i + 1) {
+          // a pass is a place gained on a car that is on the track and moving: not one in the pit lane, stopped or retired
+          let real = 0;
+          for (let k = 1; k <= prev - (i + 1); k++) {
+            const o = list[i + k];
+            if (o && !o.rs.inPitLane && !o.rs.service && !o.rs.finished && o.speed > 8) real++;
+          }
+          rsx.passes = (rsx.passes || 0) + real;
+        }
       }
       rsx.lastRank = i + 1;
       c.rs.pos = i + 1;

@@ -115,13 +115,18 @@ export class SchoolTracker {
     c.stops = car.rs.stops || 0;
     // a clean stop: reach 200 km/h, then brake from there down to a walking pace without flat-spotting a tyre
     const flat = Math.max(car.flat[0], car.flat[1], car.flat[2], car.flat[3]);
-    if (kmh > 200) { this._armed = true; this._stop = null; }
-    else if (this._armed && !this._stop && car.brake > 0.5) this._stop = { flat0: flat };
-    if (this._stop && car.brake < 0.1 && kmh > 30) { this._stop = null; this._armed = false; } // let go too early: not a stop
+    if (kmh > 200) {
+      this._armed = true;
+      // the flat-spot baseline is taken while still above 200 km/h, so a lock-up from higher speed counts against the stop
+      if (!this._stop && car.brake > 0.5) this._stop = { flat0: flat };
+      else if (!this._stop) this._flatRef = flat;
+    } else if (this._armed && !this._stop && car.brake > 0.5) this._stop = { flat0: this._flatRef ?? flat };
+    if (this._stop && car.brake < 0.1 && kmh > 30) { this._stop = null; this._armed = false; this._flatRef = undefined; } // let go too early: not a stop
     if (this._stop && kmh < 25) {
       if (flat - this._stop.flat0 < 0.12) c.cleanStops++;
       this._stop = null;
       this._armed = false;
+      this._flatRef = undefined;
     }
     return this.check();
   }
