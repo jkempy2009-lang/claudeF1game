@@ -547,7 +547,9 @@ export class World {
         const x = tr.x[i] + tr.nx[i] * d, y = tr.y[i] + tr.ny[i] * d;
         pos.set([x, z - 0.1, -y, x, z + h, -y], n * 6);
         if (n > 0) s += tr.ds;
-        uv.set([s / vLen, 0, s / vLen, 1], n * 4);
+        // seen from the track, the right-hand wall reads backwards along the lap, so its lettering runs the other way
+        const u = (sgn < 0 ? -s : s) / vLen;
+        uv.set([u, 0, u, 1], n * 4);
         if (n < count - 1) {
           const p = n * 2;
           // wound so the front face (the printed side) looks towards the track from either wall
