@@ -1,0 +1,771 @@
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { Track } from './sim/track.js';
+import { AIDriver } from './sim/ai.js';
+import { TRACK_DEFS } from './sim/trackdefs.js';
+import { Race, DT, DIFFICULTIES } from './sim/race.js';
+import { TEAMS } from './sim/teams.js';
+import { COMPOUNDS } from './sim/carspec.js';
+import { World } from './render/world.js';
+import { CarView } from './render/carmodel.js';
+import { Effects } from './render/effects.js';
+import { CameraRig, CAMERA_MODES, CAMERA_NAMES } from './render/camera.js';
+import { Input } from './ui/input.js';
+import { AudioEngine } from './ui/audio.js';
+import { HUD } from './ui/hud.js';
+import { Menu, loadSave, persist } from './ui/menu.js';
+import { clamp, formatTime, lerp } from './util/math.js';
+
+const nextFrame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+
+function b64FromFloats(f32) {
+  const u8 = new Uint8Array(f32.buffer, f32.byteOffset, f32.byteLength);
+  let s = '';
+  for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+function floatsFromB64(b64) {
+  const s = atob(b64);
+  const u8 = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) u8[i] = s.charCodeAt(i);
+  return new Float32Array(u8.buffer);
+}
+
+class Game {
+  constructor() {
+    this.canvas = document.getElementById('gl');
+    this.save = loadSave();
+    this.state = 'boot';
+    this.tracks = {};
+    this.input = new Input();
+    this.audio = new AudioEngine();
+    this.lastT = performance.now();
+    this.initRenderer();
+    this.hud = new HUD(document.getElementById('hud'));
+    this.screens = document.getElementById('screens');
+    this.menu = new Menu(this.screens, this.save, this.hooks());
+    this.session = null;
+    this.showroom = null;
+    window.addEventListener('resize', () => this.resize());
+    window.addEventListener('keydown', (e) => {
+      this.audio.start();
+      this.audio.resume();
+      if (this.state === 'menu' && e.code === 'Enter') {
+        const b = this.screens.querySelector('.btn.primary');
+        if (b && document.activeElement === document.body) b.click();
+      }
+    });
+    window.addEventListener('pointerdown', () => {
+      this.audio.start();
+      this.audio.resume();
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden && this.state === 'race') this.pause();
+    });
+    this.setupTouch();
+    this.boot();
+  }
+
+  hooks() {
+    return {
+      tracks: this.tracks,
+      sfx: (k) => this.audio.ui(k),
+      startRace: (cfg) => this.startRace(cfg),
+      toMain: (fromRace) => this.toMain(fromRace),
+      resume: () => this.resume(),
+      restart: () => this.restart(),
+      applySettings: () => this.applySettings(),
+      previewTeam: (i) => this.previewTeam(i),
+      openSeason: () => this.openSeason(),
+      nextRound: () => this.nextRound(),
+      endSeason: () => this.endSeason(),
+      cycleCamera: () => this.cycleCamera(),
+      toast: (t) => this.toast(t),
+    };
+  }
+
+  // ---- bootstrap ----------------------------------------------------------------------------------
+  initRenderer() {
+    const q = this.save.settings.quality;
+    const r = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: q !== 'low', powerPreference: 'high-performance' });
+    this.renderer = r;
+    r.toneMapping = THREE.ACESFilmicToneMapping;
+    r.toneMappingExposure = 1.0;
+    r.shadowMap.enabled = q !== 'low';
+    r.shadowMap.type = THREE.PCFShadowMap;
+    this.camera = new THREE.PerspectiveCamera(62, 1, 0.25, 9000);
+    this.resize();
+  }
+
+  resize() {
+    const q = this.save.settings.quality;
+    const cap = q === 'high' ? 2 : q === 'medium' ? 1.5 : 1;
+    const pr = Math.min(window.devicePixelRatio || 1, cap);
+    this.renderer.setPixelRatio(pr);
+    this.renderer.setSize(window.innerWidth, window.innerHeight, false);
+    this.camera.aspect = window.innerWidth / window.innerHeight;
+    this.camera.updateProjectionMatrix();
+    this.pointScale = (window.innerHeight * pr) / (2 * Math.tan((this.camera.fov * Math.PI) / 360));
+  }
+
+  applySettings() {
+    persist(this.save);
+    this.audio.setVolume(this.save.settings.volume);
+    this.hud.setUnits(this.save.settings.units);
+    this.hud.el.minimap.classList.toggle('hidden', !this.save.settings.minimap);
+    this.hud.el.tower.classList.toggle('force-hide', !this.save.settings.tower);
+    const tw = this.hud.el.tower;
+    tw.style.visibility = this.save.settings.tower ? '' : 'hidden';
+    this.resize();
+    if (this.session && this.session.camRig) this.session.camRig.shakeOn = this.save.settings.shake;
+  }
+
+  async boot() {
+    this.screens.innerHTML = this.menu.screen_loading('Warming up the garage');
+    await nextFrame();
+    try {
+      for (const def of TRACK_DEFS) {
+        this.tracks[def.id] = new Track(def);
+        await nextFrame();
+      }
+      this.buildShowroom();
+      this.applySettings();
+      this.toMain();
+      this.renderer.setAnimationLoop(() => this.frame());
+    } catch (e) {
+      console.error(e);
+      this.screens.innerHTML = `<section class="screen loading"><div class="logo">Error</div><div class="hint" style="max-width:40rem;white-space:pre-wrap">${String(e.stack || e)}</div></section>`;
+    }
+  }
+
+  toast(text) {
+    const t = document.getElementById('toast');
+    t.textContent = text;
+    t.classList.add('show');
+    clearTimeout(this._toastT);
+    this._toastT = setTimeout(() => t.classList.remove('show'), 2200);
+  }
+
+  // ---- showroom (menu background) -----------------------------------------------------------------------
+  buildShowroom() {
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color('#07090c');
+    scene.fog = new THREE.Fog('#07090c', 18, 60);
+    const pm = new THREE.PMREMGenerator(this.renderer);
+    scene.environment = pm.fromScene(new RoomEnvironment(), 0.04).texture;
+    scene.environmentIntensity = 0.9;
+    const floor = new THREE.Mesh(new THREE.CircleGeometry(40, 64), new THREE.MeshStandardMaterial({ color: 0x0d1015, roughness: 0.28, metalness: 0.7 }));
+    floor.rotation.x = -Math.PI / 2;
+    scene.add(floor);
+    const ring = new THREE.Mesh(new THREE.RingGeometry(3.6, 3.75, 96), new THREE.MeshBasicMaterial({ color: 0xff2a2a }));
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.01;
+    scene.add(ring);
+    const key = new THREE.SpotLight(0xffffff, 900, 60, 0.5, 0.6, 1.4);
+    key.position.set(-9, 12, 8);
+    key.target.position.set(0, 0.5, 0);
+    key.castShadow = true;
+    key.shadow.mapSize.set(1024, 1024);
+    const rim = new THREE.SpotLight(0xff3030, 700, 60, 0.6, 0.7, 1.4);
+    rim.position.set(10, 6, -9);
+    const rim2 = new THREE.SpotLight(0x3070ff, 500, 60, 0.6, 0.7, 1.4);
+    rim2.position.set(-10, 5, -8);
+    scene.add(key, key.target, rim, rim2);
+    this.showroom = { scene, view: null, angle: 0, cam: new THREE.PerspectiveCamera(36, 1, 0.1, 200) };
+    this.previewTeam(this.save.config.team);
+  }
+
+  previewTeam(idx) {
+    if (!this.showroom) return;
+    const sr = this.showroom;
+    if (sr.view) {
+      sr.scene.remove(sr.view.group);
+      sr.view.dispose();
+    }
+    sr.view = new CarView(TEAMS[idx], { number: 7, isPlayer: true, code: 'YOU' }, { detail: 'high' });
+    sr.view.setPose(0, 0, 0, 0);
+    sr.view.group.traverse((o) => {
+      if (o.isMesh) o.castShadow = true;
+    });
+    sr.scene.add(sr.view.group);
+    sr.view.setCompound(COMPOUNDS[this.save.config.compound || 'medium']);
+  }
+
+  // ---- navigation ------------------------------------------------------------------------------------------
+  toMain(fromRace = false) {
+    if (this.session) this.endSession();
+    this.state = 'menu';
+    this.hud.show(false);
+    document.getElementById('vignette').style.display = '';
+    this.menu.config = { ...this.save.config, assists: { ...this.save.config.assists } };
+    this.menu.show('main');
+    this.previewTeam(this.save.config.team);
+  }
+
+  openSeason() {
+    let s = this.save.season;
+    const c = this.menu.config;
+    if (!s) {
+      s = { round: 0, points: {}, cfg: null };
+      this.save.season = s;
+    }
+    c.mode = 'race';
+    c.trackId = TRACK_DEFS[Math.min(s.round, TRACK_DEFS.length - 1)].id;
+    c.frontWing = c.rearWing = null;
+    this.menu.tab = 'race';
+    this.menu.show('setup', { season: true });
+  }
+
+  nextRound() {
+    const s = this.save.season;
+    if (!s) return this.toMain();
+    s.round++;
+    persist(this.save);
+    this.openSeason();
+  }
+
+  endSeason() {
+    const s = this.save.season;
+    if (s) {
+      const t = Object.entries(s.points).sort((a, b) => b[1] - a[1]);
+      const pos = t.findIndex(([n]) => n === 'You') + 1;
+      this.toast(`Season complete: you finished P${pos} in the championship`);
+    }
+    this.save.season = null;
+    persist(this.save);
+    this.toMain();
+  }
+
+  cycleCamera() {
+    if (!this.session) return;
+    const n = this.session.camRig.next();
+    this.save.settings.camera = n;
+    persist(this.save);
+    const el = document.getElementById('camname');
+    if (el) el.textContent = CAMERA_NAMES[n];
+    this.toast('Camera: ' + CAMERA_NAMES[n]);
+  }
+
+  // ---- session ------------------------------------------------------------------------------------------------
+  async startRace(cfg) {
+    this.audio.start();
+    this.audio.resume();
+    this.lastConfig = cfg;
+    if (this.session) this.endSession();
+    this.state = 'loading';
+    this.screens.innerHTML = this.menu.screen_loading('Building ' + TRACK_DEFS.find((d) => d.id === cfg.trackId).name);
+    this.hud.show(false);
+    await nextFrame();
+    try {
+      await this.buildSession(cfg);
+    } catch (e) {
+      console.error(e);
+      this.screens.innerHTML = `<section class="screen loading"><div class="logo">Error</div><div class="hint" style="max-width:44rem;white-space:pre-wrap">${String(e.stack || e)}</div><button class="btn" data-act="quit">Back</button></section>`;
+    }
+  }
+
+  async buildSession(cfg) {
+    const track = this.tracks[cfg.trackId];
+    const season = !!(this.save.season && cfg.season !== false && this.menu.current === 'setup' && false);
+    const race = new Race(track, {
+      mode: cfg.mode,
+      laps: cfg.laps,
+      level: cfg.level,
+      adaptive: cfg.adaptive,
+      fieldSize: cfg.fieldSize,
+      playerTeam: cfg.team,
+      playerGrid: Math.min(cfg.playerGrid, cfg.fieldSize),
+      collisions: cfg.collisions,
+      damage: cfg.damage,
+      tyreWear: cfg.tyreWear,
+      mandatoryStop: cfg.mandatoryStop,
+      compound: cfg.compound,
+      setup: { frontWing: cfg.frontWing, rearWing: cfg.rearWing, brakeBias: cfg.brakeBias },
+      assists: { ...cfg.assists, stability: cfg.assists.stability, tc: cfg.assists.tc, steer: cfg.assists.steer },
+      seed: (Math.random() * 1e6) | 0,
+    });
+    await nextFrame();
+    const quality = this.save.settings.quality;
+    const profile = race.getProfile(race.player.spec, `${race.player.info.team.id}:${cfg.compound}`);
+    const world = new World(track, { quality, profile });
+    await nextFrame();
+    const scene = new THREE.Scene();
+    scene.add(world.group);
+    const th = track.theme;
+    scene.fog = new THREE.FogExp2(new THREE.Color(th.fog), 1.1 / th.fogFar);
+    scene.background = new THREE.Color(th.fog);
+    // image-based lighting from the sky
+    const pm = new THREE.PMREMGenerator(this.renderer);
+    const envScene = new THREE.Scene();
+    const skyClone = world.sky.clone();
+    envScene.add(skyClone);
+    scene.environment = pm.fromScene(envScene, 0.02).texture;
+    scene.environmentIntensity = 0.75;
+    pm.dispose();
+
+    const views = new Map();
+    const detail = quality === 'low' ? 'low' : 'high';
+    for (const car of race.cars) {
+      const view = new CarView(car.info.team, car.info, { detail });
+      view.setCompound(car.compound);
+      scene.add(view.group);
+      views.set(car, view);
+    }
+    const effects = new Effects(scene);
+    const camera = this.camera;
+    const camRig = new CameraRig(camera);
+    camRig.setMode(this.save.settings.camera || 'chase');
+    camRig.shakeOn = this.save.settings.shake;
+    let ghostView = null;
+    if (cfg.mode === 'timetrial') {
+      const g = this.save.ghosts[track.id];
+      if (g) race.ghostBest = { time: g.time, frames: floatsFromB64(g.data), track: track.id };
+      ghostView = new CarView(TEAMS[cfg.team], { number: 0, isPlayer: false, code: 'GST' }, { ghost: true, detail: 'low' });
+      ghostView.group.visible = false;
+      scene.add(ghostView.group);
+    }
+    this.session = {
+      cfg, track, race, world, scene, views, effects, camRig, ghostView,
+      acc: 0, alpha: 0, intro: 4.2, introT: 0, paused: false, finishedShown: false, radioT: 0, fast: false,
+      player: race.player, pin: null, sunDir: world.sunDir, stopTimer: 0, lastEventCar: null, seasonRound: this.save.season ? this.save.season.round : null,
+      useSeason: cfg.__season,
+    };
+    this.hud.setTrack(track);
+    this.hud.setUnits(this.save.settings.units);
+    this.hud.show(true);
+    this.applySettings();
+    this.screens.innerHTML = '';
+    this.state = 'race';
+    document.getElementById('touch') && this.updateTouchVisibility();
+    this.hud.message(cfg.mode === 'timetrial' ? 'Time trial' : `${track.name}`, '', cfg.mode === 'timetrial' ? 'Set your best lap — your ghost follows' : `${cfg.laps} laps · P${race.player.info.gridPos} on the grid`, 4);
+    if (cfg.mode === 'race') this.hud.radio('Welcome to ' + track.name + '. Lights out when you are ready — good luck.', 6);
+  }
+
+  endSession() {
+    const s = this.session;
+    if (!s) return;
+    s.scene.traverse((o) => {
+      if (o.geometry) o.geometry.dispose();
+    });
+    this.session = null;
+    this.audio.update({ rpm: 0, throttle: 0, speed: 0, slipVis: [0, 0, 0, 0], kerbShake: 0, gear: 1 }, [], { pos: new THREE.Vector3(), right: new THREE.Vector3(1, 0, 0), vel: new THREE.Vector3() }, 0.016, true);
+  }
+
+  toggleAutopilot() {
+    const s = this.session;
+    if (!s || s.race.opt.mode === 'timetrial' && false) return;
+    if (!s.pilot) {
+      const prof = s.race.getProfile(s.player.spec, 'pilot');
+      s.pilot = new AIDriver({ car: s.player, track: s.track, profile: prof, level: Math.max(0.6, s.cfg.level), seed: 4242 });
+      s.pilot.goTime = 0;
+    }
+    s.auto = !s.auto;
+    s.pilot.offset = 0;
+    this.toast(s.auto ? 'Autopilot on (G to take over)' : 'You have control');
+  }
+
+  /** Test helper: fast-forward the session with the autopilot driving. */
+  debugSkip(sec) {
+    const s = this.session;
+    if (!s) return;
+    if (!s.pilot) this.toggleAutopilot();
+    s.auto = true;
+    const { race } = s;
+    const pin = { throttle: 0, brake: 0, steer: 0, boost: false };
+    if (race.phase === 'grid') race.start();
+    const n = Math.round(sec / DT);
+    for (let i = 0; i < n; i++) {
+      if (race.phase === 'racing') {
+        const ai = s.pilot.update(DT, race);
+        pin.throttle = ai.throttle; pin.brake = ai.brake; pin.steer = ai.steer; pin.boost = ai.boost;
+        pin.drsPress = ai.drs && !s.player.rs.drsLatch;
+      } else { pin.throttle = 0; pin.brake = 1; pin.steer = 0; pin.drsPress = false; }
+      race.step(DT, pin);
+    }
+    race.events.length = 0;
+    s.introT = 99;
+  }
+
+  pause() {
+    const s = this.session;
+    if (!s || this.state !== 'race') return;
+    this.state = 'paused';
+    s.paused = true;
+    this.menu.show('pause');
+    const el = document.getElementById('camname');
+    if (el) el.textContent = CAMERA_NAMES[s.camRig.mode];
+  }
+
+  resume() {
+    if (!this.session) return;
+    this.screens.innerHTML = '';
+    this.state = 'race';
+    this.session.paused = false;
+    this.lastT = performance.now();
+  }
+
+  restart() {
+    if (this.lastConfig) this.startRace(this.lastConfig);
+  }
+
+  // ---- touch (basic) ----------------------------------------------------------------------------------------------
+  setupTouch() {
+    const touch = document.getElementById('touch');
+    if (!touch) return;
+    const set = (k, v) => (this.input.touch[k] = v);
+    touch.querySelectorAll('button').forEach((b) => {
+      const k = b.dataset.k;
+      b.addEventListener('pointerdown', (e) => { e.preventDefault(); this.input.touchMode = true; set(k, true); });
+      const up = () => set(k, false);
+      b.addEventListener('pointerup', up);
+      b.addEventListener('pointercancel', up);
+      b.addEventListener('pointerleave', up);
+    });
+    window.addEventListener('touchstart', () => { this.input.touchMode = true; this.updateTouchVisibility(); }, { passive: true, once: true });
+  }
+  updateTouchVisibility() {
+    const touch = document.getElementById('touch');
+    if (touch) touch.classList.toggle('show', this.input.touchMode && this.state === 'race');
+  }
+
+  // ---- frame loop ---------------------------------------------------------------------------------------------------
+  frame() {
+    const now = performance.now();
+    const dt = Math.min(0.05, (now - this.lastT) / 1000);
+    this.lastT = now;
+    const r = this.renderer;
+    if (this.state === 'menu' || this.state === 'loading' || (this.state === 'paused' && !this.session)) {
+      this.renderShowroom(dt);
+      return;
+    }
+    const s = this.session;
+    if (!s) return;
+    if (this.state === 'paused') {
+      // keep rendering the frozen world (camera still)
+      const pp = this.input.poll(dt, 0);
+      if (pp.pause) return this.resume();
+      this.audio.update(s.player, [], this.listener(), dt, true);
+      r.render(s.scene, this.camera);
+      return;
+    }
+    if (this.state === 'race') this.runSession(s, dt);
+    r.render(s.scene, this.camera);
+  }
+
+  renderShowroom(dt) {
+    const sr = this.showroom;
+    if (!sr) return;
+    sr.angle += dt * 0.28;
+    const c = sr.cam;
+    c.aspect = window.innerWidth / window.innerHeight;
+    // frame the car to the right on wide screens
+    const wide = c.aspect > 1.2;
+    c.setViewOffset && wide ? c.setViewOffset(window.innerWidth, window.innerHeight, -window.innerWidth * 0.17, 0, window.innerWidth, window.innerHeight) : c.clearViewOffset();
+    c.updateProjectionMatrix();
+    const R = 11.5;
+    c.position.set(Math.cos(sr.angle) * R, 2.6 + Math.sin(sr.angle * 0.7) * 0.6, Math.sin(sr.angle) * R);
+    c.lookAt(0, 0.55, 0);
+    this.renderer.render(sr.scene, c);
+  }
+
+  listener() {
+    const cam = this.camera;
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
+    return { pos: cam.position, right, vel: this._lv || (this._lv = new THREE.Vector3()) };
+  }
+
+  runSession(s, dt) {
+    const { race, player, views, camRig, effects, world } = s;
+    const input = this.input;
+    const pin = input.poll(dt, player.speed);
+    if (pin.pause) return this.pause();
+    if (pin.camera) this.cycleCamera();
+    if (pin.mute) {
+      this.audio.setEnabled(!this.audio.enabled);
+      this.toast(this.audio.enabled ? 'Sound on' : 'Sound off');
+    }
+    if (pin.map) this.hud.el.minimap.classList.toggle('hidden');
+    camRig.lookBack = pin.lookBack;
+    if (pin.autoToggle) this.toggleAutopilot();
+    if (s.auto && race.phase === 'racing') {
+      const ai = s.pilot.update(DT, race);
+      pin.throttle = ai.throttle;
+      pin.brake = ai.brake;
+      pin.steer = ai.steer;
+      pin.boost = ai.boost;
+      pin.drsPress = ai.drs && !player.rs.drsLatch;
+      if (player.rs.pilot && player.rs.pilot.pitState !== 'none') s.pilot.pitState = 'none';
+      s.pilot.wantsPit = player.rs.pitRequested;
+    }
+
+    // intro orbit, then lights
+    if (race.phase === 'grid') {
+      s.introT += dt;
+      if (s.introT > s.intro || pin.drsPress || input.isDown('pit')) {
+        race.start();
+        camRig.init = false;
+      }
+    }
+    if (pin.reset && (race.phase === 'racing' || race.phase === 'countdown')) {
+      race.resetToTrack(player, race.opt.mode === 'race' ? 0 : 0);
+      if (race.phase === 'racing') this.hud.message('Car recovered', '', 'Back on the racing line', 2);
+    }
+
+    // fixed-step physics
+    const ff = race.phase === 'racing' && player.rs.finished && race.phase !== 'finished';
+    const frameSteps = ff ? 40 : 1;
+    let n = 0;
+    s.acc += dt;
+    const edges = { gearUp: pin.gearUp, gearDown: pin.gearDown, drsPress: pin.drsPress, pitToggle: pin.pitToggle, tyreCycle: pin.tyreCycle };
+    const stepPin = { throttle: pin.throttle, brake: pin.brake, steer: pin.steer, boost: pin.boost, ...edges };
+    let lim = ff ? 400 : 14;
+    while (s.acc >= DT && n < lim) {
+      race.step(DT, stepPin);
+      stepPin.gearUp = stepPin.gearDown = stepPin.drsPress = stepPin.pitToggle = stepPin.tyreCycle = false;
+      s.acc -= DT;
+      n++;
+    }
+    if (s.acc > DT * 14) s.acc = 0;
+    s.alpha = s.acc / DT;
+    if (ff && race.phase !== 'finished') s.acc = 0;
+
+    this.processEvents(s);
+
+    // views
+    const camPos = this.camera.position;
+    let nearest = null;
+    for (const car of race.cars) {
+      const v = views.get(car);
+      v.update(car, s.alpha, dt);
+      const dx = car.x - camPos.x, dy = -car.y - camPos.z;
+      const near = dx * dx + dy * dy < 160 * 160;
+      v.group.visible = near || car === player || (dx * dx + dy * dy < 1200 * 1200);
+      v.setLod(!near && car !== player);
+      v.group.traverse((o) => { if (o.isMesh) o.castShadow = near && this.save.settings.quality !== 'low'; });
+      if (car !== player && near) effects.car(car, v, dt, camPos, true);
+    }
+    effects.car(player, views.get(player), dt, camPos, true);
+    effects.update(dt, this.pointScale);
+    // ghost
+    if (s.ghostView) {
+      const pose = race.phase === 'racing' ? race.ghostPose(race.time - player.rs.lapStart) : null;
+      if (pose && player.rs.laps >= 1) {
+        s.ghostView.group.visible = true;
+        s.ghostView.setPose(pose.x, pose.y, pose.theta, this.track ? 0 : 0, pose.steer);
+        const i = s.track.idx(0);
+        const pr = s.track.project(pose.x, pose.y, -1, {});
+        s.ghostView.group.position.y = s.track.at(s.track.z, pr.s);
+        race.ghostPos = pose;
+      } else {
+        s.ghostView.group.visible = false;
+        race.ghostPos = null;
+      }
+    }
+
+    // camera
+    if (race.phase === 'grid' && s.introT < s.intro) {
+      const a = -0.9 + s.introT * 0.5;
+      const pv = views.get(player).group.position;
+      this.camera.position.set(pv.x + Math.cos(a) * 9 + 0, pv.y + 2.4, pv.z + Math.sin(a) * 9);
+      this.camera.lookAt(pv.x, pv.y + 0.6, pv.z);
+      this.camera.fov = 48;
+      this.camera.updateProjectionMatrix();
+    } else {
+      camRig.update(dt, views.get(player), player, s.track);
+      if (!camRig.shakeOn) camRig.impact = 0;
+    }
+    world.focusShadow(views.get(player).group.position);
+    world.update(dt, performance.now() / 1000);
+    world.setStartLights(race.phase === 'countdown' ? race.lights : 0, race.phase === 'racing' && race.time - race.t0 < 1.5);
+
+    // HUD + audio
+    this.hud.update(race, player, pin, performance.now());
+    this.radioTick(s, dt);
+    const others = [];
+    for (const car of race.cars) {
+      if (car === player) continue;
+      const g = views.get(car).group.position;
+      others.push({ car, wx: g.x, wz: g.z, vx: car.u * Math.cos(car.theta), vz: -car.u * Math.sin(car.theta) });
+    }
+    const lst = this.listener();
+    const pg = views.get(player).group.position;
+    lst.vel.set(player.u * Math.cos(player.theta), 0, -player.u * Math.sin(player.theta));
+    this.audio.update(player, others, lst, dt, false);
+
+    // results
+    if (race.phase === 'finished' && !s.finishedShown) {
+      s.finishedShown = true;
+      setTimeout(() => this.showResults(), race.opt.mode === 'timetrial' ? 0 : 1500);
+    }
+  }
+
+  processEvents(s) {
+    const { race, player, effects, camRig } = s;
+    const hud = this.hud;
+    for (const e of race.events) {
+      switch (e.type) {
+        case 'light':
+          hud.setLights(e.n);
+          this.audio.light(e.n);
+          break;
+        case 'lightsOut':
+          hud.setLights(0, true);
+          this.audio.go();
+          if (race.opt.mode === 'race') hud.message('Go go go!', 'good', '', 1.6);
+          break;
+        case 'lap':
+          if (e.car === player) {
+            const fast = race.fastest.car === player && race.fastest.time === e.time;
+            const pb = player.rs.best === e.time && e.valid;
+            if (race.opt.mode === 'timetrial' || e.lap >= 2 || race.totalLaps === 1) {
+              hud.message(`Lap ${e.lap} · ${formatTime(e.time)}`, fast ? 'purple' : pb ? 'good' : e.valid ? '' : 'bad', e.valid ? (fast ? 'Fastest lap of the race' : pb ? 'Personal best' : '') : 'Lap invalidated (track limits)', 3.5);
+            } else hud.message(`Lap ${e.lap} · ${formatTime(e.time)}`, '', 'Standing-start lap, not counted for records', 3);
+          }
+          break;
+        case 'fastest':
+          if (e.car !== player && race.opt.mode === 'race') hud.message(`Fastest lap · ${e.car.info.code}`, 'purple', formatTime(e.time), 2.5);
+          break;
+        case 'penalty':
+          if (e.car === player) {
+            hud.message(`+${e.secs}s penalty`, 'bad', e.reason, 4);
+            this.audio.ui('bad');
+            hud.radio(`Penalty: ${e.reason}. ${e.secs} seconds added to your race time.`, 6);
+          }
+          break;
+        case 'warning':
+          if (e.car === player) {
+            hud.message(`Track limits · warning ${e.n}/3`, 'bad', 'All four wheels beyond the white line', 3);
+            this.audio.ui('bad');
+          }
+          break;
+        case 'lapInvalid':
+          if (e.car === player) hud.message('Lap invalidated', 'bad', 'Track limits', 2.5);
+          break;
+        case 'sector':
+          if (e.kind === 'purple') hud.message('Purple sector', 'purple', '', 1.4);
+          break;
+        case 'pitRequest':
+          if (e.car === player) hud.message(e.on ? 'Box this lap' : 'Pit request cancelled', e.on ? '' : 'bad', e.on ? 'Press T to pick the next compound' : '', 2.5);
+          break;
+        case 'pitEntry':
+          if (e.car === player) hud.message('Pit lane', '', '80 km/h limit', 2.5);
+          break;
+        case 'pitStopStart':
+          if (e.car === player) hud.radio('Box, box — hold position, tyres going on.', 3);
+          break;
+        case 'pitStopEnd':
+          if (e.car === player) {
+            hud.message('Pit stop complete', 'good', `Fitted ${COMPOUNDS[e.compound].name} tyres`, 3);
+            this.audio.ui('good');
+          }
+          break;
+        case 'impact': {
+          const cam = this.camera.position;
+          const d = Math.hypot(e.x - cam.x, -e.y - cam.z);
+          if (d < 200) {
+            effects.burst(e.x, 0.5, -e.y, Math.min(60, 10 + e.speed * 3), Math.min(18, 4 + e.speed));
+            if (d < 90) this.audio.thud(clamp(e.speed / 20, 0.15, 1) * (1 - d / 100));
+          }
+          if (e.car === player || e.other === player) {
+            camRig.impact = Math.max(camRig.impact, clamp(e.speed / 25, 0.1, 1));
+            if (race.opt.damage && e.speed > 6) hud.message('Contact', 'bad', e.wall ? 'Barrier impact' : 'Collision with ' + (e.car === player ? e.other : e.car).info.code, 2);
+          }
+          break;
+        }
+        case 'chequered':
+          hud.flag('Chequered flag', '#fff', 4, 'chequered');
+          break;
+        case 'finish':
+          if (e.car === player) {
+            const pos = player.rs.pos;
+            hud.message(race.opt.mode === 'race' ? `Finished P${pos}` : 'Session complete', 'good', formatTime(e.time), 5);
+            this.audio.ui('good');
+          }
+          break;
+        case 'ghost':
+          this.saveGhost(s);
+          break;
+        case 'recover':
+          if (e.car === player) this.input.throttle = 0;
+          break;
+      }
+    }
+    race.events.length = 0;
+  }
+
+  saveGhost(s) {
+    const g = s.race.ghostBest;
+    if (!g) return;
+    this.save.ghosts[s.track.id] = { time: g.time, data: b64FromFloats(g.frames) };
+    const rec = this.save.records[s.track.id];
+    if (!rec || g.time < rec.best) {
+      this.save.records[s.track.id] = { best: g.time };
+      this.toast('New track record: ' + formatTime(g.time));
+    }
+    persist(this.save);
+  }
+
+  radioTick(s, dt) {
+    s.radioT += dt;
+    if (s.radioT < 8 || s.race.phase !== 'racing' || s.race.opt.mode !== 'race') return;
+    const p = s.player, rs = p.rs;
+    s.radioT = 0;
+    const ts = p.tyreSummary();
+    const left = s.race.totalLaps - rs.laps;
+    if (ts.wear > 0.7 && !rs.pitRequested && rs.stops === 0 && left > 1 && s.track.pit && !s._wearCalled) {
+      s._wearCalled = true;
+      this.hud.radio('Tyres are going off. Press B when you want to box.', 6);
+    } else if (p.drsAllowed && !s._drsCalled) {
+      s._drsCalled = true;
+      this.hud.radio('DRS enabled. Press Space on the straight.', 4);
+    } else if (!p.drsAllowed) s._drsCalled = false;
+    else if (p.behind && (p.behind.gapAhead ?? 9) < 0.8 && !s._behindCalled) {
+      s._behindCalled = true;
+      this.hud.radio(`${p.behind.info.code} is right behind, ${(p.behind.gapAhead).toFixed(1)} seconds. Defend.`, 4);
+    } else if (!p.behind || (p.behind.gapAhead ?? 9) > 2) s._behindCalled = false;
+    if ((p.damageFront || 0) > 0.3 && !s._dmgCalled && s.track.pit) {
+      s._dmgCalled = true;
+      this.hud.radio('You have front wing damage. Consider boxing for a new nose.', 5);
+    }
+  }
+
+  showResults() {
+    const s = this.session;
+    if (!s || this.state === 'menu') return;
+    const { race, player, track } = s;
+    this.state = 'results';
+    this.hud.show(false);
+    document.getElementById('touch') && this.updateTouchVisibility();
+    const trackName = track.name;
+    if (race.opt.mode === 'timetrial') {
+      const rec = this.save.records[track.id];
+      const best = player.rs.best;
+      let newBest = false;
+      if (best < Infinity && (!rec || best < rec.best)) {
+        this.save.records[track.id] = { best };
+        newBest = true;
+      }
+      persist(this.save);
+      this.menu.show('timetrial', { player, race, trackName, best, newBest });
+      return;
+    }
+    const cls = race.classification();
+    // records + season
+    const me = cls.find((e) => e.car === player);
+    if (me && me.best < Infinity) {
+      const rec = this.save.records[track.id];
+      if (!rec || me.best < rec.best) this.save.records[track.id] = { best: me.best };
+    }
+    let season = null;
+    const cfg = s.cfg;
+    if (this.save.season && TRACK_DEFS[this.save.season.round] && TRACK_DEFS[this.save.season.round].id === track.id) {
+      season = this.save.season;
+      for (const e of cls) season.points[e.info.name] = (season.points[e.info.name] || 0) + e.points;
+      season.lastCls = cls.length;
+    }
+    persist(this.save);
+    this.menu.show('results', { cls, player, race, season, trackName });
+  }
+}
+
+window.apex = new Game();

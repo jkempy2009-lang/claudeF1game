@@ -1,0 +1,43 @@
+// Browser smoke test + screenshots. Usage: node tests/shot.mjs <outDir> [trackId] [mode]
+import { createRequire } from 'node:module';
+import fs from 'node:fs';
+const require = createRequire(import.meta.url);
+const { chromium } = require('playwright');
+const out = process.argv[2];
+const trackId = process.argv[3] || 'northfield';
+const mode = process.argv[4] || 'race';
+fs.mkdirSync(out, { recursive: true });
+const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--enable-webgl'] });
+const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+const logs = [];
+page.on('console', (m) => { if (['error', 'warning'].includes(m.type())) logs.push(`[${m.type()}] ${m.text()}`); });
+page.on('pageerror', (e) => logs.push('[pageerror] ' + e.message + '\n' + (e.stack || '').split('\n').slice(0, 5).join('\n')));
+const flush = () => { if (logs.length) console.log(logs.splice(0).join('\n')); };
+await page.addInitScript((tid) => {
+  localStorage.setItem('apex-grand-prix.v1', JSON.stringify({ config: { trackId: tid, laps: 3, level: 0.55, fieldSize: 20, playerGrid: 8, team: 1, mode: 'race' }, settings: { quality: 'medium' } }));
+}, trackId);
+await page.goto('http://localhost:8099/index.html');
+await page.waitForTimeout(5000);
+if (mode === 'timetrial') {
+  await page.click('[data-mode=timetrial]');
+  await page.waitForTimeout(500);
+  await page.click('[data-act=go]');
+} else await page.click('[data-act=quick]');
+const t0 = Date.now();
+await page.waitForSelector('#hud:not(.hidden)', { timeout: 120000 });
+console.log('session loaded in', ((Date.now() - t0) / 1000).toFixed(1), 's');
+flush();
+await page.waitForTimeout(1200);
+await page.screenshot({ path: `${out}/02-intro.png` });
+await page.waitForTimeout(4500);
+await page.screenshot({ path: `${out}/03-grid.png` });
+await page.waitForTimeout(5000);
+await page.keyboard.down('KeyW');
+await page.waitForTimeout(3000);
+await page.screenshot({ path: `${out}/04-launch.png` });
+await page.waitForTimeout(6000);
+await page.screenshot({ path: `${out}/05-racing.png` });
+flush();
+const fps = await page.evaluate(() => new Promise((res) => { let n = 0; const t = performance.now(); const f = () => { n++; if (performance.now() - t > 2000) res(n / 2); else requestAnimationFrame(f); }; requestAnimationFrame(f); }));
+console.log('fps (software GL, 1280x720):', fps.toFixed(1));
+await browser.close();

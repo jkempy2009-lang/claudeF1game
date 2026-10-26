@@ -340,6 +340,7 @@ export class Race {
         inp.throttle = 0;
         inp.brake = 1;
       }
+      if (rs.service || (rs.pilot && rs.pilot.pitState !== 'none')) inp.allowReverse = false;
       // DRS latch
       if (p.drsPress && car.drsAllowed) rs.drsLatch = true;
       if (!car.drsAllowed || inp.brake > 0.1) rs.drsLatch = false;
@@ -433,6 +434,8 @@ export class Race {
       const frac = (rs.cpIdx * tr.cpSpacing - prevMax) / Math.max(1e-6, rs.maxDist - prevMax);
       const idx = rs.cpIdx + 8;
       if (idx >= 0 && idx < rs.cpTimes.length) rs.cpTimes[idx] = this.time - dt * (1 - clamp(frac, 0, 1));
+      const kLocal = ((rs.cpIdx % tr.cpCount) + tr.cpCount) % tr.cpCount;
+      if (rs.lapCpBest && kLocal > 0 && rs.laps >= 1) rs.delta = rs.cpTimes[idx] - rs.lapStart - rs.lapCpBest[kLocal];
     }
     // sector change
     if (rs.laps >= 0) {
@@ -481,12 +484,24 @@ export class Race {
     if (rs.laps >= 1) {
       rs.last = lapTime;
       rs.lapTimes.push(lapTime);
-      const valid = !rs.invalidLap;
+      const counts = rs.laps >= 2 || this.totalLaps === 1;
+      const valid = !rs.invalidLap && counts;
       if (valid && lapTime < rs.best) {
         rs.best = lapTime;
-        if (car.info.isPlayer && this.opt.mode === 'timetrial') this.commitGhost(lapTime);
+        if (car.info.isPlayer) {
+          const base = (rs.laps - 1) * this.track.cpCount + 8;
+          const t0 = rs.cpTimes[base];
+          const arr = new Float64Array(this.track.cpCount);
+          let ok = !Number.isNaN(t0);
+          for (let k = 0; k < arr.length && ok; k++) {
+            arr[k] = rs.cpTimes[base + k] - t0;
+            if (Number.isNaN(arr[k])) ok = false;
+          }
+          if (ok) rs.lapCpBest = arr;
+          if (this.opt.mode === 'timetrial') this.commitGhost(lapTime);
+        }
       }
-      if (valid && lapTime < this.fastest.time && rs.laps >= 1) {
+      if (valid && lapTime < this.fastest.time) {
         this.fastest = { time: lapTime, car, lap: rs.laps };
         this.pushEvent({ type: 'fastest', car, time: lapTime });
       }
@@ -626,7 +641,8 @@ export class Race {
       }
     }
     // player: stopped in the box?
-    if (car === this.player && !rs.service && rs.inPitLane && car.speed < 0.7) {
+    if (rs.boxLatch && car.speed > 3) rs.boxLatch = false;
+    if (car === this.player && !rs.service && !rs.boxLatch && rs.inPitLane && car.speed < 0.7) {
       const box = tr.pitBox(car.info.teamIdx);
       if (Math.abs(loopDelta(car.s, box.s, tr.length)) < 3.2 && Math.abs(car.d - box.d) < 2.8) car.pitStopped = true;
     }
@@ -653,6 +669,7 @@ export class Race {
         rs.stops++;
         rs.service = null;
         rs.pitRequested = false;
+        rs.boxLatch = true;
         car.pitStopped = false;
         if (drv) {
           // new profile for the new tyre compound

@@ -70,15 +70,16 @@ export class AIDriver {
     let d = this.basePath(s) + (withOffset ? this.offset : 0);
     if (this.pitState === 'in' || this.pitState === 'stopped' || this.pitState === 'out') {
       const b = tr._pitBlend(s);
-      if (b > 0) {
-        let target = -tr.pit.offset + 1.4;
+      if (b > 0.001) {
+        // follow the actual lane centreline (it slides back into the track on the exit ramp)
+        let target = tr.pitCentre(s) + 1.4 * b;
         if (this.box.s != null) {
           // slide into the working lane for the box, and back out afterwards
           const rel = loopDelta(s, this.box.s, tr.length);
           const toBox = smoothstep(-70, -18, rel) * (1 - smoothstep(10, 55, rel));
           target = lerp(target, this.box.d, toBox);
         }
-        d = lerp(d, target, smoothstep(0, 0.6, b));
+        d = lerp(d, target, smoothstep(0, 0.45, b));
       }
     }
     return d;
@@ -111,6 +112,23 @@ export class AIDriver {
     if (this.neighTimer <= 0) {
       this.neighTimer = 1 / 30;
       this.scanTraffic(race);
+    }
+
+    // --- feel for the tyres: slow down as grip fades (cold, overheated or worn)
+    this.gripT = (this.gripT || 0) - dt;
+    if (this.gripT <= 0) {
+      this.gripT = 0.5;
+      const comp = car.compound;
+      let g = 0;
+      for (let w = 0; w < 4; w++) {
+        const tf = clamp(1 - 0.2 * ((car.temp[w] - comp.tOpt) / comp.tRange) ** 2, 0.7, 1.02);
+        const wr = car.wear[w];
+        const wf = 1 - 0.06 * wr - 0.2 * smoothstep(0.62, 1.0, wr);
+        g += tf * wf;
+      }
+      g /= 4;
+      const want = Math.sqrt(clamp(g / 0.96, 0.6, 1));
+      this.gripAdapt += (Math.min(1, want) - this.gripAdapt) * 0.5;
     }
 
     // --- mistakes: roll once per corner approach

@@ -7,7 +7,7 @@ const AMBIENT = 30;
 const TYRE_HEAT_CAP = 3500; // J/K, lumped surface+carcass
 export const TUNE = { heat: 0.1, coolBase: 0.0011, coolSpeed: 0.00007 };
 /** Joules of tyre slip energy per tyre per "reference lap" - calibrated so wearLaps reads as real laps at pace 1.0. */
-export const WEAR_REF_J = 2.6e6;
+export const WEAR_REF_J = 0.4e6;
 
 const tmpProj = { i: 0, t: 0, s: 0, d: 0, dist: 0 };
 
