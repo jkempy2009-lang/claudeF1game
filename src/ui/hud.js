@@ -250,7 +250,7 @@ export class HUD {
   showKeyHint(ms = 9000, keys = null) {
     const k = (action) => ((keys && keys[action]) || DEFAULT_KEYS[action] || []).filter((c) => c !== 'Escape' || action === 'pause').slice(0, 1).map((c) => `<kbd>${keyLabel(c)}</kbd>`).join('');
     const pair = (a, b) => k(a) + k(b);
-    this.el.keyhint.innerHTML = `<div><b>${pair('throttle', 'brake')}</b> throttle / brake &nbsp; <b>${pair('left', 'right')}</b> steer &nbsp; <b>${k('drs')}</b> DRS &nbsp; <b>${k('boost')}</b> ERS boost &nbsp; <b>${k('pit')}</b> pit &nbsp; <b>${k('camera')}</b> camera &nbsp; <b>${k('reset')}</b> reset &nbsp; <b>${k('pause')}</b> pause</div><div class="hint">Press <kbd>Space</kbd> to start the lights · hold ${k('throttle')} to build revs; the car is held until the lights go out · brake at a standstill to reverse · <kbd>G</kbd> hands the car to the autopilot</div>`;
+    this.el.keyhint.innerHTML = `<div><b>${pair('throttle', 'brake')}</b> throttle / brake &nbsp; <b>${pair('left', 'right')}</b> steer &nbsp; <b>${k('drs')}</b> DRS &nbsp; <b>${k('boost')}</b> ERS boost &nbsp; <b>${k('pit')}</b> pit &nbsp; <b>${k('camera')}</b> camera &nbsp; <b>${k('reset')}</b> reset &nbsp; <b>${k('pause')}</b> pause</div><div class="hint">Press ${k('drs')} to start the lights · hold ${k('throttle')} to build revs; the car is held until the lights go out · brake at a standstill to reverse · ${k('auto')} hands the car to the autopilot</div>`;
     this.el.keyhint.classList.remove('hidden');
     this.el.keyhint.style.opacity = 1;
     clearTimeout(this._khT);

@@ -32,7 +32,7 @@ export const KEY_ACTIONS = [
   ['throttle', 'Throttle'], ['brake', 'Brake / reverse'], ['left', 'Steer left'], ['right', 'Steer right'], ['drs', 'DRS / wheel nut'], ['boost', 'ERS boost (hold)'],
   ['gearUp', 'Gear up (manual)'], ['gearDown', 'Gear down (manual)'], ['pit', 'Pit request'], ['tyre', 'Change pit tyre'], ['camera', 'Camera'], ['lookBack', 'Look back'],
   ['reset', 'Reset to track'], ['pause', 'Pause'], ['line', 'Racing line guide'], ['tele', 'Live telemetry'], ['map', 'Minimap size'], ['mute', 'Mute'],
-  ['ersMode', 'ERS mode'], ['fuelMode', 'Fuel mix'], ['bbUp', 'Brake bias forward'], ['bbDown', 'Brake bias rearward'],
+  ['auto', 'Autopilot toggle'], ['ersMode', 'ERS mode'], ['fuelMode', 'Fuel mix'], ['bbUp', 'Brake bias forward'], ['bbDown', 'Brake bias rearward'],
 ];
 const KEY_CODE = /^[A-Za-z][A-Za-z0-9]{1,23}$/;
 const RESERVED = new Set(['Escape', 'Enter', 'Tab', 'F5', 'F11', 'F12']);

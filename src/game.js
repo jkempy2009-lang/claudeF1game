@@ -690,6 +690,7 @@ class Game {
   resume() {
     if (!this.session) return;
     this.screens.innerHTML = '';
+    this.hud.show(true); // photo mode and the replay hide the HUD
     this.state = 'race';
     this.session.paused = false;
     this.lastT = performance.now();
@@ -749,7 +750,7 @@ class Game {
    */
   watchPerf(realDt) {
     if (this.save.settings.autoQuality === false || realDt > 0.5) return; // ignore pauses / tab switches
-    const p = this.perf || (this.perf = { acc: 0, n: 0, steps: 0, cool: 0 });
+    const p = this.perf || (this.perf = { acc: 0, n: 0, steps: this.perfSteps || 0, cool: this.perfSteps ? 0 : 1 }); // the first window of a session (shader compiling, the intro) is ignored
     p.acc += realDt;
     p.n++;
     if (p.acc < 4) return;
@@ -762,9 +763,11 @@ class Game {
     }
     if (fps >= 40 || p.steps >= 4) return;
     p.steps++;
+    this.perfSteps = p.steps; // later sessions start from the same level
     p.cool = 1;
     if (p.steps <= 3) this.resScale = [1, 0.85, 0.7, 0.55][p.steps];
     else {
+      if (this.session && this.session.world) this.session.world.sun.castShadow = false; // the light stops casting, the program is rebuilt by three
       this.renderer.shadowMap.enabled = false;
       this.perfNoFx = true; // for this page load only: the saved settings are left alone
     }
@@ -1535,7 +1538,7 @@ class Game {
 
   saveGhost(s) {
     const g = s.race.ghostBest;
-    if (!g) return;
+    if (!g || s.cfg.lesson) return; // a school lesson (rain, a fixed car) never sets your records
     this.save.ghosts[s.track.id] = { time: g.time, data: b64FromFloats(g.frames) };
     const rec = this.save.records[s.track.id];
     if (!rec || g.time < rec.best) {
@@ -1633,7 +1636,7 @@ class Game {
       const rec = this.save.records[track.id];
       const best = player.rs.best;
       let newBest = false;
-      if (best < Infinity && (!rec || best < rec.best)) {
+      if (!s.cfg.lesson && best < Infinity && (!rec || best < rec.best)) {
         this.save.records[track.id] = { best };
         newBest = true;
       }
@@ -1657,15 +1660,16 @@ class Game {
       return;
     }
     const cls = race.classification();
+    const cfg0 = s.cfg;
     // records + season
     const me = cls.find((e) => e.car === player);
-    if (me && me.best < Infinity) {
+    if (me && me.best < Infinity && !cfg0.lesson) {
       const rec = this.save.records[track.id];
       if (!rec || me.best < rec.best) this.save.records[track.id] = { best: me.best };
     }
     let season = null;
     const cfg = s.cfg;
-    if (this.save.season && this.save.season.calendar && !cfg.career && (s.seasonRecorded || this.save.season.calendar[this.save.season.round] === track.id)) {
+    if (this.save.season && this.save.season.calendar && !cfg.career && !cfg.lesson && (s.seasonRecorded || this.save.season.calendar[this.save.season.round] === track.id)) {
       season = this.save.season;
       if (!s.seasonRecorded) {
         s.seasonRecorded = true;
@@ -1684,7 +1688,7 @@ class Game {
         this.recordStats({ kind: 'career', pos: rc.driverPos });
       }
     }
-    if (!s.statsRecorded) {
+    if (!s.statsRecorded && !cfg.lesson) {
       s.statsRecorded = true;
       const rsP = player.rs;
       this.recordStats({

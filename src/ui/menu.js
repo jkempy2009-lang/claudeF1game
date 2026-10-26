@@ -248,6 +248,7 @@ export class Menu {
   }
 
   show(name, data) {
+    if (name !== 'controls') this.rebinding = null; // leaving the controls screen cancels a pending rebind
     this.current = name;
     this.lastData = data;
     const fn = this['screen_' + name];
@@ -837,6 +838,8 @@ export class Menu {
         const next = importSave(box ? box.value : '');
         if (!next) { H.toast && H.toast('That is not a valid backup'); return; }
         Object.assign(this.save, next);
+        this.config = { ...this.save.config, assists: { ...this.save.config.assists } };
+        this.save.config = this.config;
         H.applySettings();
         H.toast && H.toast('Save restored');
         return this.rerender();

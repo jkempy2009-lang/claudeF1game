@@ -306,7 +306,7 @@ export class AIDriver {
     inp.boost = !underSc && thr > 0.95 && straight && car.soc > 0.12 && (gapAhead < 1.8 || car.soc > 0.55 || race.lapsLeft(car) <= 1);
 
     // --- stuck recovery handled by Race using stuckT
-    if (V < 1.2 && race.phase === 'racing' && race.time > this.goTime + 6 && this.pitState !== 'stopped' && !(car.rs && car.rs.service)) this.stuckT += dt;
+    if (V < 1.2 && race.phase === 'racing' && race.time > this.goTime + 6 && this.pitState !== 'stopped' && !(car.rs && car.rs.service) && !(this.pitState !== 'none' && this.neigh.some((n) => n.ds > 0 && n.ds < 14 && Math.abs(n.dd) < 3.2))) this.stuckT += dt;
     else this.stuckT = 0;
     return inp;
   }

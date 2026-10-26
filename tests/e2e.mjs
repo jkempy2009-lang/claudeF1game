@@ -130,6 +130,7 @@ for (const [name, bad] of [
   await page.waitForSelector('[data-act=resume]', { timeout: 20000 });
   step('replay returns to the pause menu', await page.evaluate(() => window.apex.state === 'paused'));
   await page.click('[data-act=resume]');
+  step('HUD is visible again after the replay', await page.evaluate(() => !document.getElementById('hud').classList.contains('hidden')));
   const done = await page.evaluate(() => { const a = window.apex; return a.debugUntil(() => a.session.player.rs.finished, 400); });
   step('player finishes', done === true || done === undefined, String(done));
   await page.waitForFunction(() => window.apex.session.fin && window.apex.session.fin.t > 2, null, { timeout: 120000 });

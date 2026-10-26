@@ -57,7 +57,7 @@ export function recordSession(save, ctx) {
     if (have[a.id]) continue;
     let ok = false;
     try {
-      ok = !!a.test(st, ctx.kind === 'race' || ctx.kind === 'career-race' ? ctx : null);
+      ok = !!a.test(st, ctx.kind === 'race' ? ctx : null);
     } catch (e) {
       ok = false;
     }
