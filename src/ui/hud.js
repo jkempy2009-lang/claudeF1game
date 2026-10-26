@@ -51,6 +51,7 @@ export class HUD {
       <div id="lights" class="hud-box hidden"><i></i><i></i><i></i><i></i><i></i></div>
       <div id="pitgame" class="hud-box hidden"><div class="pgt">Pit stop · press <kbd>Space</kbd> with the marker in the green</div><div class="pgw">${['FL', 'FR', 'RL', 'RR'].map((n) => `<div class="nut"><div class="trk"><i class="gd"></i><i class="pf"></i><b></b></div><span>${n}</span></div>`).join('')}</div><div class="pgr"></div></div>
       <div id="msgs"></div>
+      <div id="lesson" class="hud-box hidden"></div>
       <div id="radio" class="hud-box hidden"><b>Radio</b><span id="radio-t"></span></div>
       <div id="pit" class="hud-box hidden"></div>
       <div id="dash" class="hud-box">
@@ -80,7 +81,7 @@ export class HUD {
     this.el = {
       twRows: $('#tw-rows'), twLap: $('#tw-lap'), tbLap: $('#tb-lap'), tbClock: $('#tb-clock'), tbWx: $('#tb-wx'), pitgame: $('#pitgame'),
       cur: $('#t-cur'), delta: $('#t-delta'), last: $('#t-last'), best: $('#t-best'), fast: $('#t-fast'), sec: $('#t-sec'),
-      mini: $('#minimap canvas'), lights: $('#lights'), msgs: $('#msgs'), radio: $('#radio'), radioT: $('#radio-t'), pit: $('#pit'),
+      mini: $('#minimap canvas'), lights: $('#lights'), msgs: $('#msgs'), radio: $('#radio'), lesson: $('#lesson'), radioT: $('#radio-t'), pit: $('#pit'),
       revs: $('#revs'), soc: $('#d-soc'), socb: $('#d-socb'), drs: $('#d-drs'), boost: $('#d-boost'), gap: $('#d-gap'),
       gear: $('#d-gear'), spd: $('#d-spd'), unit: $('#d-unit'), thr: $('#p-thr'), brk: $('#p-brk'), rpm: $('#d-rpm'),
       tyreBoxes: [...root.querySelectorAll('#tyres .tyre')], tyB: $('#ty-b'), tyN: $('#ty-n'), tyW: $('#ty-w'), tyT: $('#ty-t'), tyF: $('#ty-f'), tyD: $('#ty-d'),
@@ -264,6 +265,15 @@ export class HUD {
     this.el.msgs.prepend(el);
     while (this.el.msgs.children.length > 4) this.el.msgs.lastChild.remove();
     setTimeout(() => el.remove(), ttl * 1000);
+  }
+
+  /** Driving-school checklist: lesson = {title, goals:[{id,text,progress?}]}, done = {id: bool}, ctx for progress text. */
+  setLesson(lesson, done, ctx, complete) {
+    const el = this.el.lesson;
+    if (!lesson) return el.classList.add('hidden');
+    el.classList.remove('hidden');
+    const html = `<b>${lesson.title}</b>` + lesson.goals.map((g) => `<div class="goal ${done[g.id] ? 'ok' : ''}">${done[g.id] ? '✓' : '○'} ${g.text}${!done[g.id] && g.progress ? ` <i>${g.progress(ctx)}</i>` : ''}</div>`).join('') + (complete ? '<div class="goal ok">Lesson complete: keep driving or press Esc</div>' : '');
+    if (html !== this._lessonHtml) { this._lessonHtml = html; el.innerHTML = html; }
   }
 
   radio(text, ttl = 5) {

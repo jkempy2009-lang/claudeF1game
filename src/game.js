@@ -10,6 +10,7 @@ import { World } from './render/world.js';
 import { CarView, VIEW_OPTS } from './render/carmodel.js';
 import { PitCrew } from './render/crew.js';
 import { Guideline } from './render/guideline.js';
+import { SchoolTracker, lessonById } from './sim/school.js';
 import { PostFX } from './render/postfx.js';
 import { Rain } from './render/rain.js';
 import { ReplayBuffer, makeReplayCars } from './render/replay.js';
@@ -143,6 +144,7 @@ class Game {
       tracks: this.tracks,
       sfx: (k) => this.audio.ui(k),
       startRace: (cfg) => this.startRace(cfg),
+      startLesson: (id) => this.startLesson(id),
       raceFromQuali: (qr) => this.startRace({ ...qr.cfg, mode: 'race', qualiTimes: qr.times, playerGrid: qr.grid }),
       toMain: (fromRace) => this.toMain(fromRace),
       resume: () => this.resume(),
@@ -428,6 +430,34 @@ class Game {
   }
 
   // ---- session ------------------------------------------------------------------------------------------------
+  startLesson(id) {
+    const l = lessonById(id);
+    if (!l) return;
+    const base = this.menu.config;
+    const track = this.tracks[l.track];
+    const wet = l.weather === 'heavy' || l.weather === 'light';
+    this.startRace({
+      ...base,
+      mode: l.mode,
+      trackId: l.track,
+      laps: l.laps || 99,
+      level: l.level ?? 0.3,
+      fieldSize: l.mode === 'race' ? l.fieldSize || 2 : 2,
+      playerGrid: 2,
+      tyreWear: l.tyreWear ?? 2,
+      compound: wet ? 'wet' : l.compound || 'medium',
+      weather: l.weather || 'dry',
+      timeOfDay: 'day',
+      mandatoryStop: false,
+      qualify: false,
+      qualiTimes: null,
+      damage: false,
+      collisions: true,
+      lesson: l.id,
+      assists: { ...base.assists, abs: true, stability: Math.max(1, base.assists.stability), pitAuto: true, pitGame: true },
+    });
+  }
+
   async startRace(cfg) {
     this.audio.start();
     this.audio.resume();
@@ -535,8 +565,10 @@ class Game {
       player: race.player, pin: null, sunDir: world.sunDir, stopTimer: 0, lastEventCar: null, seasonRound: this.save.season ? this.save.season.round : null,
       useSeason: cfg.__season,
       rec: new ReplayBuffer(race.cars.length, 30, 30), replayCars: makeReplayCars(race.cars),
+      school: cfg.lesson && lessonById(cfg.lesson) ? new SchoolTracker(lessonById(cfg.lesson)) : null,
     };
     this.hud.setTrack(track);
+    if (!this.session.school) this.hud.setLesson(null);
     this.hud.setUnits(this.save.settings.units);
     this.hud.show(true);
     this.applySettings();
@@ -970,6 +1002,7 @@ class Game {
     // HUD + audio
     this.hud.update(race, player, pin, performance.now());
     this.radioTick(s, dt);
+    this.schoolTick(s, dt);
     // reuse the audio source records every frame (no per-frame allocation)
     const others = s._others || (s._others = []);
     let no = 0;
@@ -999,6 +1032,7 @@ class Game {
     const { race, player, effects, camRig } = s;
     const hud = this.hud;
     for (const e of race.events) {
+      if (s.school && s.school.onEvent(e, player)) this.lessonPassed(s);
       switch (e.type) {
         case 'light':
           hud.setLights(e.n);
@@ -1471,6 +1505,30 @@ class Game {
       this.toast('New track record: ' + formatTime(g.time));
     }
     persist(this.save);
+  }
+
+  /** Driving school: feed the tracker, show the checklist, save the result the moment a lesson is passed. */
+  schoolTick(s, dt) {
+    if (!s.school) return;
+    const sc = s.school;
+    const finished = sc.update(dt, s.player, s.race);
+    const done = finished || sc.complete;
+    this.hud.setLesson(sc.lesson, sc.done, sc.ctx, sc.complete);
+    if (!s._schoolTip && s.race.phase === 'racing') {
+      s._schoolTip = true;
+      this.hud.radio(sc.lesson.tip, 9);
+    }
+    if (finished) this.lessonPassed(s);
+    return done;
+  }
+
+  lessonPassed(s) {
+    const id = s.school.lesson.id;
+    const first = !this.save.school[id];
+    this.save.school[id] = true;
+    persist(this.save);
+    this.hud.message('Lesson complete', 'good', s.school.lesson.title + (first ? '' : ' (again)'), 4);
+    this.audio.ui('good');
   }
 
   radioTick(s, dt) {

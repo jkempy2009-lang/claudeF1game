@@ -5,6 +5,7 @@ import { COMPOUNDS, COMPOUND_IDS } from '../sim/carspec.js';
 import { formatTime } from '../util/math.js';
 import { drawLineChart } from './charts.js';
 import { ACHIEVEMENTS, DEFAULT_STATS } from '../sim/achievements.js';
+import { LESSONS, sanitizeSchool } from '../sim/school.js';
 import { CHAMP_CAL, sanitizeCareer, UPGRADE_KEYS, UPGRADE_INFO, UPGRADE_MAX, upgradeCost, objectiveFor, DISTANCES, seasonDone, driverStandings, constructorStandings, lapsFor, teamRank, weatherFor, WEATHER_NAMES } from '../sim/career.js';
 
 export const SAVE_KEY = 'apex-grand-prix.v1';
@@ -165,6 +166,7 @@ export function loadSave() {
     career: sanitizeCareer(raw.career),
     honours: Array.isArray(raw.honours) ? raw.honours.filter((h) => isObj(h)).slice(-30) : [],
     stats: sanitizeStats(raw.stats),
+    school: sanitizeSchool(raw.school),
     achievements: isObj(raw.achievements) ? Object.fromEntries(Object.entries(raw.achievements).filter(([k, v]) => ACHIEVEMENTS.some((a) => a.id === k) && Number.isFinite(+v))) : {},
   };
 }
@@ -281,7 +283,7 @@ export class Menu {
         <button class="btn" data-act="setup" data-mode="timetrial">Time trial<small>Chase your ghost, alone on the circuit</small></button>
         <button class="btn" data-act="career">Career<small>${this.save.career ? `Season ${this.save.career.seasonNo} · ${TEAMS[this.save.career.team].short} · round ${Math.min(this.save.career.season.round + 1, this.save.career.season.calendar.length)} of ${this.save.career.season.calendar.length}` : 'Pick a team, develop the car, climb the grid across seasons'}</small></button>
         <button class="btn" data-act="season">Championship<small>${s ? `Round ${Math.min(s.round + 1, s.calendar.length)} of ${s.calendar.length} in progress` : '4 rounds, points, a title to win'}</small></button>
-        <div class="row"><button class="btn sm grow" data-act="controls">Controls</button><button class="btn sm grow" data-act="profile">Profile</button><button class="btn sm grow" data-act="settings">Settings</button></div>
+        <div class="row"><button class="btn sm grow" data-act="controls">Controls</button><button class="btn sm grow" data-act="school">School</button><button class="btn sm grow" data-act="profile">Profile</button><button class="btn sm grow" data-act="settings">Settings</button></div>
       </div>
       <div class="version">v1.1 · WASD / arrows to drive · works with gamepads</div>
     </section>`;
@@ -408,6 +410,22 @@ export class Menu {
       <div class="panel"><h3>Gamepad</h3><div class="keys">${pad.map(([n, v]) => `<div class="key"><span>${n}</span><span><kbd>${v}</kbd></span></div>`).join('')}</div>
       <h3 style="margin-top:1.2rem">Racecraft</h3><div class="hint">• Brake in a straight line, then trail off the pedal as you turn in.<br>• Hit the apex kerb, then use all the track on exit — but not past the white line, or you get a track-limits warning.<br>• DRS opens the rear wing for ~10-15 km/h when you are within one second of the car ahead at the detection line.<br>• ERS boost spends the battery: harvest it by braking hard and lifting.<br>• Follow closely and you lose front downforce (dirty air) but gain a slipstream on the straights.<br>• Tyres have a temperature window: scrubbing them sliding overheats them, and worn tyres lose grip fast.<br>• Press <kbd>B</kbd> to call a pit stop — new tyres, repairs, and a limiter in the lane.</div></div></div>
       <div class="footer"><button class="btn sm" data-act="back">◀ Back</button></div></section>`;
+  }
+
+  screen_school() {
+    const done = this.save.school || {};
+    const n = LESSONS.filter((l) => done[l.id]).length;
+    const rows = LESSONS.map((l, i) => {
+      const td = TRACK_DEFS.find((d) => d.id === l.track);
+      return `<div class="lesson ${done[l.id] ? 'done' : ''}"><div class="lno">${done[l.id] ? '✓' : i + 1}</div><div class="grow"><b>${esc(l.title)}</b><div class="hint">${esc(l.blurb)}</div>
+        <div class="hint">${esc(td ? td.name : l.track)} · ${l.mode === 'race' ? 'vs a slow car' : 'alone on the circuit'}${l.weather ? ' · rain' : ''}</div>
+        <ul class="goals">${l.goals.map((g) => `<li>${esc(g.text)}</li>`).join('')}</ul></div>
+        <button class="btn sm ${done[l.id] ? '' : 'primary'}" data-act="lesson" data-lesson="${l.id}">${done[l.id] ? 'Again' : 'Start'}</button></div>`;
+    }).join('');
+    return `<section class="screen panel-screen full"><h2>Driving <span>school</span></h2>
+      <div class="hint" style="margin-bottom:.8rem">${n} of ${LESSONS.length} lessons passed. Each lesson is a short session with a checklist on screen; finish the goals and carry on driving for as long as you like.</div>
+      <div class="lessons">${rows}</div>
+      <div class="footer"><button class="btn sm" data-act="main">◀ Back</button></div></section>`;
   }
 
   screen_profile() {
@@ -718,6 +736,10 @@ export class Menu {
       case 'profile':
         this.prev = this.current;
         return this.show('profile');
+      case 'school':
+        return this.show('school');
+      case 'lesson':
+        return H.startLesson(t.dataset.lesson);
       case 'controls':
         this.prev = this.current;
         return this.show('controls');

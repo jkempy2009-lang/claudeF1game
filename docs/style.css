@@ -326,3 +326,14 @@ table.results .tc { display: inline-block; width: 4px; height: 1em; vertical-ali
 /* accessibility */
 body.bighud #hud { zoom: 1.2; }
 body.calm *, body.calm *::before, body.calm *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+
+/* driving school */
+#lesson { left: 50%; top: calc(var(--u) * 5.2); transform: translateX(-50%); min-width: calc(var(--u) * 22); padding: 0.5em 1em; font-size: 0.95em; border-top: 3px solid var(--accent2); }
+#lesson b { display: block; font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.1em; color: var(--accent2); margin-bottom: 0.2em; }
+#lesson .goal { opacity: 0.9; } #lesson .goal.ok { color: var(--good); } #lesson .goal i { color: #aab; font-style: normal; }
+.lessons { display: flex; flex-direction: column; gap: 0.6rem; }
+.lesson { display: flex; gap: 1rem; align-items: center; padding: 0.7rem 1rem; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; }
+.lesson.done { border-color: rgba(60,220,120,0.5); }
+.lesson .lno { width: 2.2rem; height: 2.2rem; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.1); font-weight: 900; flex: none; }
+.lesson.done .lno { background: rgba(60,220,120,0.3); color: #7dffb0; }
+.lesson .goals { margin: 0.3rem 0 0; padding-left: 1.1rem; font-size: 0.85rem; color: #cfd3dc; }

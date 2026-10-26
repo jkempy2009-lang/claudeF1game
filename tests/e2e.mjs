@@ -212,6 +212,29 @@ for (const [name, bad] of [
   await page.context().close();
 }
 
+// 6b. driving school: lesson list, a lesson starts with its checklist, passing saves progress
+{
+  const page = await open(fast);
+  await page.click('[data-act=school]');
+  await page.waitForSelector('[data-act=lesson]', { timeout: 10000 });
+  step('school lists the lessons', (await page.$$('[data-act=lesson]')).length >= 7);
+  await page.click('[data-lesson=launch]');
+  await waitHud(page);
+  await page.waitForTimeout(1500);
+  step('lesson checklist is on screen', await page.evaluate(() => !document.getElementById('lesson').classList.contains('hidden') && document.getElementById('lesson').textContent.includes('Reach 200')));
+  await page.evaluate(() => { const a = window.apex; a.session.introCancelled = true; a.debugUntil(() => a.session.player.speed * 3.6 > 285, 200); });
+  await page.waitForTimeout(3500);
+  step('passing a lesson saves it', await page.evaluate(() => window.apex.save.school.launch === true));
+  await page.keyboard.down('Escape'); await page.waitForTimeout(2500); await page.keyboard.up('Escape');
+  await page.waitForSelector('[data-act=quit]', { timeout: 20000 });
+  await page.click('[data-act=quit]');
+  await page.waitForSelector('[data-act=quick]');
+  await page.click('[data-act=quick]');
+  await waitHud(page);
+  step('the checklist is gone in a normal race', await page.evaluate(() => document.getElementById('lesson').classList.contains('hidden')));
+  await page.context().close();
+}
+
 // 7. touch controls: overlay appears on touch devices and the action buttons work
 {
   const ctx = await browser.newContext({ viewport: { width: 820, height: 400 }, hasTouch: true, isMobile: true });

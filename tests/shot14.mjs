@@ -1,0 +1,27 @@
+// Driving school screenshots. Usage: node tests/shot14.mjs outdir
+import { createRequire } from 'node:module';
+import fs from 'node:fs';
+const require = createRequire(import.meta.url);
+const { chromium } = require('playwright');
+const [out] = process.argv.slice(2);
+fs.mkdirSync(out, { recursive: true });
+const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--enable-webgl'] });
+const page = await browser.newPage({ viewport: { width: 1120, height: 630 } });
+const logs = [];
+page.on('console', (m) => { if (m.type() === 'error') logs.push(m.text()); });
+page.on('pageerror', (e) => logs.push('[pageerror] ' + e.message));
+await page.addInitScript(() => localStorage.setItem('apex-grand-prix.v1', JSON.stringify({ school: { launch: true }, settings: { quality: 'medium' } })));
+await page.goto('http://localhost:8099/index.html');
+await page.waitForSelector('[data-act=quick]', { timeout: 60000 });
+await page.screenshot({ path: `${out}/main.png` });
+await page.click('[data-act=school]');
+await page.waitForSelector('[data-act=lesson]');
+await page.waitForTimeout(500);
+await page.screenshot({ path: `${out}/school.png` });
+await page.click('[data-lesson=brake]');
+await page.waitForSelector('#hud:not(.hidden)', { timeout: 180000 });
+await page.evaluate(() => { const a = window.apex; a.session.introCancelled = true; a.debugSkip(10); });
+await page.waitForTimeout(3000);
+await page.screenshot({ path: `${out}/lesson.png`, timeout: 180000 });
+console.log(logs.join('\n') || 'no errors');
+await browser.close();
