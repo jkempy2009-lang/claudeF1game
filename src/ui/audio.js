@@ -5,7 +5,7 @@ export class AudioEngine {
   constructor() {
     this.ctx = null;
     this.enabled = true;
-    this.volume = 0.7;
+    this.volume = 0.55;
     this.voices = [];
     this.started = false;
     this.lastGear = 1;
@@ -53,22 +53,20 @@ export class AudioEngine {
     const curve = new Float32Array(1024);
     for (let i = 0; i < 1024; i++) {
       const x = (i / 512) - 1;
-      curve[i] = Math.tanh(x * 2.6) * 0.9;
+      curve[i] = Math.tanh(x * 1.3) * 0.9;
     }
     shaper.curve = curve;
     this.engFilter = ctx.createBiquadFilter();
     this.engFilter.type = 'lowpass';
-    this.engFilter.Q.value = 2.5;
+    this.engFilter.Q.value = 0.6;
     const bp = ctx.createBiquadFilter();
     bp.type = 'peaking';
-    bp.frequency.value = 1800;
-    bp.gain.value = 5;
+    bp.frequency.value = 700;
+    bp.gain.value = 3;
     this.oscs = [
-      { o: ctx.createOscillator(), g: ctx.createGain(), mult: 3, w: 'sawtooth', a: 0.5 },
-      { o: ctx.createOscillator(), g: ctx.createGain(), mult: 1.5, w: 'square', a: 0.22 },
-      { o: ctx.createOscillator(), g: ctx.createGain(), mult: 6, w: 'sawtooth', a: 0.22 },
-      { o: ctx.createOscillator(), g: ctx.createGain(), mult: 9, w: 'triangle', a: 0.16 },
-      { o: ctx.createOscillator(), g: ctx.createGain(), mult: 3.02, w: 'sawtooth', a: 0.3 },
+      { o: ctx.createOscillator(), g: ctx.createGain(), mult: 1.5, w: 'triangle', a: 0.5 },
+      { o: ctx.createOscillator(), g: ctx.createGain(), mult: 3, w: 'sawtooth', a: 0.2 },
+      { o: ctx.createOscillator(), g: ctx.createGain(), mult: 6, w: 'triangle', a: 0.08 },
     ];
     for (const v of this.oscs) {
       v.o.type = v.w;
@@ -84,8 +82,8 @@ export class AudioEngine {
     const nz = noise();
     const nzf = ctx.createBiquadFilter();
     nzf.type = 'bandpass';
-    nzf.frequency.value = 3000;
-    nzf.Q.value = 0.8;
+    nzf.frequency.value = 1200;
+    nzf.Q.value = 0.5;
     this.nzGain = ctx.createGain();
     this.nzGain.gain.value = 0;
     nz.connect(nzf);
@@ -113,8 +111,8 @@ export class AudioEngine {
     const tn = noise();
     const tf = ctx.createBiquadFilter();
     tf.type = 'bandpass';
-    tf.frequency.value = 1500;
-    tf.Q.value = 6;
+    tf.frequency.value = 1000;
+    tf.Q.value = 2.5;
     this.tyreGain = ctx.createGain();
     this.tyreGain.gain.value = 0;
     tn.connect(tf);
@@ -153,13 +151,13 @@ export class AudioEngine {
     this.voices = [];
     for (let i = 0; i < 6; i++) {
       const o1 = ctx.createOscillator(), o2 = ctx.createOscillator();
-      o1.type = 'sawtooth';
-      o2.type = 'square';
+      o1.type = 'triangle';
+      o2.type = 'triangle';
       const g = ctx.createGain();
       g.gain.value = 0;
       const f = ctx.createBiquadFilter();
       f.type = 'lowpass';
-      f.frequency.value = 1500;
+      f.frequency.value = 600;
       const pan = ctx.createStereoPanner();
       o1.connect(f);
       o2.connect(f);
@@ -205,24 +203,24 @@ export class AudioEngine {
     const thr = player.throttle;
     const load = 0.25 + 0.75 * thr;
     for (const v of this.oscs) set(v.o.frequency, fc * v.mult, 0.02);
-    set(this.engFilter.frequency, 500 + rpm * 0.45 + thr * 1400, 0.05);
-    set(this.eng.gain, (0.16 + 0.34 * load) * (0.5 + rpm / 30000), 0.05);
-    set(this.nzGain.gain, 0.04 + thr * 0.1 * (rpm / 15000), 0.05);
-    set(this.nzf.frequency, 2000 + rpm * 0.25, 0.05);
+    set(this.engFilter.frequency, 240 + rpm * 0.13 + thr * 320, 0.08);
+    set(this.eng.gain, (0.12 + 0.2 * load) * (0.65 + rpm / 40000), 0.08);
+    set(this.nzGain.gain, 0.015 + thr * 0.03 * (rpm / 15000), 0.08);
+    set(this.nzf.frequency, 900 + rpm * 0.08, 0.1);
     const V = player.speed;
-    set(this.windGain.gain, clamp((V / 95) ** 2 * 0.5, 0, 0.55), 0.1);
-    set(this.windFilter.frequency, 300 + V * 9, 0.1);
+    set(this.windGain.gain, clamp((V / 95) ** 2 * 0.22, 0, 0.25), 0.15);
+    set(this.windFilter.frequency, 250 + V * 5, 0.15);
     let slip = 0;
     for (let w = 0; w < 4; w++) slip = Math.max(slip, player.slipVis[w]);
-    set(this.tyreGain.gain, clamp(slip * 0.35, 0, 0.32), 0.04);
-    set(this.tyreFilter.frequency, 1000 + 500 * clamp(V / 60, 0, 1) + slip * 400, 0.06);
-    const rumble = player.kerbShake * 0.35 + (player.onGrass ? clamp(V / 60, 0, 1) * 0.3 : 0);
+    set(this.tyreGain.gain, clamp(slip * 0.16, 0, 0.14), 0.08);
+    set(this.tyreFilter.frequency, 800 + 300 * clamp(V / 60, 0, 1) + slip * 200, 0.1);
+    const rumble = player.kerbShake * 0.22 + (player.onGrass ? clamp(V / 60, 0, 1) * 0.2 : 0);
     set(this.rumbleGain.gain, rumble, 0.04);
     set(this.rumbleFilter.frequency, 90 + V * 2.5, 0.1);
     // gear change thump
     if (player.gear !== this.lastGear) {
       this.lastGear = player.gear;
-      this.blip(120, 0.07, 0.08, 'square');
+      this.blip(110, 0.08, 0.035, 'sine');
     }
     // other cars: nearest 6 audible
     const lp = listener.pos, lr = listener.right, lv = listener.vel;
@@ -249,9 +247,9 @@ export class AudioEngine {
       const f = (car.rpm / 60) * 3 * dop;
       set(v.o1.frequency, f, 0.04);
       set(v.o2.frequency, f * 0.5, 0.04);
-      set(v.f.frequency, 400 + car.rpm * 0.3, 0.06);
+      set(v.f.frequency, 220 + car.rpm * 0.09, 0.1);
       const att = 1 / (1 + (d / 18) ** 1.6);
-      set(v.g.gain, 0.2 * att * (0.4 + 0.6 * car.throttle), 0.05);
+      set(v.g.gain, 0.07 * att * (0.4 + 0.6 * car.throttle), 0.08);
       set(v.pan.pan, clamp((e.dx * lr.x + e.dz * lr.z) / d, -1, 1), 0.05);
     });
   }

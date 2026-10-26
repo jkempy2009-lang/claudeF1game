@@ -6,7 +6,7 @@ import { formatTime } from '../util/math.js';
 
 export const SAVE_KEY = 'apex-grand-prix.v1';
 
-export const DEFAULT_SETTINGS = { quality: 'high', volume: 0.7, units: 'kmh', minimap: true, shake: true, camera: 'chase', tower: true };
+export const DEFAULT_SETTINGS = { quality: 'high', volume: 0.55, units: 'kmh', line: true, minimap: true, shake: true, camera: 'chase', tower: true };
 export const DEFAULT_CONFIG = {
   mode: 'race',
   trackId: 'northfield',
@@ -238,7 +238,7 @@ export class Menu {
     const rows = [
       ['Throttle', k('W', '↑')], ['Brake / reverse', k('S', '↓')], ['Steer', k('A', 'D', '←', '→')], ['DRS (in a zone, when eligible)', k('Space')], ['ERS boost (hold)', k('Shift')],
       ['Gear up / down (manual)', k('E', 'Q')], ['Pit request toggle', k('B')], ['Change pit tyre', k('T')], ['Camera', k('C')], ['Look back', k('V')],
-      ['Reset to track', k('R')], ['Pause', k('Esc', 'P')], ['Minimap size', k('M')], ['Mute', k('N')],
+      ['Reset to track', k('R')], ['Pause', k('Esc', 'P')], ['Racing line guide', k('L')], ['Minimap size', k('M')], ['Mute', k('N')],
     ];
     const pad = [['Steer', 'Left stick'], ['Throttle / brake', 'RT / LT'], ['DRS', 'A'], ['Boost', 'X'], ['Pit request', 'B'], ['Camera', 'Y'], ['Gears', 'LB / RB'], ['Look back', 'L3'], ['Pause', 'Start'], ['Reset', 'Back']];
     return `<section class="screen panel-screen full"><h2>Con<span>trols</span></h2>
@@ -253,6 +253,7 @@ export class Menu {
     return `<section class="screen panel-screen full"><h2>Set<span>tings</span></h2>
       <div class="grid2"><div class="panel"><h3>Graphics</h3>
         <div class="field"><label>Quality</label>${this.chips('quality', [{ value: 'low', label: 'Low' }, { value: 'medium', label: 'Medium' }, { value: 'high', label: 'High' }], s.quality)}<div class="hint">Low: no shadows, fewer trees, lower resolution. Changes apply to the next session.</div></div>
+        ${this.toggle('s.line', 'Racing line guide', 'Green: keep going. Yellow: ease off. Red: brake now (key L)', s.line !== false)}
         ${this.toggle('s.shake', 'Camera shake', 'Kerbs, speed and impacts', s.shake)}
         ${this.toggle('s.minimap', 'Show minimap', '', s.minimap)}
         ${this.toggle('s.tower', 'Show timing tower', '', s.tower)}
@@ -357,6 +358,7 @@ export class Menu {
     if (t.dataset.toggle) {
       const k = t.dataset.toggle;
       if (k.startsWith('a.')) this.config.assists[k.slice(2)] = !this.config.assists[k.slice(2)];
+      else if (k === 's.line') this.save.settings.line = !(this.save.settings.line !== false);
       else if (k.startsWith('s.')) this.save.settings[k.slice(2)] = !this.save.settings[k.slice(2)];
       else this.config[k] = !this.config[k];
       this.persist();

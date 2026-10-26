@@ -297,6 +297,7 @@ export class Car {
       if (this.fuel <= 0) Te = Math.min(Te, 0);
     }
     let Tw = Te * ratio * sp.driveEff;
+    if (inp.hold) Tw = 0; // clutch held on the grid: revs build, nothing is driven
     if (this.shiftTimer > 0) Tw *= 0.05;
     // limited-slip differential: faster wheel loses torque to the slower one
     const dw = this.omega[RL] - this.omega[RR];
@@ -468,8 +469,8 @@ export class Car {
     this.soc = clamp(this.soc + ((harvest - ersP) * dt) / sp.ersCapacity, 0, 1);
 
     this.locate();
-    this.pitch = lerp(this.pitch, clamp(-this.axF * 0.0045, -0.05, 0.05), 1 - Math.exp(-dt * 12));
-    this.roll = lerp(this.roll, clamp(-this.ayF * 0.0028, -0.06, 0.06), 1 - Math.exp(-dt * 12));
+    this.pitch = lerp(this.pitch, clamp(-this.axF * 0.0006, -0.025, 0.025), 1 - Math.exp(-dt * 5));
+    this.roll = lerp(this.roll, clamp(-this.ayF * 0.0005, -0.025, 0.025), 1 - Math.exp(-dt * 5));
     this.onGrass = grassHit >= 3;
     this.aeroDown = aero.downF + aero.downR;
     this.aeroDrag = aero.drag;

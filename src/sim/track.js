@@ -692,8 +692,10 @@ export class Track {
     if (side > 0) return this.wl[i] + this.kl[i] + this.r1l[i] + this.r2l[i];
     let w = this.wr[i] + this.kr[i] + this.r1r[i] + this.r2r[i];
     if (this.pit) {
-      const b = this._pitBlend(i * this.ds);
-      if (b > 0.01) w = Math.max(w, b * this.pit.offset + PIT_WIDTH / 2 + 3);
+      const s = i * this.ds;
+      const b = this._pitBlend(s);
+      if (this.pitWallRange(s)) w = b * this.pit.offset + PIT_WIDTH / 2 + 0.7; // garage front
+      else if (b > 0.01) w = Math.max(w, b * this.pit.offset + PIT_WIDTH / 2 + 3);
     }
     return w;
   }
@@ -738,6 +740,19 @@ export class Track {
   /** Lateral position of the pit-lane centreline at s (negative = right of the track). */
   pitCentre(s) {
     return -this._pitBlend(s) * this.pit.offset;
+  }
+
+  /** True where the solid pit wall and the garage building exist (between the entry and exit ramps). */
+  pitWallRange(s) {
+    const p = this.pit;
+    if (!p) return false;
+    const rel = mod(s - p.start, this.length);
+    return rel >= p.rampIn && rel <= p.len - p.rampOut;
+  }
+
+  /** Lateral position (d) of the pit wall's centreline: on the track side of the pit lane. */
+  pitWallLat(s) {
+    return this.pitCentre(s) + this.pit.width / 2 + 0.35;
   }
 
   inPitRange(s) {

@@ -335,9 +335,9 @@ export class Race {
         inp.boost = false;
         inp.aiDriven = true;
       }
-      if (!racing) {
-        inp.brake = Math.max(inp.brake, 0);
-      }
+      // on the grid the car is held (clutch + brakes) until the lights go out: a false start is impossible
+      inp.hold = !racing;
+      if (inp.hold) inp.brake = 1;
       if (rs.service) {
         inp.throttle = 0;
         inp.brake = 1;
@@ -359,7 +359,6 @@ export class Race {
         rs.nextCompound = order[(order.indexOf(cur) + 1) % order.length];
       }
       if (this.opt.mode === 'timetrial' && this.phase !== 'racing') {
-        inp.throttle = 0;
         inp.brake = 1;
         inp.steer = 0;
       }
@@ -417,11 +416,6 @@ export class Race {
     const delta = loopDelta(car.s, rs.lastS, L);
     rs.lastS = car.s;
     if (this.phase === 'grid' || this.phase === 'countdown') {
-      // false start: moved noticeably before lights out
-      if (this.phase === 'countdown' && car.info.isPlayer && !rs.falseStart && car.u > 1.0 && this.opt.mode === 'race') {
-        rs.falseStart = true;
-        this.addPenalty(car, 5, 'False start');
-      }
       rs.dist += delta;
       return;
     }

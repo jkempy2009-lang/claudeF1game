@@ -43,7 +43,9 @@ export class CameraRig {
     const pt = {};
     for (let k = 0; k < n; k++) {
       const s = (k / n) * track.length;
-      const side = k % 2 ? 1 : -1;
+      let side = k % 2 ? 1 : -1;
+      // never inside the garage building: use the opposite (left) side along the pit straight
+      if (track.pit && track.inPitRange(s) && side < 0) side = 1;
       const i = track.idx(s);
       const street = track.def.runoff && track.def.runoff.mode === 'street';
       track.pointAt(s, side * (track.wallDist(i, side) + (street ? 2.2 : 5 + (k % 3) * 3)), pt);

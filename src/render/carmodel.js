@@ -404,8 +404,8 @@ export class CarView {
     const slopePitch = Math.atan(car.trackSlope * Math.cos(car.theta - car.trackHeading));
     this.group.position.set(x, car.trackH, -y);
     this.group.rotation.set(0, th, 0);
-    this.pitchSmooth = lerp(this.pitchSmooth, -car.pitch * 3.2 + slopePitch, clamp(dt * 14, 0, 1));
-    this.rollSmooth = lerp(this.rollSmooth, -car.roll * 1.6, clamp(dt * 14, 0, 1));
+    this.pitchSmooth = lerp(this.pitchSmooth, -car.pitch + slopePitch, clamp(dt * 6, 0, 1));
+    this.rollSmooth = lerp(this.rollSmooth, -car.roll, clamp(dt * 6, 0, 1));
     this.model.rotation.order = 'YZX';
     this.model.rotation.set(this.rollSmooth, 0, this.pitchSmooth);
     this.layoutWheels(car.a, car.b, spec.trackF, spec.trackR, spec.wheelbase, car.steer);

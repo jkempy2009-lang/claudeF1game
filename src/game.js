@@ -9,6 +9,7 @@ import { COMPOUNDS } from './sim/carspec.js';
 import { World } from './render/world.js';
 import { CarView } from './render/carmodel.js';
 import { PitCrew } from './render/crew.js';
+import { Guideline } from './render/guideline.js';
 import { Effects } from './render/effects.js';
 import { CameraRig, CAMERA_MODES, CAMERA_NAMES } from './render/camera.js';
 import { Input } from './ui/input.js';
@@ -114,6 +115,7 @@ class Game {
     this.audio.setVolume(this.save.settings.volume);
     this.hud.setUnits(this.save.settings.units);
     this.hud.el.minimap.classList.toggle('hidden', !this.save.settings.minimap);
+    if (this.session && this.session.guide) this.session.guide.setVisible(this.save.settings.line !== false);
     this.hud.el.tower.classList.toggle('force-hide', !this.save.settings.tower);
     const tw = this.hud.el.tower;
     tw.style.visibility = this.save.settings.tower ? '' : 'hidden';
@@ -314,6 +316,9 @@ class Game {
       views.set(car, view);
     }
     const effects = new Effects(scene);
+    const guide = new Guideline(track, profile);
+    scene.add(guide.mesh);
+    guide.setVisible(this.save.settings.line !== false);
     const camera = this.camera;
     const camRig = new CameraRig(camera);
     camRig.setMode(this.save.settings.camera || 'chase');
@@ -327,7 +332,7 @@ class Game {
       scene.add(ghostView.group);
     }
     this.session = {
-      cfg, track, race, world, scene, views, effects, camRig, ghostView,
+      cfg, track, race, world, scene, views, effects, camRig, ghostView, guide,
       acc: 0, alpha: 0, intro: 4.2, introT: 0, paused: false, finishedShown: false, radioT: 0, fast: false,
       player: race.player, pin: null, sunDir: world.sunDir, stopTimer: 0, lastEventCar: null, seasonRound: this.save.season ? this.save.season.round : null,
       useSeason: cfg.__season,
@@ -505,12 +510,22 @@ class Game {
     const input = this.input;
     const pin = input.poll(dt, player.speed);
     if (pin.pause) return this.pause();
-    if (pin.camera) this.cycleCamera();
+    if (pin.camera) {
+      this.cycleCamera();
+      s.introCancelled = true;
+      camRig.init = false;
+    }
     if (pin.mute) {
       this.audio.setEnabled(!this.audio.enabled);
       this.toast(this.audio.enabled ? 'Sound on' : 'Sound off');
     }
     if (pin.map) this.hud.el.minimap.classList.toggle('hidden');
+    if (pin.line) {
+      this.save.settings.line = !(this.save.settings.line !== false);
+      s.guide.setVisible(this.save.settings.line);
+      persist(this.save);
+      this.toast('Racing line guide ' + (this.save.settings.line ? 'on' : 'off'));
+    }
     camRig.lookBack = pin.lookBack;
     if (pin.autoToggle) this.toggleAutopilot();
     if (s.auto && race.phase === 'racing') {
@@ -594,6 +609,8 @@ class Game {
       }
     }
     effects.update(dt, this.pointScale);
+    s.guide.setVisible(this.save.settings.line !== false && race.phase !== 'grid' && !player.rs.inPitLane);
+    s.guide.update(player);
     // ghost
     if (s.ghostView) {
       const pose = race.phase === 'racing' ? race.ghostPose(race.time - player.rs.lapStart) : null;
@@ -611,7 +628,8 @@ class Game {
     }
 
     // camera
-    if (race.phase === 'grid' && s.introT < s.intro) {
+    const orbitIntro = race.phase === 'grid' && s.introT < s.intro && camRig.mode === 'chase' && !s.introCancelled;
+    if (orbitIntro) {
       const a = -0.9 + s.introT * 0.5;
       const pv = views.get(player).group.position;
       this.camera.position.set(pv.x + Math.cos(a) * 9 + 0, pv.y + 2.4, pv.z + Math.sin(a) * 9);

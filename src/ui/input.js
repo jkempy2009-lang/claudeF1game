@@ -18,6 +18,7 @@ export const DEFAULT_KEYS = {
   map: ['KeyM'],
   mute: ['KeyN'],
   auto: ['KeyG'],
+  line: ['KeyL'],
 };
 
 const dead = (v, d) => (Math.abs(v) < d ? 0 : (v - Math.sign(v) * d) / (1 - d));
@@ -61,7 +62,7 @@ export class Input {
 
   /** Called once per rendered frame with the frame dt and the player's speed (m/s). */
   poll(dt, speed) {
-    const out = { throttle: 0, brake: 0, steer: 0, boost: false, gearUp: false, gearDown: false, drsPress: false, pitToggle: false, tyreCycle: false, camera: false, reset: false, pause: false, lookBack: false, map: false, mute: false, autoToggle: false };
+    const out = { throttle: 0, brake: 0, steer: 0, boost: false, gearUp: false, gearDown: false, drsPress: false, pitToggle: false, tyreCycle: false, camera: false, reset: false, pause: false, lookBack: false, map: false, mute: false, autoToggle: false, line: false };
     // keyboard ramps
     const kThr = this.isDown('throttle') || this.touch.throttle;
     const kBrk = this.isDown('brake') || this.touch.brake;
@@ -92,6 +93,7 @@ export class Input {
     out.map = this.wasPressed('map');
     out.mute = this.wasPressed('mute');
     out.autoToggle = this.wasPressed('auto');
+    out.line = this.wasPressed('line');
 
     // gamepad overrides when it is being used
     const p = this.pad();

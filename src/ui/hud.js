@@ -157,7 +157,7 @@ export class HUD {
 
   showKeyHint(ms = 9000) {
     const k = (t) => `<kbd>${t}</kbd>`;
-    this.el.keyhint.innerHTML = `<div><b>${k('W')}${k('S')}</b> throttle / brake &nbsp; <b>${k('A')}${k('D')}</b> steer &nbsp; <b>${k('Space')}</b> DRS &nbsp; <b>${k('Shift')}</b> ERS boost &nbsp; <b>${k('B')}</b> pit &nbsp; <b>${k('C')}</b> camera &nbsp; <b>${k('R')}</b> reset &nbsp; <b>${k('Esc')}</b> pause</div><div class="hint">Press <kbd>Space</kbd> to start the lights · hold the brake at a standstill to reverse · <kbd>G</kbd> hands the car to the autopilot</div>`;
+    this.el.keyhint.innerHTML = `<div><b>${k('W')}${k('S')}</b> throttle / brake &nbsp; <b>${k('A')}${k('D')}</b> steer &nbsp; <b>${k('Space')}</b> DRS &nbsp; <b>${k('Shift')}</b> ERS boost &nbsp; <b>${k('B')}</b> pit &nbsp; <b>${k('C')}</b> camera &nbsp; <b>${k('R')}</b> reset &nbsp; <b>${k('Esc')}</b> pause</div><div class="hint">Press <kbd>Space</kbd> to start the lights · hold W to build revs; the car is held until the lights go out · brake at a standstill to reverse · <kbd>G</kbd> hands the car to the autopilot</div>`;
     this.el.keyhint.classList.remove('hidden');
     this.el.keyhint.style.opacity = 1;
     clearTimeout(this._khT);

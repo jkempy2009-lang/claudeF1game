@@ -445,8 +445,15 @@ export class World {
     };
     const street = this.track.def.runoff?.mode === 'street';
     for (const sgn of [1, -1]) {
-      wallStrip(0, N - 1, sgn, 0.12, street ? 1.5 : 1.25, 8, wallGeos);
-      wallStrip(N - 1, 0, sgn, 0.12, street ? 1.5 : 1.25, 8, wallGeos);
+      if (sgn < 0 && tr.pit) {
+        // no outer barrier in front of the garages: the building is the wall there
+        const p = tr.pit;
+        const a = tr.idx(p.start + p.len - p.rampOut), b = tr.idx(p.start + p.rampIn);
+        wallStrip(a, b, sgn, 0.12, street ? 1.5 : 1.25, 8, wallGeos); // from the garages' end, round the lap, to their start
+      } else {
+        wallStrip(0, N - 1, sgn, 0.12, street ? 1.5 : 1.25, 8, wallGeos);
+        wallStrip(N - 1, 0, sgn, 0.12, street ? 1.5 : 1.25, 8, wallGeos);
+      }
       // tyre walls on the outside of the quicker corners
       for (const c of tr.corners) {
         if (c.maxK < 1 / 420 || street) continue;

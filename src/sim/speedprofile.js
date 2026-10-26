@@ -65,6 +65,14 @@ export function buildSpeedProfile(track, spec, opts = {}) {
     return Math.sqrt(Math.max(0.02, 1 - r * r));
   };
 
+  // pure braking envelope (corner limits propagated backwards, no acceleration limit) - used by the driving guide
+  const vBrake = Float64Array.from(vCorner);
+  for (let n = 2 * N; n > 0; n--) {
+    const j = n % N, i = (n - 1 + N) % N;
+    const b = env.brakeDecel(vBrake[j], brakeUse) * circle(vBrake[j], kappa[j]);
+    const vp = Math.sqrt(vBrake[j] * vBrake[j] + 2 * b * ds);
+    if (vp < vBrake[i]) vBrake[i] = vp;
+  }
   const v = Float64Array.from(vCorner);
   const twoLaps = 2 * N;
   // forward pass (acceleration), two laps for the cyclic boundary
@@ -81,5 +89,5 @@ export function buildSpeedProfile(track, spec, opts = {}) {
     const vp = Math.sqrt(v[j] * v[j] + 2 * b * ds);
     if (vp < v[i]) v[i] = vp;
   }
-  return { v, kappa, ds, env, mass };
+  return { v, vBrake, kappa, ds, env, mass };
 }

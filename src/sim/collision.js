@@ -140,23 +140,14 @@ export function collideWalls(car, track, restitution = 0.2, friction = 0.35) {
   worldCorners(car, ca);
   let worst = null;
   const co = Math.cos(car.theta), si = Math.sin(car.theta);
-  for (let k = 0; k < 4; k++) {
-    const wx = ca[k * 2], wy = ca[k * 2 + 1];
-    const p = track.project(wx, wy, car.i, tmp);
-    const side = p.d >= 0 ? 1 : -1;
-    const lim = track.wallDist(p.i, side);
-    const pen = Math.abs(p.d) - lim;
-    if (pen <= 0) continue;
-    // inward normal (towards the centreline) in world coords
-    const nxT = track.nx[p.i], nyT = track.ny[p.i];
-    const nx = -side * nxT, ny = -side * nyT;
-    // positional correction (move the whole car in)
+  const resolve = (pen, nx, ny, wx, wy) => {
+    // positional correction (move the whole car out of the barrier)
     car.x += nx * (pen + 0.01);
     car.y += ny * (pen + 0.01);
     const rx = wx - car.x, ry = wy - car.y;
     const v = velAt(car, rx, ry);
     const vn = v[0] * nx + v[1] * ny;
-    if (vn >= 0) continue;
+    if (vn >= 0) return;
     const m = car.mass, iz = car.spec.izDry + car.fuel * 0.45;
     const rn = rx * ny - ry * nx;
     const denom = 1 / m + (rn * rn) / iz;
@@ -171,6 +162,26 @@ export function collideWalls(car, track, restitution = 0.2, friction = 0.35) {
     if (!worst || energy > worst.energy) {
       const lx = rx * co + ry * si, ly = -rx * si + ry * co;
       worst = { energy, lx, ly, speed: -vn, wx, wy };
+    }
+  };
+  // which side of the pit wall is the car on? (decided by its centre, so a car is never trapped on the wrong side)
+  let pitSide = 0, pitWp = 0;
+  if (track.pit && track.pitWallRange(car.s)) {
+    pitWp = track.pitWallLat(car.s);
+    pitSide = car.d > pitWp ? 1 : -1;
+  }
+  for (let k = 0; k < 4; k++) {
+    const wx = ca[k * 2], wy = ca[k * 2 + 1];
+    const p = track.project(wx, wy, car.i, tmp);
+    const side = p.d >= 0 ? 1 : -1;
+    const lim = track.wallDist(p.i, side);
+    const pen = Math.abs(p.d) - lim;
+    if (pen > 0) resolve(pen, -side * track.nx[p.i], -side * track.ny[p.i], wx, wy);
+    if (pitSide && track.pitWallRange(p.s)) {
+      // solid pit wall, 0.4 m thick, closed to traffic from either side between the entry and exit ramps
+      const wp = track.pitWallLat(p.s);
+      const pp = pitSide > 0 ? wp + 0.2 - p.d : p.d - (wp - 0.2);
+      if (pp > 0) resolve(pp, pitSide * track.nx[p.i], pitSide * track.ny[p.i], wx, wy);
     }
   }
   return worst;

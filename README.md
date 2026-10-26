@@ -24,9 +24,11 @@ npm test             # physics validation + headless AI race
 | Northfield Grand Prix Circuit | 5.7 km | Flowing high-speed aero circuit |
 | Circuit des Hautes-Fagnes | 4.9 km | Spa-like: big elevation, hairpin, fast sweepers |
 
-**Racing** – standing start with lights, 10 fictional teams × 2 drivers, live timing tower with real time gaps, sector timing (purple/green), best-lap delta, DRS (detection line + <1 s rule), ERS deploy/harvest with a boost button, slipstream and dirty air, damage (wings, floor, punctures), tyre compounds with a temperature window and wear, mandatory-stop option, pit lane with speed limiter, garage boxes, a pit-stop service and an optional autopilot through the lane, track-limits warnings, false start, pit speeding penalties, marshal recovery, fast-forward to the final classification.
+**Racing** – standing start with lights, 10 fictional teams × 2 drivers, live timing tower with real time gaps, sector timing (purple/green), best-lap delta, DRS (detection line + <1 s rule), ERS deploy/harvest with a boost button, slipstream and dirty air, damage (wings, floor, punctures), tyre compounds with a temperature window and wear, mandatory-stop option, pit lane with speed limiter, garage boxes, a pit-stop service and an optional autopilot through the lane, track-limits warnings, pit speeding penalties (the car is held on the grid until the lights go out, so false starts can't happen), marshal recovery, fast-forward to the final classification.
 
 **Difficulty** – five presets (Rookie → Legend) plus a continuous 0–100 % slider. Difficulty changes how much of the *same* physical limit the AI uses, how often it makes mistakes, how early it brakes, how much of the track it uses, how aggressively it overtakes and its reaction time at the start. Optional adaptive pace nudges the AI ±3–5 % depending on the gap to you. Nothing is "cheated": AI cars run the identical car model.
+
+**Racing line guide** – a ribbon on the road ahead, coloured from the braking envelope of the circuit: green keep going, yellow ease off, red brake now. Toggle with L or in Settings.
 
 **Driver aids** – ABS, traction control (4 levels), stability control, steering-lock assist, automatic/manual gearbox, pit autopilot; presets from Beginner to Simulator. Keyboard, gamepad and basic touch controls.
 
@@ -45,9 +47,10 @@ npm test             # physics validation + headless AI race
 | Camera · look back | C · V | Y · L3 |
 | Reset to track | R | Back |
 | Autopilot toggle | G | – |
+| Racing line guide on/off | L | – |
 | Pause | Esc / P | Start |
 
-Holding the brake while stopped engages reverse, so you can get out of the gravel.
+Holding the brake while stopped engages reverse, so you can get out of the gravel. The pit wall and garage fronts are solid; the pit lane is open at the entry and exit ramps.
 
 ## How the physics works
 
