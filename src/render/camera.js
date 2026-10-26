@@ -2,13 +2,15 @@ import * as THREE from 'three';
 import { clamp, lerp, wrapAngle } from '../util/math.js';
 
 export const CAMERA_MODES = ['chase', 'close', 'cockpit', 'tcam', 'heli', 'tv'];
-export const CAMERA_NAMES = { chase: 'Chase', close: 'Low chase', cockpit: 'Cockpit', tcam: 'T-cam', heli: 'Helicopter', tv: 'TV broadcast' };
+export const CAMERA_NAMES = { finish: 'Finish orbit', chase: 'Chase', close: 'Low chase', cockpit: 'Cockpit', tcam: 'T-cam', heli: 'Helicopter', tv: 'TV broadcast' };
 
 const up = new THREE.Vector3(0, 1, 0);
 const qTmp = new THREE.Quaternion();
 const qY = new THREE.Quaternion().setFromAxisAngle(up, -Math.PI / 2);
 const v1 = new THREE.Vector3(), v2 = new THREE.Vector3(), v3 = new THREE.Vector3();
 const qBack = new THREE.Quaternion().setFromAxisAngle(up, Math.PI);
+const EXPO3 = Math.exp(3) - 1;
+const expo = (x) => (Math.exp(3 * x) - 1) / EXPO3;
 
 export class CameraRig {
   constructor(camera) {
@@ -25,6 +27,8 @@ export class CameraRig {
     this.time = 0;
     this.init = false;
     this.impact = 0;
+    this.shakePhase = 0;
+    this._view = null;
   }
 
   next() {
@@ -35,6 +39,7 @@ export class CameraRig {
   setMode(m) {
     this.mode = m;
     this.init = false;
+    this.tvIndex = -1;
   }
 
   buildTv(track) {
@@ -66,6 +71,12 @@ export class CameraRig {
     const carPos = g.position;
     const beta = clamp(Math.atan2(car.v, Math.max(Math.abs(car.u), 8)), -0.5, 0.5);
     let fovTarget = 62 + clamp(speed * 0.1, 0, 14);
+    if (this._view !== view) {
+      // a driver's helmet hidden for the cockpit view comes back as soon as the rig follows another car
+      if (this._view) this._view.helmet.visible = true;
+      this._view = view;
+      this.tvIndex = -1;
+    }
     view.helmet.visible = this.mode !== 'cockpit' && this.mode !== 'tcam';
     if (this.mode === 'finish' && !this.init) this.fT = 0;
 
@@ -98,7 +109,7 @@ export class CameraRig {
       // slow cinematic orbit around the car as it rolls through the cool-down lap
       this.fT = (this.fT || 0) + dt;
       const t = this.fT;
-      const a = th + Math.PI * 0.8 + t * 0.32;
+      const a = -th + Math.PI * 0.8 + t * 0.32; // the car's forward vector sits at angle -th in the x/z plane
       const R = lerp(12, 6.5, clamp(t / 12, 0, 1));
       const h = 1.5 + 0.9 * Math.sin(t * 0.45) + clamp(t / 20, 0, 1) * 0.6;
       const want = v3.set(carPos.x + Math.cos(a) * R, carPos.y + h, carPos.z + Math.sin(a) * R);
@@ -106,7 +117,7 @@ export class CameraRig {
       const pr = this._pr || (this._pr = { i: 0, t: 0, s: 0, d: 0, dist: 0 });
       track.project(want.x, -want.z, this._hint ?? -1, pr);
       this._hint = pr.i;
-      const wl = track.wallDist(pr.i, 1) - 1.4, wr = track.wallDist(pr.i, -1) - 1.4;
+      const wl = Math.max(0.5, track.wallDist(pr.i, 1) - 1.4), wr = Math.max(0.5, track.wallDist(pr.i, -1) - 1.4);
       if (pr.d > wl || pr.d < -wr) {
         const dd = Math.min(wl, Math.max(-wr, pr.d)) - pr.d;
         want.x += track.nx[pr.i] * dd;
@@ -127,14 +138,15 @@ export class CameraRig {
         if (d > 280 || (ahead < -25 && d > 40)) best = -1;
       }
       if (best < 0) {
-        this.tvPoints.forEach((p, i) => {
+        for (let i = 0; i < this.tvPoints.length; i++) {
+          const p = this.tvPoints[i];
           const d = p.distanceTo(carPos);
           const ahead = v2.copy(p).sub(carPos).dot(fwd);
           if (ahead > 15 && d < bd && d > 30) {
             bd = d;
             best = i;
           }
-        });
+        }
         if (best < 0) best = 0;
       }
       this.tvIndex = best;
@@ -149,12 +161,12 @@ export class CameraRig {
     // vibration: kerbs, speed, impacts
     // engine / speed rumble rises exponentially with speed and revs, strongest from the cockpit
     const vx = clamp(speed / 95, 0, 1), rx = clamp((car.rpm - 5000) / 9500, 0, 1);
-    const expo = (x) => (Math.exp(3 * x) - 1) / (Math.exp(3) - 1);
     const rumble = this.shakeOn === false ? 0 : (expo(vx) * 0.65 + expo(rx) * 0.35) * (this.mode === 'cockpit' ? 0.016 : this.mode === 'tcam' ? 0.011 : this.mode === 'close' ? 0.0045 : 0.0022);
-    const sh = (car.kerbShake * 0.03 + rumble + this.impact * 0.25);
+    const sh = ((this.shakeOn === false ? 0 : car.kerbShake * 0.03) + rumble + this.impact * 0.25);
     this.impact *= Math.exp(-dt * 6);
     if (sh > 0.0004 && this.mode !== 'tv') {
-      const t = this.time * (53 + rx * 40);
+      this.shakePhase += dt * (53 + rx * 40);
+      const t = this.shakePhase;
       cam.position.x += Math.sin(t * 1.3) * sh;
       cam.position.y += Math.sin(t * 1.9 + 1) * sh;
       cam.position.z += Math.cos(t * 1.1) * sh;
