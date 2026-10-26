@@ -149,6 +149,7 @@ function sharedMaterials() {
   shared.rim = new THREE.MeshStandardMaterial({ color: 0x2b2e34, roughness: 0.35, metalness: 0.85 });
   shared.metal = new THREE.MeshStandardMaterial({ color: 0x555a62, roughness: 0.4, metalness: 0.8 });
   shared.helmetVisor = new THREE.MeshStandardMaterial({ color: 0x0b0b10, roughness: 0.1, metalness: 0.6 });
+  for (const m of [shared.carbon, shared.tyre, shared.rim, shared.metal, shared.helmetVisor]) m.userData.shared = true;
   shared.tyreGeoF = null;
   shared.ready = true;
   return shared;
@@ -512,9 +513,17 @@ export class CarView {
   }
 
   dispose() {
+    const done = new Set();
     this.group.traverse((o) => {
-      if (o.isMesh) {
-        o.geometry.dispose();
+      if (!o.isMesh) return;
+      o.geometry.dispose();
+      for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+        if (!m || done.has(m)) continue;
+        done.add(m);
+        // textures created for this car (number decals etc.); shared material textures are rebuilt on demand
+        for (const k of ['map', 'emissiveMap', 'alphaMap']) if (m[k] && m[k].dispose) m[k].dispose();
+        if (m.userData && m.userData.shared) continue;
+        m.dispose();
       }
     });
   }

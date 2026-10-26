@@ -49,7 +49,7 @@ const race = new Race(track, { laps: 2, level: 0.7, fieldSize: 20, playerGrid: 1
 const bot = new AIDriver({ car: race.player, track, profile: race.getProfile(race.player.spec, 'bot'), level: 0.7, seed: 9 });
 race.start();
 let n = 0;
-while (race.phase !== 'finished' && n < 240 * 400) {
+while (race.phase !== 'finished' && n < 240 * 1000) {
   const i = race.phase === 'racing' ? bot.update(DT, race) : { throttle: 0, brake: 1, steer: 0 };
   race.step(DT, { throttle: i.throttle, brake: i.brake, steer: i.steer, boost: i.boost });
   race.events.length = 0;

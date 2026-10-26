@@ -31,7 +31,7 @@ function disposeScene(scene) {
     if (o.isInstancedMesh) o.dispose();
     const mats = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : [];
     for (const m of mats) {
-      if (seen.has(m)) continue;
+      if (seen.has(m) || (m.userData && m.userData.shared)) continue;
       seen.add(m);
       for (const k of texKeys) if (m[k] && m[k].dispose) m[k].dispose();
       if (m.uniforms) for (const u of Object.values(m.uniforms)) if (u.value && u.value.isTexture) u.value.dispose();
