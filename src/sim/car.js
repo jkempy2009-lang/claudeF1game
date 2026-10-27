@@ -1,4 +1,4 @@
-import { G, clamp, lerp, smoothstep, wrapAngle } from '../util/math.js';
+import { G, clamp, lerp, smoothstep, wrapAngle, mulberry32 } from '../util/math.js';
 import { SURF } from './track.js';
 import { AIR_DENSITY, SURFACE, engineTorque, wetGripFactor } from './carspec.js';
 
@@ -23,6 +23,7 @@ const tmpProj = { i: 0, t: 0, s: 0, d: 0, dist: 0 };
 
 export class Car {
   constructor(spec, track) {
+    this.rand = mulberry32(0x5eed + 7919 * (Car.count = (Car.count || 0) + 1)); // punctures and the like: deterministic, so a replayed race is the same race
     this.spec = spec;
     this.track = track;
     this.assist = { abs: true, tc: 2, steer: 1, autoGear: true, stability: 1 };
@@ -566,7 +567,7 @@ export class Car {
     } else this.damageFloor = Math.min(1, (this.damageFloor || 0) + e * 0.5);
     if (e > 0.5) {
       const w = lx > 0 ? (ly > 0 ? FL : FR) : ly > 0 ? RL : RR;
-      if (Math.random() < Math.min(0.5, e * 0.4)) this.puncture[w] = 1;
+      if (this.rand() < Math.min(0.5, e * 0.4)) this.puncture[w] = 1;
     }
   }
 

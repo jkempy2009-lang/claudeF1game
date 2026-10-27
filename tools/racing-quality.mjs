@@ -22,9 +22,10 @@ for (const id of ids) {
     race.step(DT, { throttle: inp.throttle, brake: inp.brake, steer: inp.steer, boost: inp.boost, drsPress: inp.drs && !p.rs.drsLatch });
     if (race.phase === 'racing' && race.time - race.t0 > 20 && i % 120 === 0) for (const c of race.cars) { const q = pos.get(c); if (q != null && q !== c.rs.pos && !c.rs.inPitLane) passes += q > c.rs.pos ? 1 : 0; pos.set(c, c.rs.pos); }
     for (const e of race.events) {
-      if (e.type === 'impact' && e.speed > 3) e.wall ? walls++ : cars++;
-      if (e.type === 'recover') recov++;
-      if (e.type === 'penalty') pens++;
+      // the player here is a bot that does not recover or pit when it breaks: only the field's events count
+      if (e.type === 'impact' && e.speed > 3 && !(e.wall && e.car === p)) e.wall ? walls++ : cars++;
+      if (e.type === 'recover' && e.car !== p) recov++;
+      if (e.type === 'penalty' && e.car !== p) pens++;
     }
     race.events.length = 0;
   }

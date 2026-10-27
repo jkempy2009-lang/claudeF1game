@@ -92,7 +92,7 @@ export class RaceBrain {
     const ok = {
       LINE: true,
       FOLLOW: !!s.ahead,
-      DRAFT: !!s.ahead && ctx.straight && s.ahead.gap > 14,
+      DRAFT: !!s.ahead && ctx.straight && s.ahead.gap > 14 && this.closeRate < 24 && s.ahead.v > 30, // never tuck in behind a car that is crawling: that is an obstacle, not a tow
       ATTACK: !!s.ahead && now >= this.noAttackUntil && s.atkSide !== 0 && s.ahead.gap < 40 && !s.alongsideAttackerSide,
       COVER: this.traits.defend > 0.25 && !!s.behind && ctx.straight && !s.aside,
       BLOCK: this.traits.defend > 0.25 && !!s.behind && ctx.dCorner > 55 && ctx.dCorner < 330 && !!ctx.inside && !s.aside,
