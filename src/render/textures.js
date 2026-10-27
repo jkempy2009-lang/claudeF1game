@@ -73,7 +73,8 @@ export function runoffTexture() {
   return toTexture(c);
 }
 
-export function grassTexture(a = '#4a7d2f', b = '#5e9238') {
+/** mow: bands of cut grass along the texture's v axis (used on the verges next to the track, where v follows the lap). */
+export function grassTexture(a = '#4a7d2f', b = '#5e9238', mow = false) {
   const [c, g] = canvas(512, 512);
   const rnd = mulberry32(31);
   g.fillStyle = a;
@@ -91,6 +92,12 @@ export function grassTexture(a = '#4a7d2f', b = '#5e9238') {
     g.stroke();
   }
   g.globalAlpha = 1;
+  if (mow) {
+    g.fillStyle = 'rgba(255,255,200,0.075)';
+    g.fillRect(0, 0, 512, 256);
+    g.fillStyle = 'rgba(0,25,0,0.075)';
+    g.fillRect(0, 256, 512, 256);
+  }
   return toTexture(c);
 }
 

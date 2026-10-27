@@ -294,6 +294,7 @@ export class World {
     t.asphalt = TX.asphaltTexture();
     t.runoff = TX.runoffTexture();
     t.grass = TX.grassTexture(th.grass[0], th.grass[1]);
+    t.grassMow = TX.grassTexture(th.grass[0], th.grass[1], true);
     t.gravel = TX.gravelTexture();
     t.kerb = TX.kerbTexture();
     t.barrier = TX.barrierTexture();
@@ -499,7 +500,7 @@ export class World {
     // run-off zones: first zone per surface type, then grass
     const gravelMat = new THREE.MeshStandardMaterial({ map: T.gravel, roughness: 1 });
     const runoffMat = new THREE.MeshStandardMaterial({ map: T.runoff, roughness: 0.95 });
-    const grassMat = new THREE.MeshStandardMaterial({ map: T.grass, roughness: 1 });
+    const grassMat = new THREE.MeshStandardMaterial({ map: T.grassMow, roughness: 1 });
     const gg = [], rg = [], gr = [];
     const side = (sgn) => {
       const k = sgn > 0 ? tr.kl : tr.kr, w = sgn > 0 ? wl : wr;
