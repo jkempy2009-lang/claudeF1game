@@ -127,6 +127,13 @@ export class RaceBrain {
       this.since = now;
       best = 'FOLLOW';
     }
+    // a defender who moved across and closed the gap we were going for: lift out of it rather than drive into him
+    if (best === 'ATTACK' && s.ahead && now - this.since > 0.6 && s.ahead.ds < 13 && Math.abs(s.ahead.dd) < 1.7 && car.speed > s.ahead.v + 3) {
+      this.action = 'FOLLOW';
+      this.noAttackUntil = now + 1.5;
+      this.since = now;
+      best = 'FOLLOW';
+    }
     this.side = best === 'ATTACK' ? s.atkSide : best === 'COVER' ? s.coverSide : best === 'BLOCK' ? ctx.inside : best === 'YIELD' ? s.yieldSide : 0;
     return this.fill(it, ctx, s, ok, best);
   }

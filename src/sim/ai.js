@@ -59,6 +59,7 @@ export class AIDriver {
     this.gripAdapt = 1;
     this.lastLap = 0;
     this.speedUp = 1;
+    this.prevD = new Map(); // car -> { d, t }: for the lateral speed of the cars around us
     this.brain = new RaceBrain(this); // the decision matrix: what to do about the cars around us
     this.intent = this.brain.intent;
     this.managePower = false; // the Race switches this on for the field: they run their own ERS and fuel modes
@@ -265,8 +266,14 @@ export class AIDriver {
       let aTraffic = 0;
       for (const n of this.neigh) {
         const closing = V - n.v;
-        if (n.ds <= 0 || n.ds > 40 + 2.4 * Math.max(0, closing) || Math.abs(n.dd) > 2.6) continue;
+        if (n.ds <= 0 || n.ds > 40 + 2.4 * Math.max(0, closing)) continue;
         if (closing <= 0) continue;
+        // judged by where the car is going: a pit-exit car merging onto the line, or a defender moving across, counts before it is there
+        const tc = clamp(Math.max(n.ds - CAR_LEN, 1) / closing, 0, 2.5);
+        // a car coming out of the pits at 80 km/h is a hazard at 300 km/h of closing speed whichever side of the lane it is on
+        const merging = !!(n.c.rs && n.c.rs.inPitLane) || (n.c.driver && n.c.driver.pitState === 'out');
+        const reach = merging && !this.car.rs.inPitLane ? 9 : 2.6 + clamp(0.07 * closing - 0.5, 0, 3);
+        if (Math.min(Math.abs(n.dd), Math.abs(n.dd + (n.ddot || 0) * tc)) > reach) continue;
         const gap = Math.max(n.ds - CAR_LEN - 4, 0.8);
         const aLead = Math.max(0, -(n.c.axF || 0)) * 0.7;
         aTraffic = Math.max(aTraffic, aLead + (closing * closing) / (2 * gap));
@@ -330,7 +337,16 @@ export class AIDriver {
       if (o === car || o.retired || o.inGarage) continue;
       const ds = loopDelta(o.s, car.s, Ltr);
       if (ds < -60 || ds > 190) continue; // far enough ahead to stop for a car crawling into the pit lane at 250 km/h of closing speed
-      list.push({ c: o, ds, dd: o.d - car.d, v: o.speed });
+      // lateral speed in the track frame: a car merging onto the line (pit exit, a defender) is judged by where it is going
+      let pv = this.prevD.get(o);
+      if (!pv) this.prevD.set(o, (pv = { d: o.d, cd: car.d, t: race.time, ddot: 0 }));
+      else if (race.time - pv.t >= 0.1) {
+        const w = race.time - pv.t;
+        pv.ddot = clamp((o.d - pv.d) / w, -6, 6) - clamp((car.d - pv.cd) / w, -6, 6); // relative lateral speed over the last 0.1 s
+        pv.d = o.d; pv.cd = car.d; pv.t = race.time;
+      }
+      const ddot = pv.ddot;
+      list.push({ c: o, ds, dd: o.d - car.d, v: o.speed, ddot });
     }
     // the pace car counts as the car in front
     const sc = race.sc;
