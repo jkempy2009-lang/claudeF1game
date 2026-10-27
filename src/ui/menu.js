@@ -29,7 +29,7 @@ export const DEFAULT_CONFIG = {
   adaptive: false,
   qualify: false,
   equalCars: true,
-  carPower: 'quick',
+  carPower: 'standard',
   weather: 'dry',
   timeOfDay: 'progress',
   frontWing: null,
@@ -464,7 +464,7 @@ export class Menu {
         <button class="btn sm" data-act="resetsetup" style="margin-top:.6rem">Use recommended</button></div>
       <div class="panel"><h3>Engine &amp; grip</h3>
         ${this.chips('carPower', [{ value: 'standard', label: 'Standard' }, { value: 'quick', label: 'Quick' }, { value: 'rocket', label: 'Rocket' }], c.carPower)}
-        <div class="hint">Your car only. Quick: +20 % power, a little more downforce and grip, and a much stronger launch (0-100 km/h in about 2.3 s). Rocket: +50 % power and a violent launch (under 2 s): for catching the field from the back of the grid. Standard is the same car as every rival. Not used in Career, which has its own upgrades.</div></div>
+        <div class="hint">Your car only. Standard is the same car as every rival (0-100 km/h in about 2.6 s). Quick: +8 % power, a little more grip and a firmer launch. Rocket: +30 % power and a violent launch, for catching the field from the back of the grid. Not used in Career, which has its own upgrades.</div></div>
       <div class="panel"><h3>Brakes</h3>
         ${this.slider('brakeBias', 'Brake bias (front)', Math.round(c.brakeBias * 100), 50, 68, 1, Math.round(c.brakeBias * 100) + '%')}
         <div class="hint">Higher front bias is stable but can lock the front tyres; lower bias turns in better and risks locking the rears. ABS covers most of it if enabled.</div></div>
@@ -774,7 +774,7 @@ export class Menu {
       }
       if (k === 'diff') c.level = +v;
       else if (k === 'compound') c.compound = v;
-      else if (k === 'carPower') c.carPower = ['standard', 'quick', 'rocket'].includes(v) ? v : 'quick';
+      else if (k === 'carPower') c.carPower = ['standard', 'quick', 'rocket'].includes(v) ? v : 'standard';
       else if (k === 'weather') {
         c.weather = v;
         // wet weather starts you on wets; coming back to dry restores the dry tyre you had chosen before

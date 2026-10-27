@@ -16,8 +16,8 @@ export const CAR_POWER = {
   quick: { name: 'Quick', power: 1.08, aero: 1.03, grip: 1.03, launch: 0.12 },
   rocket: { name: 'Rocket', power: 1.3, aero: 1.08, grip: 1.07, launch: 0.35 },
 };
-/** Every car on the grid (rivals included) is quicker than the first-principles baseline: more power, downforce, grip and traction off the line. */
-export const CAR_BASE = { power: 1.25, aero: 1.1, grip: 1.06, launch: 0.22 };
+/** A uniform tweak applied to every car on the grid, rivals included. Left neutral on purpose: the field gets faster through better driving, not a quicker car. */
+export const CAR_BASE = { power: 1, aero: 1, grip: 1, launch: 0 }; // neutral: the stock car is the first-principles F1 car (0-100 km/h in about 2.6 s)
 
 export const DIFFICULTIES = [
   { id: 'rookie', name: 'Rookie', level: 0.08, blurb: 'Relaxed pace, frequent mistakes' },

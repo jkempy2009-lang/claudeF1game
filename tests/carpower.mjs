@@ -19,14 +19,14 @@ function launch(cp, upgrades) {
   return { v100, v200, race };
 }
 const s = launch('standard'), q = launch('quick'), r = launch('rocket');
-ok('even the standard car launches like a modern F1 car or better', s.v100 > 1.9 && s.v100 < 2.8, `0-100 ${s.v100.toFixed(2)} s`);
+ok('the standard car launches like a modern F1 car (about 2.6 s to 100 km/h)', s.v100 > 2.4 && s.v100 < 2.9, `0-100 ${s.v100.toFixed(2)} s`);
 ok('quick launches harder', q.v100 < s.v100 - 0.15 && q.v200 < s.v200 - 0.25, `0-100 ${q.v100.toFixed(2)} s, 0-200 ${q.v200.toFixed(2)} s`);
 ok('rocket launches hardest', r.v100 < q.v100 - 0.2 && r.v200 < q.v200 - 0.35, `0-100 ${r.v100.toFixed(2)} s, 0-200 ${r.v200.toFixed(2)} s`);
 const rival = (x) => x.race.cars.find((c) => !c.info.isPlayer).spec;
 ok('rivals do not get the boost', rival(q).powerScale === rival(s).powerScale && rival(r).frontGrip === rival(s).frontGrip);
-ok('every car, rivals included, gets the base speed-up', rival(s).powerScale > 1.2 && rival(s).launchGrip > 0.1);
+ok('no hidden speed-up for anyone: rivals and the standard car are identical', rival(s).powerScale === s.race.player.spec.powerScale && CAR_BASE.power === 1);
 ok('career upgrades replace the boost', launch('rocket', { power: 0, aero: 0, grip: 0 }).race.player.spec.launchGrip === CAR_BASE.launch);
 ok('an unknown value falls back to standard', launch('banana').v100 === s.v100);
-ok('config default and clean-up', sanitizeConfig({}).carPower === 'quick' && sanitizeConfig({ carPower: 'rocket' }).carPower === 'rocket' && sanitizeConfig({ carPower: 'x' }).carPower === 'quick');
+ok('config default and clean-up', sanitizeConfig({}).carPower === 'standard' && sanitizeConfig({ carPower: 'rocket' }).carPower === 'rocket' && sanitizeConfig({ carPower: 'x' }).carPower === 'standard');
 ok('three levels exist', Object.keys(CAR_POWER).join() === 'standard,quick,rocket');
 process.exit(bad ? 1 : 0);
