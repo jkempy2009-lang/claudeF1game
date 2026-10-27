@@ -1,7 +1,7 @@
 // The player's car boost: stronger launch and pace, off in career, junk values fall back, rivals are untouched.
 import { Track } from '../src/sim/track.js';
 import { TRACK_DEFS } from '../src/sim/trackdefs.js';
-import { Race, DT, CAR_POWER } from '../src/sim/race.js';
+import { Race, DT, CAR_POWER, CAR_BASE } from '../src/sim/race.js';
 import { sanitizeConfig } from '../src/ui/menu.js';
 let bad = 0;
 const ok = (n, c, x = '') => { console.log(`${c ? 'PASS' : 'FAIL'}  ${n} ${x}`); if (!c) bad++; };
@@ -19,12 +19,13 @@ function launch(cp, upgrades) {
   return { v100, v200, race };
 }
 const s = launch('standard'), q = launch('quick'), r = launch('rocket');
-ok('standard launch is a realistic F1 one', s.v100 > 2.4 && s.v100 < 3.4, `0-100 ${s.v100.toFixed(2)} s`);
-ok('quick launches harder', q.v100 < s.v100 - 0.4 && q.v200 < s.v200 - 0.6, `0-100 ${q.v100.toFixed(2)} s, 0-200 ${q.v200.toFixed(2)} s`);
-ok('rocket launches hardest', r.v100 < q.v100 - 0.25 && r.v200 < q.v200 - 0.5, `0-100 ${r.v100.toFixed(2)} s, 0-200 ${r.v200.toFixed(2)} s`);
+ok('even the standard car launches like a modern F1 car or better', s.v100 > 1.9 && s.v100 < 2.8, `0-100 ${s.v100.toFixed(2)} s`);
+ok('quick launches harder', q.v100 < s.v100 - 0.15 && q.v200 < s.v200 - 0.25, `0-100 ${q.v100.toFixed(2)} s, 0-200 ${q.v200.toFixed(2)} s`);
+ok('rocket launches hardest', r.v100 < q.v100 - 0.2 && r.v200 < q.v200 - 0.35, `0-100 ${r.v100.toFixed(2)} s, 0-200 ${r.v200.toFixed(2)} s`);
 const rival = (x) => x.race.cars.find((c) => !c.info.isPlayer).spec;
 ok('rivals do not get the boost', rival(q).powerScale === rival(s).powerScale && rival(r).frontGrip === rival(s).frontGrip);
-ok('career upgrades replace the boost', launch('rocket', { power: 0, aero: 0, grip: 0 }).race.player.spec.launchGrip === undefined);
+ok('every car, rivals included, gets the base speed-up', rival(s).powerScale > 1.2 && rival(s).launchGrip > 0.1);
+ok('career upgrades replace the boost', launch('rocket', { power: 0, aero: 0, grip: 0 }).race.player.spec.launchGrip === CAR_BASE.launch);
 ok('an unknown value falls back to standard', launch('banana').v100 === s.v100);
 ok('config default and clean-up', sanitizeConfig({}).carPower === 'quick' && sanitizeConfig({ carPower: 'rocket' }).carPower === 'rocket' && sanitizeConfig({ carPower: 'x' }).carPower === 'quick');
 ok('three levels exist', Object.keys(CAR_POWER).join() === 'standard,quick,rocket');

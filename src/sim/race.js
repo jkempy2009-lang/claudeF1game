@@ -12,10 +12,12 @@ import { clamp, loopDelta, mod, mulberry32 } from '../util/math.js';
 export const DT = 1 / 240;
 /** Optional boost for the player's car (not used in career, which has its own upgrades): engine power, downforce and tyre grip multipliers. */
 export const CAR_POWER = {
-  standard: { name: 'Standard', power: 1, aero: 1, grip: 1 },
-  quick: { name: 'Quick', power: 1.2, aero: 1.05, grip: 1.05, launch: 0.25 },
-  rocket: { name: 'Rocket', power: 1.5, aero: 1.1, grip: 1.1, launch: 0.5 },
+  standard: { name: 'Standard', power: 1, aero: 1, grip: 1, launch: 0 },
+  quick: { name: 'Quick', power: 1.08, aero: 1.03, grip: 1.03, launch: 0.12 },
+  rocket: { name: 'Rocket', power: 1.3, aero: 1.08, grip: 1.07, launch: 0.35 },
 };
+/** Every car on the grid (rivals included) is quicker than the first-principles baseline: more power, downforce, grip and traction off the line. */
+export const CAR_BASE = { power: 1.25, aero: 1.1, grip: 1.06, launch: 0.22 };
 
 export const DIFFICULTIES = [
   { id: 'rookie', name: 'Rookie', level: 0.08, blurb: 'Relaxed pace, frequent mistakes' },
@@ -121,8 +123,12 @@ export class Race {
       ? { frontWing: opt.setup.frontWing ?? rec.front, rearWing: opt.setup.rearWing ?? rec.rear, brakeBias: opt.setup.brakeBias, pressure: opt.setup.pressure }
       : { frontWing: rec.front, rearWing: rec.rear };
     const spec = makeSpec({ ...setup, compound, performance: 0.972 + 0.028 * rating, fuel });
-    spec.frontGrip *= grip;
-    spec.rearGrip *= grip;
+    spec.frontGrip *= grip * CAR_BASE.grip;
+    spec.rearGrip *= grip * CAR_BASE.grip;
+    spec.powerScale *= CAR_BASE.power;
+    spec.clAf *= CAR_BASE.aero;
+    spec.clAr *= CAR_BASE.aero;
+    spec.launchGrip = CAR_BASE.launch;
     if (isPlayer && !opt.upgrades) {
       const b = CAR_POWER[opt.carPower] || CAR_POWER.standard;
       spec.powerScale *= b.power;
@@ -130,7 +136,7 @@ export class Race {
       spec.clAr *= b.aero;
       spec.frontGrip *= b.grip;
       spec.rearGrip *= b.grip;
-      spec.launchGrip = b.launch || 0;
+      spec.launchGrip += b.launch || 0;
     }
     if (isPlayer && opt.upgrades) {
       // career car development

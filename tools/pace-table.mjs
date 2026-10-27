@@ -6,7 +6,7 @@ import { makeSpec } from '../src/sim/carspec.js';
 import { buildSpeedProfile } from '../src/sim/speedprofile.js';
 import { AIDriver } from '../src/sim/ai.js';
 import { formatTime } from '../src/util/math.js';
-import { DIFFICULTIES } from '../src/sim/race.js';
+import { DIFFICULTIES, CAR_BASE } from '../src/sim/race.js';
 const DT = 1 / 240;
 console.log('| | ' + DIFFICULTIES.map((d) => d.name).join(' | ') + ' |');
 console.log('|---|' + DIFFICULTIES.map(() => '---').join('|') + '|');
@@ -15,6 +15,7 @@ for (const def of TRACK_DEFS) {
   const row = [];
   for (const d of DIFFICULTIES) {
     const spec = makeSpec({ fuel: 20, compound: 'medium', frontWing: def.setup?.front, rearWing: def.setup?.rear });
+    spec.powerScale *= CAR_BASE.power; spec.clAf *= CAR_BASE.aero; spec.clAr *= CAR_BASE.aero; spec.frontGrip *= CAR_BASE.grip; spec.rearGrip *= CAR_BASE.grip; spec.launchGrip = CAR_BASE.launch;
     const prof = buildSpeedProfile(track, spec, { latUse: 0.9, brakeUse: 0.95, accelUse: 1.0 });
     const car = new Car(spec, track);
     car.assist = { abs: true, tc: 2, steer: 0, autoGear: true, stability: 1 };
