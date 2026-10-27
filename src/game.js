@@ -240,6 +240,7 @@ class Game {
     if (this.session && this.session.camRig) this.session.camRig.shakeOn = this.save.settings.shake && !this.save.settings.calm;
     if (this.session && this.session.guide) this.session.guide.cbSafe = !!this.save.settings.cbSafe;
     VIEW_OPTS.calm = !!this.save.settings.calm;
+    this.post.gradeOn = this.save.settings.quality !== 'low' && !this.perfNoFx; // colour grade and vignette
     document.body.classList.toggle('calm', !!this.save.settings.calm);
     document.body.classList.toggle('bighud', !!this.save.settings.bigHud);
   }
@@ -535,6 +536,7 @@ class Game {
       upgrades: cfg.upgrades || null,
       weather: cfg.weather || 'dry',
       equalCars: cfg.career ? false : cfg.equalCars !== false,
+      carPower: cfg.carPower,
     });
     await nextFrame();
     const quality = this.save.settings.quality;
@@ -792,6 +794,7 @@ class Game {
       if (this.session && this.session.world) this.session.world.sun.castShadow = false; // the light stops casting, the program is rebuilt by three
       this.renderer.shadowMap.enabled = false;
       this.perfNoFx = true; // for this page load only: the saved settings are left alone
+      this.post.gradeOn = false;
     }
     this.resize();
     this.toast(p.steps <= 3 ? `Frame rate was ${fps.toFixed(0)} fps: lowered the render resolution (Settings > Automatic quality)` : 'Frame rate is still low: shadows and motion blur turned off');

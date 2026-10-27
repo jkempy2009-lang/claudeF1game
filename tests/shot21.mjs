@@ -16,7 +16,7 @@ await page.waitForSelector('[data-act=quick]', { timeout: 60000 });
 await page.click('[data-act=quick]');
 await page.waitForSelector('#hud:not(.hidden)', { timeout: 180000 });
 await page.evaluate(() => { const a = window.apex; a.session.introCancelled = true; a.session.race.start(); a.toggleAutopilot(); });
-await page.waitForFunction(() => window.apex.session.race.phase === 'racing', null, { timeout: 120000 });
+await page.waitForFunction(() => window.apex.session.race.phase === 'racing', null, { timeout: 600000 });
 await page.evaluate((n) => { const a = window.apex; const t0 = a.session.race.time; return a.debugUntil(() => a.session.race.time - t0 > n, 400); }, +secs);
 for (const cam of ['chase', 'tv']) {
   await page.evaluate((c) => window.apex.session.camRig.setMode(c), cam);

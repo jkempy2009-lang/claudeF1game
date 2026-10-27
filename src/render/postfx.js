@@ -16,31 +16,43 @@ export class PostFX {
     this.strength = 0;
     this.bloomOn = true; // user/quality switch
     this.bloom = 0; // current strength (0..1)
+    this.gradeOn = true; // colour grade + vignette (medium and high quality)
     this.rtA = null;
     this.rtB = null;
     this.scene = new THREE.Scene();
     this.cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
     this.mat = new THREE.ShaderMaterial({
-      uniforms: { tDiffuse: { value: null }, tBloom: { value: null }, bloom: { value: 0 }, strength: { value: 0 }, aspect: { value: 1 }, center: { value: new THREE.Vector2(0.5, 0.46) } },
+      uniforms: { tDiffuse: { value: null }, tBloom: { value: null }, bloom: { value: 0 }, strength: { value: 0 }, aspect: { value: 1 }, center: { value: new THREE.Vector2(0.5, 0.46) }, grade: { value: 1 } },
       vertexShader: VERT,
       fragmentShader: `
-        uniform sampler2D tDiffuse; uniform sampler2D tBloom; uniform float bloom; uniform float strength; uniform float aspect; uniform vec2 center;
+        uniform sampler2D tDiffuse; uniform sampler2D tBloom; uniform float bloom; uniform float strength; uniform float aspect; uniform vec2 center; uniform float grade;
         varying vec2 vUv;
         void main() {
           vec2 d = vUv - center;
           float r = length(d * vec2(aspect, 1.0));
           float m = smoothstep(0.16, 0.8, r) * strength;
           vec4 col = vec4(0.0);
-          const int N = 12;
-          for (int i = 0; i < N; i++) {
-            float t = float(i) / float(N - 1);
-            col += texture2D(tDiffuse, center + d * (1.0 - m * 0.16 * t));
-          }
-          col /= float(N);
+          if (strength > 0.001) {
+            const int N = 12;
+            for (int i = 0; i < N; i++) {
+              float t = float(i) / float(N - 1);
+              col += texture2D(tDiffuse, center + d * (1.0 - m * 0.16 * t));
+            }
+            col /= float(N);
+          } else col = texture2D(tDiffuse, vUv); // no blur: one sample (the grade pass alone must stay cheap)
           vec3 rgb = col.rgb + texture2D(tBloom, vUv).rgb * bloom;
           gl_FragColor = vec4(rgb, 1.0);
           #include <tonemapping_fragment>
           #include <colorspace_fragment>
+          // grade (display space): a touch more contrast and colour, cool shadows, and a soft vignette that settles the eye on the road
+          vec3 c = gl_FragColor.rgb;
+          float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
+          c = mix(vec3(lum), c, 1.0 + 0.12 * grade);
+          c = (c - 0.5) * (1.0 + 0.07 * grade) + 0.5;
+          c += vec3(-0.004, 0.0, 0.012) * (1.0 - lum) * grade;
+          float v = smoothstep(0.42, 1.08, length(d * vec2(aspect, 1.0) * 1.15));
+          c *= 1.0 - 0.34 * v * v * grade;
+          gl_FragColor.rgb = clamp(c, 0.0, 1.0);
         }`,
       depthTest: false,
       depthWrite: false,
@@ -105,7 +117,8 @@ export class PostFX {
     this.bloom += ((this.bloomOn ? bloom : 0) - this.bloom) * 0.1;
     const doBlur = this.enabled && this.strength >= 0.03;
     const doBloom = this.enabled && this.bloom >= 0.02;
-    if (!doBlur && !doBloom) {
+    const doGrade = this.enabled && this.gradeOn;
+    if (!doBlur && !doBloom && !doGrade) {
       r.render(scene, camera);
       return;
     }
@@ -136,6 +149,7 @@ export class PostFX {
     this.mat.uniforms.tDiffuse.value = this.rt.texture;
     this.mat.uniforms.strength.value = doBlur ? this.strength : 0;
     this.mat.uniforms.bloom.value = doBloom ? this.bloom : 0;
+    this.mat.uniforms.grade.value = doGrade ? 1 : 0;
     if (!doBloom) this.mat.uniforms.tBloom.value = this.rt.texture;
     r.render(this.scene, this.cam);
   }

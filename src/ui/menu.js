@@ -29,6 +29,7 @@ export const DEFAULT_CONFIG = {
   adaptive: false,
   qualify: false,
   equalCars: true,
+  carPower: 'quick',
   weather: 'dry',
   timeOfDay: 'progress',
   frontWing: null,
@@ -79,6 +80,7 @@ export function sanitizeConfig(raw) {
     adaptive: bool(r.adaptive, D.adaptive),
     qualify: bool(r.qualify, D.qualify),
     equalCars: bool(r.equalCars, D.equalCars),
+    carPower: oneOf(r.carPower, ['standard', 'quick', 'rocket'], D.carPower),
     weather: oneOf(r.weather, ['dry', 'light', 'heavy', 'changing'], D.weather),
     timeOfDay: oneOf(r.timeOfDay, ['progress', 'day', 'night'], D.timeOfDay),
     frontWing: wing(r.frontWing),
@@ -460,6 +462,9 @@ export class Menu {
         ${this.slider('rearWing', 'Rear wing', rw, 0, 10, 1, `${rw}  (recommended ${rec.rear})`)}
         <div class="hint">More wing = more downforce and cornering grip, but more drag and a lower top speed. Low wing suits long straights; high wing suits tight, twisty circuits. Setups affect handling balance: more rear wing for stability, more front wing for turn-in.</div>
         <button class="btn sm" data-act="resetsetup" style="margin-top:.6rem">Use recommended</button></div>
+      <div class="panel"><h3>Engine &amp; grip</h3>
+        ${this.chips('carPower', [{ value: 'standard', label: 'Standard' }, { value: 'quick', label: 'Quick' }, { value: 'rocket', label: 'Rocket' }], c.carPower)}
+        <div class="hint">Your car only. Quick: +20 % power, a little more downforce and grip, and a much stronger launch (0-100 km/h in about 2.3 s). Rocket: +50 % power and a violent launch (under 2 s): for catching the field from the back of the grid. Standard is the same car as every rival. Not used in Career, which has its own upgrades.</div></div>
       <div class="panel"><h3>Brakes</h3>
         ${this.slider('brakeBias', 'Brake bias (front)', Math.round(c.brakeBias * 100), 50, 68, 1, Math.round(c.brakeBias * 100) + '%')}
         <div class="hint">Higher front bias is stable but can lock the front tyres; lower bias turns in better and risks locking the rears. ABS covers most of it if enabled.</div></div>
@@ -769,6 +774,7 @@ export class Menu {
       }
       if (k === 'diff') c.level = +v;
       else if (k === 'compound') c.compound = v;
+      else if (k === 'carPower') c.carPower = ['standard', 'quick', 'rocket'].includes(v) ? v : 'quick';
       else if (k === 'weather') {
         c.weather = v;
         // wet weather starts you on wets; coming back to dry restores the dry tyre you had chosen before

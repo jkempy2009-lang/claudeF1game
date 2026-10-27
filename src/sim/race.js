@@ -10,6 +10,13 @@ import { makePitGame, stepPitGame } from './pitgame.js';
 import { clamp, loopDelta, mod, mulberry32 } from '../util/math.js';
 
 export const DT = 1 / 240;
+/** Optional boost for the player's car (not used in career, which has its own upgrades): engine power, downforce and tyre grip multipliers. */
+export const CAR_POWER = {
+  standard: { name: 'Standard', power: 1, aero: 1, grip: 1 },
+  quick: { name: 'Quick', power: 1.2, aero: 1.05, grip: 1.05, launch: 0.25 },
+  rocket: { name: 'Rocket', power: 1.5, aero: 1.1, grip: 1.1, launch: 0.5 },
+};
+
 export const DIFFICULTIES = [
   { id: 'rookie', name: 'Rookie', level: 0.08, blurb: 'Relaxed pace, frequent mistakes' },
   { id: 'amateur', name: 'Amateur', level: 0.3, blurb: 'Learn the circuit without pressure' },
@@ -116,6 +123,15 @@ export class Race {
     const spec = makeSpec({ ...setup, compound, performance: 0.972 + 0.028 * rating, fuel });
     spec.frontGrip *= grip;
     spec.rearGrip *= grip;
+    if (isPlayer && !opt.upgrades) {
+      const b = CAR_POWER[opt.carPower] || CAR_POWER.standard;
+      spec.powerScale *= b.power;
+      spec.clAf *= b.aero;
+      spec.clAr *= b.aero;
+      spec.frontGrip *= b.grip;
+      spec.rearGrip *= b.grip;
+      spec.launchGrip = b.launch || 0;
+    }
     if (isPlayer && opt.upgrades) {
       // career car development
       const u = upgradeEffects(opt.upgrades);

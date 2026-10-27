@@ -586,7 +586,8 @@ export class HUD {
     g.beginPath();
     g.moveTo(100, 6); g.lineTo(100, 194); g.moveTo(6, 100); g.lineTo(194, 100);
     g.stroke();
-    const gx = clamp(-p.latG / 5, -1, 1) * 96, gy = clamp(-p.longG / 5, -1, 1) * 96;
+    // the dot shows the force you feel: braking throws you forward (up), accelerating pushes you back (down), a left turn throws you right
+    const gx = clamp(p.latG / 5, -1, 1) * 96, gy = clamp(p.longG / 5, -1, 1) * 96;
     g.fillStyle = '#ff2a2a';
     g.beginPath();
     g.arc(100 + gx, 100 + gy, 9, 0, 6.283);

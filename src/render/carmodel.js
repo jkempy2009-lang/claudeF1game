@@ -162,6 +162,24 @@ function textColorFor(hex) {
 }
 
 const shared = {};
+function sharedBlobMaterial() {
+  if (shared.blob) return shared.blob;
+  const c = document.createElement('canvas');
+  c.width = 128;
+  c.height = 64;
+  const g = c.getContext('2d');
+  g.scale(1, 0.5); // the gradient is drawn in the squashed space, so it becomes an ellipse
+  const grad = g.createRadialGradient(64, 64, 4, 64, 64, 62);
+  grad.addColorStop(0, 'rgba(0,0,0,0.78)');
+  grad.addColorStop(0.55, 'rgba(0,0,0,0.42)');
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 128, 128);
+  const tex = new THREE.CanvasTexture(c);
+  shared.blob = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+  shared.blob.userData.shared = true;
+  return shared.blob;
+}
 function sharedMaterials() {
   if (shared.ready) return shared;
   shared.carbon = new THREE.MeshStandardMaterial({ color: 0x15171b, roughness: 0.42, metalness: 0.45 });
@@ -418,6 +436,16 @@ export class CarView {
       }
     });
     for (const wd of this.wheelDefs) { wd.glow.castShadow = false; wd.glow.userData.noShadow = true; }
+    if (!this.ghost) {
+      // a soft contact shadow under the floor: grounds the car on every quality level (the shadow map only reaches the near cars)
+      const blob = new THREE.Mesh(new THREE.PlaneGeometry(6.4, 3.0), sharedBlobMaterial());
+      blob.rotation.x = -Math.PI / 2;
+      blob.position.set(0.1, 0.035, 0);
+      blob.renderOrder = 2;
+      blob.castShadow = blob.receiveShadow = false;
+      blob.userData.noShadow = true;
+      this.group.add(blob);
+    }
     if (this.ghost) this.makeGhost();
     this.layoutWheels(1.962, 1.638, 1.6, 1.55, 3.6, 0);
     this.pitchSmooth = 0;

@@ -21,6 +21,7 @@ const suites = [
   ['achievements + stats', 'tests/achievements.mjs'],
   ['driver identity', 'tests/driver.mjs'],
   ['ghost sharing', 'tests/ghost.mjs'],
+  ['car power boost', 'tests/carpower.mjs'],
 ];
 let failed = 0;
 for (const [name, file] of suites) {

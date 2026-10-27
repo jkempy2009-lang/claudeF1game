@@ -41,6 +41,8 @@ npm run test:leak    # browser: GPU resources across repeated sessions
 
 **AI** – identical cars by default (only the drivers differ), five difficulty presets plus a continuous slider. The drivers draft, pull out to pass, choose the inside of the next corner, defend once, give room, use the wet-weather tyres, take a cheap stop under the safety car and pit for damage. Nothing is cheated: AI cars run the identical car model and Legend laps about as quickly as a strong human lap (Vettore 1:08.0, Rade 1:05.3, Hautes-Fagnes 1:17.8, Northfield 1:22.3).
 
+**Your car** – the Team & car tab has an *Engine & grip* choice for your car only: **Quick** (default) is +20 % power with extra grip and a much stronger launch (0-100 km/h in about 1.9 s), **Rocket** is +50 % power (1.6 s), **Standard** is the same car as every rival. It is the way to fight through the field from the back of the grid; Career uses its own upgrades instead. The G-meter dot shows the force you feel (braking throws it forward).
+
 **Engineering** – brake discs have their own temperature (cold carbon bites less, above about 880 C it fades, and they glow through the wheels at night); a pit wall that reads your measured tyre wear and calls the stop (radio advice or automatic); tyre-pressure setup; live telemetry traces (Y); bloom at dusk and night; accessibility options (colour-blind-safe racing line, reduced motion, larger HUD); on-screen touch controls with pit, DRS, ERS, camera and pause buttons.
 
 Reference clean-lap pace of the best car at each level (medium tyres; `node tools/pace-table.mjs` regenerates this table). Legend is calibrated to a very good human lap: about 1:19 at Hautes-Fagnes, 1:08.5 at Vettore and 1:06 at La Rade. In a race the top drivers keep about 2 % in hand:
