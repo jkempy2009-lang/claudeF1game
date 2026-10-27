@@ -67,7 +67,7 @@ export function sanitizeConfig(raw) {
     mode: oneOf(r.mode, ['race', 'timetrial', 'qualifying'], D.mode),
     trackId: oneOf(r.trackId, TRACK_DEFS.map((t) => t.id), D.trackId),
     laps: Math.round(num(r.laps, 1, 30, D.laps)),
-    level: num(r.level, 0, 1, D.level),
+    level: num(r.level, 0, 1.3, D.level),
     fieldSize,
     playerGrid: Math.round(num(r.playerGrid, 1, fieldSize, Math.min(D.playerGrid, fieldSize))),
     team: Math.round(num(r.team, 0, TEAMS.length - 1, D.team)),

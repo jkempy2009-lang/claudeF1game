@@ -1,5 +1,6 @@
 import { wetGripFactor } from './carspec.js';
 import { clamp, lerp, loopDelta, mod, smoothstep, wrapAngle, mulberry32 } from '../util/math.js';
+import { RaceBrain } from './racecraft.js';
 
 const CAR_LEN = 5.5;
 const RACE_MARGIN = 0.02; // share of the hot-lap pace a top driver leaves in hand in a race
@@ -39,9 +40,6 @@ export class AIDriver {
 
     this.offset = 0; // current lateral offset from the base line (overtaking)
     this.offTarget = 0;
-    this.passSide = 0;
-    this.defendSide = 0;
-    this.defendUntil = 0;
     this.rcMode = 'free';
     this.neigh = [];
     this.neighTimer = 0;
@@ -61,6 +59,9 @@ export class AIDriver {
     this.gripAdapt = 1;
     this.lastLap = 0;
     this.speedUp = 1;
+    this.brain = new RaceBrain(this); // the decision matrix: what to do about the cars around us
+    this.intent = this.brain.intent;
+    this.managePower = false; // the Race switches this on for the field: they run their own ERS and fuel modes
   }
 
   setLevel(level) {
@@ -180,8 +181,11 @@ export class AIDriver {
     const idx = tr.idx(s + look);
     const air = 1 - 0.06 * (car.dirtyAir || 0); // following closely costs front downforce: take the corners a touch slower
     // every speed target is the same physical profile times this driver's pace, skill, grip feel and traffic effects
-    const paceK = this.dp.pace * this.skill * this.raceK * this.paceAdapt * this.gripAdapt * air;
+    const it = this.intent;
+    const paceK = this.dp.pace * this.skill * this.raceK * this.paceAdapt * this.gripAdapt * air * it.push * it.yieldLift;
     let vt = prof.v[idx] * paceK * (this.mistake && this.mistake.active ? this.mistake.factor : 1);
+    // use the whole car on the straights: with the wing open the drag falls and the car keeps accelerating past the plain profile speed
+    if (this.managePower && this.pitState === 'none' && Math.abs(kt) < 0.0025 && Math.abs(kPath) < 0.003) vt *= 1 + (inp.drs ? 0.05 : 0) + (inp.boost ? 0.02 : 0);
     // off the road (either side; the pit lane is not off the road): slow down and return
     const inPitArea = this.pitState !== 'none' && tr._pitBlend(s) > 0.01;
     if (car.onGrass || (!inPitArea && (car.d > tr.wl[car.i] + 1.5 || -car.d > tr.wr[car.i] + 1.5))) vt = Math.min(vt, 28);
@@ -256,12 +260,12 @@ export class AIDriver {
       const brakeFromErr = errNow < -1.5 ? (-errNow - 1.5) * 2.2 : 0;
       // brake late: only once the stopping demand approaches what the brakes (plus drag) can do; until then follow
       // the target speed. Lower levels leave a bigger margin (brakeBias).
-      const aLate = (0.78 - 0.14 * (car.wetness || 0)) * this.dp.brakeBias * (capBrake + aDrag * 0.9);
+      const aLate = (0.78 - 0.14 * (car.wetness || 0)) * this.dp.brakeBias * this.intent.brakeLate * (capBrake + aDrag * 0.9);
       // traffic: deceleration needed to stop behind a car in our lane that is slower than us or braking
       let aTraffic = 0;
       for (const n of this.neigh) {
-        if (n.ds <= 0 || n.ds > 90 || Math.abs(n.dd) > 2.6) continue;
         const closing = V - n.v;
+        if (n.ds <= 0 || n.ds > 40 + 2.4 * Math.max(0, closing) || Math.abs(n.dd) > 2.6) continue;
         if (closing <= 0) continue;
         const gap = Math.max(n.ds - CAR_LEN - 4, 0.8);
         const aLead = Math.max(0, -(n.c.axF || 0)) * 0.7;
@@ -303,7 +307,12 @@ export class AIDriver {
     inp.drs = !!car.drsAllowed && thr > 0.95 && brk < 0.05 && straight;
     const underSc = race.sc && race.sc.state !== 'none';
     const gapAhead = car.gapAhead ?? 99;
-    inp.boost = !underSc && thr > 0.95 && straight && car.soc > 0.12 && (gapAhead < 1.8 || car.soc > 0.55 || race.lapsLeft(car) <= 1);
+    inp.boost = !underSc && thr > 0.95 && straight && car.soc > 0.12 && (gapAhead < 1.8 || car.soc > 0.55 || race.lapsLeft(car) <= 1 || (this.intent.ers === 2 && car.soc > 0.1));
+    if (this.managePower && !underSc) {
+      // engine and energy modes follow the racecraft plan (harvest behind a car, attack mode in a fight)
+      car.ersMode = this.intent.ers;
+      car.fuelMode = this.intent.fuel;
+    }
 
     // --- stuck recovery handled by Race using stuckT
     if (V < 1.2 && race.phase === 'racing' && race.time > this.goTime + 6 && this.pitState !== 'stopped' && !(car.rs && car.rs.service) && !(this.pitState !== 'none' && this.neigh.some((n) => n.ds > 0 && n.ds < 14 && Math.abs(n.dd) < 3.2))) this.stuckT += dt;
@@ -320,7 +329,7 @@ export class AIDriver {
     for (const o of race.cars) {
       if (o === car || o.retired || o.inGarage) continue;
       const ds = loopDelta(o.s, car.s, Ltr);
-      if (ds < -60 || ds > 90) continue;
+      if (ds < -60 || ds > 190) continue; // far enough ahead to stop for a car crawling into the pit lane at 250 km/h of closing speed
       list.push({ c: o, ds, dd: o.d - car.d, v: o.speed });
     }
     // the pace car counts as the car in front
@@ -331,7 +340,7 @@ export class AIDriver {
     }
     const V = Math.max(car.speed, 5);
     const base = this.basePath(car.s);
-    const wl = tr.wl[car.i] - 1.6, wr = tr.wr[car.i] - 1.6;
+    const wl = tr.wl[car.i] - 1.2, wr = tr.wr[car.i] - 1.2;
     const probe = (d) => tr.at(tr.curv, car.s + d);
     // where is the next corner, and which side is its inside?
     let dCorner = Infinity, inside = 0;
@@ -347,83 +356,16 @@ export class AIDriver {
     const now = race.time;
     let target = 0;
 
-    // ---- the car we are trying to pass ------------------------------------------------------------------------
-    let blocker = null;
-    for (const n of list) {
-      if (n.ds > 0 && n.ds < 60 && Math.abs(n.dd) < 3.4 && (!blocker || n.ds < blocker.ds)) blocker = n;
-    }
-    this.blocker = blocker;
-    this.rcMode = 'free';
-    if (blocker) {
-      const o = blocker.c;
-      const gap = blocker.ds - CAR_LEN;
-      const closing = V - blocker.v;
-      const willing = this.dp.aggression + (straight ? 0.3 : -0.1) + (gap < 12 ? 0.25 : 0) - 0.3 * (car.wetness || 0);
-      if (!this.passSide) {
-        // choose the side: the inside of the coming corner when it is close (late-braking dive), otherwise the side with room
-        const needLeft = o.d + 3.0, needRight = o.d - 3.0;
-        const free = (pd) => !list.some((m) => m !== blocker && m.ds > -9 && m.ds < blocker.ds + 8 && Math.abs(car.d + m.dd - pd) < 2.7);
-        const leftOk = needLeft <= wl && free(needLeft), rightOk = needRight >= -wr && free(needRight);
-        let pick = 0;
-        if (leftOk && rightOk) pick = dCorner < 320 && inside ? inside : Math.abs(needLeft - car.d) < Math.abs(needRight - car.d) ? 1 : -1;
-        else if (leftOk) pick = 1;
-        else if (rightOk) pick = -1;
-        this.passSide = pick;
-      }
-      if (this.passSide) {
-        // someone moved into the gap we wanted: forget it and choose again next tick
-        const pdWant = o.d + this.passSide * 3.0;
-        if (list.some((m) => m !== blocker && m.ds > -9 && m.ds < blocker.ds + 8 && Math.abs(car.d + m.dd - pdWant) < 2.4)) this.passSide = 0;
-      }
-      if (this.passSide && willing > 0.45) {
-        const drafting = straight && gap > 17 && dCorner > 170 && closing < 22 && blocker.c.speed > 30;
-        if (drafting) {
-          // tuck into the slipstream and wait for the right moment to pull out
-          target = clamp(o.d - base, -9, 9);
-          this.rcMode = 'draft';
-        } else {
-          const pd = o.d + this.passSide * 3.0;
-          target = clamp(clamp(pd, -wr, wl) - base, -12, 12);
-          this.rcMode = 'attack';
-        }
-      }
-    } else {
-      this.passSide = 0;
-    }
-
-    // ---- the car trying to pass us: defend once, no weaving ------------------------------------------------------
-    let attacker = null;
-    for (const n of list) {
-      if (n.ds < -3 && n.ds > -48 && Math.abs(n.dd) < 4.6 && (!attacker || n.ds > attacker.ds)) attacker = n;
-    }
-    if (attacker && !(blocker && this.rcMode === 'attack')) {
-      const timeGap = -attacker.ds / V;
-      const closing = attacker.v - V;
-      const wantsDefend = this.dp.aggression > 0.45 && straight && dCorner > 55 && dCorner < 480 && timeGap < 0.95 && closing > -3 && this.level > 0.3;
-      if (wantsDefend && !this.defendSide) {
-        // cover the side the attacker is on, unless that leaves them the inside of the corner anyway
-        this.defendSide = attacker.dd > 0.8 ? 1 : attacker.dd < -0.8 ? -1 : inside || 1;
-        this.defendUntil = now + 6;
-      }
-    }
-    if (this.defendSide) {
-      const stillThreat = attacker && -attacker.ds / V < 1.6;
-      if (now > this.defendUntil && !stillThreat) this.defendSide = 0;
-      else if (!stillThreat && !attacker) this.defendSide = 0;
-    }
-    if (this.defendSide && this.rcMode !== 'attack') {
-      // a single move toward the attacker's side, held through the braking zone (never after the turn-in point)
-      const lim = this.defendSide > 0 ? wl : -wr;
-      const want = clamp(this.defendSide * Math.min(Math.abs(lim), 4.2) , -wr, wl);
-      if (dCorner > 25) target = clamp(want - base, -12, 12);
-      this.rcMode = 'defend';
-    }
+    // ---- racecraft: the decision matrix picks the action, the intent says where to put the car ----------------------
+    const intent = this.brain.think({ list, V, base, wl, wr, dCorner, inside, straight, now, race });
+    this.intent = intent;
+    this.blocker = intent.rival ? list.find((n) => n.c === intent.rival) || null : null;
+    const act = intent.action;
+    this.rcMode = act === 'ATTACK' ? 'attack' : act === 'DRAFT' ? 'draft' : act === 'COVER' || act === 'BLOCK' ? 'defend' : act === 'YIELD' ? 'yield' : 'free';
+    if (intent.target != null) target = clamp(intent.target - base, -12, 12);
 
     // a car is alongside: no new lateral commitments, hold the line we are on
-    if (list.some((n) => n.ds > -8 && n.ds < 7 && Math.abs(n.dd) < 3.8)) {
-      target = this.offset;
-      this.defendSide = this.defendSide && now > this.defendUntil ? 0 : this.defendSide;
-    }
+    if (list.some((n) => n.ds > -8 && n.ds < 7 && Math.abs(n.dd) < 3.8)) target = this.offset;
 
     // ---- side by side: leave a car's width, yield when behind -------------------------------------------------------
     for (const n of list) {
@@ -439,8 +381,6 @@ export class AIDriver {
     // never plan a position outside the track
     if (sc && sc.state !== 'none') {
       // behind the pace car: no racing, stay on the line
-      this.passSide = 0;
-      this.defendSide = 0;
       this.rcMode = 'free';
       target = 0;
     }

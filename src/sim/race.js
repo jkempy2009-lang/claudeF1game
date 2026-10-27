@@ -25,6 +25,7 @@ export const DIFFICULTIES = [
   { id: 'pro', name: 'Pro', level: 0.55, blurb: 'Fair fight, occasional errors' },
   { id: 'elite', name: 'Elite', level: 0.8, blurb: 'Fast, aggressive, rarely wrong' },
   { id: 'legend', name: 'Legend', level: 1.0, blurb: 'Every car at the limit' },
+  { id: 'f1', name: 'F1', level: 1.15, blurb: 'Professional race drivers: flawless, relentless, and they race you' },
 ];
 
 export const DEFAULT_OPTIONS = {
@@ -232,6 +233,7 @@ export class Race {
           boxD: track.pit ? track.pitBox(seat.ti).d : null,
         });
         car.driver = driver;
+        driver.managePower = !this.isQuali && !timeTrial; // the field runs its own ERS / fuel plan in a race
         if (this.isQuali) {
           driver.releaseDelay = k * 2.4; // cars leave one after another so the lap is clear
           driver.ignoreTraffic = true;

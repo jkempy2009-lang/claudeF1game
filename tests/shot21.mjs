@@ -18,7 +18,8 @@ await page.waitForSelector('#hud:not(.hidden)', { timeout: 180000 });
 await page.evaluate(() => { const a = window.apex; a.session.introCancelled = true; a.session.race.start(); a.toggleAutopilot(); });
 await page.waitForFunction(() => window.apex.session.race.phase === 'racing', null, { timeout: 600000 });
 await page.evaluate((n) => { const a = window.apex; const t0 = a.session.race.time; return a.debugUntil(() => a.session.race.time - t0 > n, 400); }, +secs);
-for (const cam of ['chase', 'tv']) {
+if (process.env.TELE) await page.evaluate(() => window.apex.hud.toggleTele());
+for (const cam of (process.env.CAMS || 'chase,tv').split(',')) {
   await page.evaluate((c) => window.apex.session.camRig.setMode(c), cam);
   await page.waitForTimeout(3500);
   await page.screenshot({ path: `${out}/${track}-${weather}-${tod}-${cam}.png`, timeout: 180000 });
