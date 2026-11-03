@@ -356,7 +356,9 @@ export class AIDriver {
     }
     const V = Math.max(car.speed, 5);
     const base = this.basePath(car.s);
-    const wl = tr.wl[car.i] - 1.2, wr = tr.wr[car.i] - 1.2;
+    // how close to the edge the planned positions may go: more room between walls, where there is no run-off to absorb a slide
+    const em = tr.def.runoff && tr.def.runoff.mode === 'street' ? 2.8 : 2.0;
+    const wl = tr.wl[car.i] - em, wr = tr.wr[car.i] - em;
     const probe = (d) => tr.at(tr.curv, car.s + d);
     // where is the next corner, and which side is its inside?
     let dCorner = Infinity, inside = 0;

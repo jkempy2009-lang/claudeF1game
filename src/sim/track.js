@@ -267,7 +267,8 @@ function solvePenta(d0, d1, d2, b) {
  * banded least-squares problem (curvature + a little path length), with an active-set loop to
  * respect the track limits. Returns lateral offsets (+ left) per sample.
  */
-export function computeRacingLine(track, margin = 1.1, lengthWeight = 0.001, smoothLen = 10) {
+const WALL_CLEAR = 3.2; // metres from the car's centre line to a barrier, for the racing line
+export function computeRacingLine(track, margin = 1.9, lengthWeight = 0.001, smoothLen = 10) {
   const N = track.N;
   const M = N * 3;
   const cx = new Float64Array(M), cy = new Float64Array(M), nx = new Float64Array(M), ny = new Float64Array(M);
@@ -278,8 +279,9 @@ export function computeRacingLine(track, margin = 1.1, lengthWeight = 0.001, smo
     cy[k] = track.y[i];
     nx[k] = track.nx[i];
     ny[k] = track.ny[i];
-    lo[k] = -(track.wr[i] - margin);
-    hi[k] = track.wl[i] - margin;
+    // inside the edge by `margin`, and never closer than WALL_CLEAR to a barrier (street circuits put the wall right beside the asphalt)
+    lo[k] = -Math.min(track.wr[i] - margin, track.wallDist(i, -1) - WALL_CLEAR);
+    hi[k] = Math.min(track.wl[i] - margin, track.wallDist(i, 1) - WALL_CLEAR);
   }
   // Second-difference of the centre line (the d = 0 part of the residuals).
   const a0x = new Float64Array(M), a0y = new Float64Array(M);
@@ -481,7 +483,7 @@ export class Track {
     this._buildPit();
     this._buildMarkers();
 
-    this.lineD = computeRacingLine(this, def.lineMargin ?? 1.1);
+    this.lineD = computeRacingLine(this, def.lineMargin ?? 1.9);
     this._finishLine();
   }
 

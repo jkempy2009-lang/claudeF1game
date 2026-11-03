@@ -68,7 +68,7 @@ export const TRACK_DEFS = [
     elevation: [[1, 6, 1.2], [3, 1.8, 0.4]],
     runoff: { mode: 'street', gap: 1.4, kerbs: true },
     kerbWidth: 1.1,
-    lineMargin: 0.95,
+    lineMargin: 2.6,
     points: [
       [880, 0, 28],
       [180, 0, 26],
@@ -304,7 +304,7 @@ export const TRACK_DEFS = [
     elevation: [[1, 3.5, 0.8], [3, 1.2, 2.2]],
     runoff: { mode: 'street', gap: 1.5, kerbs: true },
     kerbWidth: 1.1,
-    lineMargin: 1.0,
+    lineMargin: 2.6,
     points: [
       [0, 0, 40],
       [700, 0, 30],
@@ -343,7 +343,7 @@ export const TRACK_DEFS = [
     elevation: [[3, 2.2, 1.2], [8, 2.6, 1.6]],
     runoff: { mode: 'street', gap: 1.8, kerbs: true },
     kerbWidth: 1.1,
-    lineMargin: 1.0,
+    lineMargin: 2.6,
     points: [
       [0, 0, 60],
       [1400, 0, 50],
@@ -421,7 +421,7 @@ export const TRACK_DEFS = [
     elevation: [[2, 3.0, 1.0], [6, 3.4, 1.4]],
     runoff: { mode: 'street', gap: 1.6, kerbs: true },
     kerbWidth: 1.0,
-    lineMargin: 0.9,
+    lineMargin: 2.6,
     points: [
       [0, 0, 55],
       [1500, 0, 45],
