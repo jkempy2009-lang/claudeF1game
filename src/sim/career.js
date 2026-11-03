@@ -16,10 +16,58 @@ export const DISTANCES = [
   { id: 'grandprix', name: 'Grand Prix', km: 50 },
 ];
 
-/** Calendar of circuit ids: the four original circuits, or every circuit when 8+ rounds are requested. */
+/** Calendar of circuit ids: the first `rounds` circuits (the classic four, then the rest in order); a longer season than there are circuits goes round again. */
 export function makeCalendar(rounds = 4) {
   const ids = TRACK_DEFS.map((d) => d.id);
-  return rounds >= 8 ? ids.slice() : ids.slice(0, 4);
+  const n = Math.max(1, Math.min(MAX_ROUNDS, Math.round(Number.isFinite(+rounds) ? +rounds : 4)));
+  return Array.from({ length: n }, (_, i) => ids[i % ids.length]);
+}
+export const MAX_ROUNDS = 24;
+
+/** The rules of a career, editable at any time from the career hub. */
+export const DEFAULT_RULES = {
+  laps: 0, // 0 = by the distance preset, otherwise a fixed number of laps for every race
+  fieldSize: 20,
+  playerGrid: 12, // starting position when you skip qualifying
+  weather: 'forecast', // 'forecast' = each round's own forecast; or force one condition for the whole season
+  tyreWear: 3,
+  damage: true,
+  collisions: true,
+  mandatoryStop: false,
+  adaptive: false, // adaptive AI pace
+  pitCalls: 'radio',
+  prize: 1, // multiplier on prize money and the season bonus
+  creep: true, // the AI gets a little faster every season
+};
+export const RULE_WEATHERS = ['forecast', ...['dry', 'light', 'heavy', 'changing']];
+
+export function sanitizeRules(raw) {
+  const r = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const D = DEFAULT_RULES;
+  const num = (v, lo, hi, d) => ((typeof v === 'number' || (typeof v === 'string' && v.trim() !== '')) && Number.isFinite(+v) ? Math.max(lo, Math.min(hi, Math.round(+v))) : d);
+  const bool = (v, d) => (typeof v === 'boolean' ? v : d);
+  const fieldSize = num(r.fieldSize, 2, 20, D.fieldSize);
+  const prizes = [0.5, 1, 2, 5];
+  return {
+    laps: num(r.laps, 0, 30, D.laps),
+    fieldSize,
+    playerGrid: num(r.playerGrid, 1, fieldSize, Math.min(D.playerGrid, fieldSize)),
+    weather: RULE_WEATHERS.includes(r.weather) ? r.weather : D.weather,
+    tyreWear: [0, 1.5, 3, 6].includes(+r.tyreWear) && r.tyreWear !== null && r.tyreWear !== '' ? +r.tyreWear : D.tyreWear,
+    damage: bool(r.damage, D.damage),
+    collisions: bool(r.collisions, D.collisions),
+    mandatoryStop: bool(r.mandatoryStop, D.mandatoryStop),
+    adaptive: bool(r.adaptive, D.adaptive),
+    pitCalls: ['off', 'radio', 'auto'].includes(r.pitCalls) ? r.pitCalls : D.pitCalls,
+    prize: prizes.includes(+r.prize) ? +r.prize : D.prize,
+    creep: bool(r.creep, D.creep),
+  };
+}
+
+/** Laps of one career race on a circuit: the fixed number from the rules, or the distance preset. */
+export function careerLaps(career, lengthM) {
+  const fixed = career.rules && career.rules.laps;
+  return fixed > 0 ? fixed : lapsFor(lengthM, career.distance);
 }
 /** The classic four-round championship. */
 export const CHAMP_CAL = makeCalendar(4);
@@ -100,14 +148,15 @@ export function upgradeEffects(u = {}) {
   };
 }
 
-export function newCareer({ team = 6, level = 0.55, rounds = 4, distance = 'standard' } = {}) {
+export function newCareer({ team = 6, level = 0.55, rounds = 4, distance = 'standard', rules = {} } = {}) {
   const t = Math.max(0, Math.min(TEAMS.length - 1, Math.round(team)));
   return {
     v: 1,
     team: t,
     level,
-    rounds,
+    rounds: Math.max(1, Math.min(MAX_ROUNDS, Math.round(Number.isFinite(+rounds) ? +rounds : 4))),
     distance,
+    rules: sanitizeRules(rules),
     seasonNo: 1,
     budget: 20,
     upgrades: { power: 0, aero: 0, grip: 0 },
@@ -137,7 +186,7 @@ export function settleRace(career, row, cls) {
   const obj = objectiveFor(career.team);
   const met = !!me && me.pos <= obj.finish;
   const fl = cls.find((e) => e.info.isPlayer && Number.isFinite(e.best) && e.best === Math.min(...cls.map((c) => c.best)));
-  const prize = prizeFor(me ? me.pos : 20, met, !!fl);
+  const prize = Math.round(prizeFor(me ? me.pos : 20, met, !!fl) * ((career.rules && career.rules.prize) || 1));
   career.budget += prize;
   return { pos: me ? me.pos : null, met, prize, objective: obj.finish, fastest: !!fl };
 }
@@ -177,7 +226,7 @@ export function endSeason(career) {
 }
 
 function bonusOnEnd(career, recap) {
-  career.budget += (recap.champion ? 40 : recap.driverPos <= 3 ? 20 : 8) + (recap.metConstructor ? 15 : 0);
+  career.budget += Math.round(((recap.champion ? 40 : recap.driverPos <= 3 ? 20 : 8) + (recap.metConstructor ? 15 : 0)) * ((career.rules && career.rules.prize) || 1));
 }
 
 /** Starts the next season, optionally with a different team (new car: upgrades start again). */
@@ -187,7 +236,7 @@ export function nextSeason(career, teamIdx = career.team) {
     career.upgrades = { power: 0, aero: 0, grip: 0 };
   }
   career.seasonNo++;
-  career.level = Math.min(1, career.level + 0.04);
+  if (!career.rules || career.rules.creep !== false) career.level = Math.min(Math.max(1, career.level), career.level + 0.04);
   career.season = newSeason(career.rounds);
   career.seasonRecap = null;
   return career;
@@ -237,7 +286,8 @@ export function sanitizeCareer(raw) {
   try {
     if (!raw || typeof raw !== 'object' || raw.v !== 1) return null;
     const n = (v, lo, hi, d) => (Number.isFinite(+v) ? Math.max(lo, Math.min(hi, +v)) : d);
-    const rounds = raw.rounds >= 8 ? 8 : 4;
+    // a save from before the rules existed: '8' meant every circuit
+    const rounds = !raw.rules && raw.rounds >= 8 ? TRACK_DEFS.length : Math.round(n(raw.rounds, 1, MAX_ROUNDS, 4));
     const season = raw.season && Array.isArray(raw.season.calendar) ? raw.season : newSeason(rounds);
     const ids = TRACK_DEFS.map((d) => d.id);
     season.calendar = season.calendar.filter((id) => ids.includes(id));
@@ -253,8 +303,9 @@ export function sanitizeCareer(raw) {
     return {
       v: 1,
       team: Math.round(n(raw.team, 0, TEAMS.length - 1, 6)),
-      level: n(raw.level, 0, 1, 0.55),
+      level: n(raw.level, 0, 1.3, 0.55),
       rounds,
+      rules: sanitizeRules(raw.rules),
       distance: DISTANCES.some((d) => d.id === raw.distance) ? raw.distance : 'standard',
       seasonNo: Math.round(n(raw.seasonNo, 1, 99, 1)),
       budget: Math.round(n(raw.budget, 0, 9999, 0)),

@@ -7,7 +7,7 @@ import { drawLineChart } from './charts.js';
 import { ACHIEVEMENTS, DEFAULT_STATS } from '../sim/achievements.js';
 import { LESSONS, sanitizeSchool } from '../sim/school.js';
 import { KEY_ACTIONS, keyLabel, mergeKeys, sanitizeKeys } from './input.js';
-import { CHAMP_CAL, sanitizeCareer, UPGRADE_KEYS, UPGRADE_INFO, UPGRADE_MAX, upgradeCost, objectiveFor, DISTANCES, driverStandings, constructorStandings, lapsFor, weatherFor, WEATHER_NAMES, WEATHER_IDS, cleanNumMap, cleanStrMap, cleanResults } from '../sim/career.js';
+import { CHAMP_CAL, DEFAULT_RULES, MAX_ROUNDS, careerLaps, sanitizeRules, sanitizeCareer, UPGRADE_KEYS, UPGRADE_INFO, UPGRADE_MAX, upgradeCost, objectiveFor, DISTANCES, driverStandings, constructorStandings, lapsFor, weatherFor, WEATHER_NAMES, WEATHER_IDS, cleanNumMap, cleanStrMap, cleanResults } from '../sim/career.js';
 
 export const SAVE_KEY = 'apex-grand-prix.v1';
 
@@ -642,11 +642,45 @@ export class Menu {
         return `<button class="team ${n.team === i ? 'on' : ''}" data-cteam="${i}" style="--c:${t.color};--c2:${t.accent}"><i></i><div><b>${esc(t.name)}</b><div class="hint">Car ${Math.round(55 + t.rating * 45)}% · target P${o.finish}</div><div class="bar"><span style="width:${Math.round(55 + t.rating * 45)}%"></span></div></div></button>`;
       }).join('')}</div>
       <div class="hint" style="margin-top:.5rem">A weaker car is a tougher start: prize money buys upgrades, and strong seasons earn offers from better teams.</div></div>
-      <div class="grid2" style="margin-top:1rem">
-        <div class="panel"><h3>AI difficulty</h3>${this.chips('cn.level', DIFFICULTIES.map((d) => ({ value: d.level, label: d.name })), diff.level)}<div class="hint">${esc(diff.blurb)}. It rises a little every season.</div></div>
-        <div class="panel"><h3>Season</h3><div class="field"><label>Calendar</label>${this.chips('cn.rounds', [{ value: 4, label: '4 rounds' }, { value: 8, label: TRACK_DEFS.length + ' rounds (all circuits)' }], n.rounds)}</div>
-        <div class="field"><label>Race distance</label>${this.chips('cn.distance', DISTANCES.map((d) => ({ value: d.id, label: `${d.name} · ${d.km} km` })), n.distance)}</div></div></div>
-      <div class="footer"><button class="btn sm" data-act="main">◀ Back</button><div class="hint">${esc(TEAMS[n.team].name)} · ${n.rounds >= 8 ? TRACK_DEFS.length : n.rounds} rounds · ${esc(diff.name)}</div><button class="btn primary" data-act="careerstart">Start career</button></div></section>`;
+      ${this.careerRulesPanels(n, true)}
+      <div class="footer"><button class="btn sm" data-act="main">◀ Back</button><div class="hint">${esc(TEAMS[n.team].name)} · ${n.rounds} rounds · ${n.rules.laps ? n.rules.laps + (n.rules.laps === 1 ? ' lap' : ' laps') + ' a race' : 'races by distance'} · ${esc(diff.name)}</div><button class="btn primary" data-act="careerstart">Start career</button></div></section>`;
+  }
+
+  /** The editable rules of a career (a new one, or the running one from the hub): race rules and season rules. */
+  careerRulesPanels(T, isNew) {
+    const R = T.rules || (T.rules = sanitizeRules({}));
+    const diff = nearestDifficulty(T.level);
+    const lapsLabel = R.laps ? `${R.laps} ${R.laps === 1 ? 'lap' : 'laps'}` : 'By distance';
+    const bw = (v) => ({ value: v.value, label: v.label });
+    return `<div class="grid2" style="margin-top:1rem">
+      <div class="panel"><h3>Race rules</h3>
+        ${this.slider('cr.laps', 'Laps per race', R.laps, 0, 30, 1, lapsLabel)}
+        <div class="hint" style="margin:-.2rem 0 .6rem">Slide to 0 to use the race distance below. 1 lap makes every round a quick sprint.</div>
+        ${this.slider('cr.field', 'Cars on the grid', R.fieldSize, 2, 20, 1, R.fieldSize)}
+        ${this.slider('cr.grid', 'Your start without qualifying', Math.min(R.playerGrid, R.fieldSize), 1, R.fieldSize, 1, 'P' + Math.min(R.playerGrid, R.fieldSize))}
+        <div class="field"><label>Weather</label>${this.chips('cr.weather', [{ value: 'forecast', label: 'Forecast' }, { value: 'dry', label: 'Always dry' }, { value: 'light', label: 'Light rain' }, { value: 'heavy', label: 'Heavy rain' }, { value: 'changing', label: 'Changeable' }].map(bw), R.weather)}</div>
+        <div class="field"><label>Tyre wear</label>${this.chips('cr.tyreWear', [{ value: 0, label: 'Off' }, { value: 1.5, label: 'Low' }, { value: 3, label: 'Normal' }, { value: 6, label: 'High' }], R.tyreWear)}</div>
+        <div class="field"><label>Pit wall</label>${this.chips('cr.pitCalls', [{ value: 'off', label: 'Silent' }, { value: 'radio', label: 'Radio advice' }, { value: 'auto', label: 'Calls you in' }], R.pitCalls)}</div>
+        ${this.toggle('cr.damage', 'Damage', 'Wings, floor and sidepods can be broken', R.damage)}
+        ${this.toggle('cr.collisions', 'Car-to-car collisions', 'Off: cars pass through each other', R.collisions)}
+        ${this.toggle('cr.mandatoryStop', 'Mandatory pit stop', 'Everyone must stop once (a penalty if not)', R.mandatoryStop)}
+        ${this.toggle('cr.adaptive', 'Adaptive AI pace', 'Cars far ahead ease off, cars far behind push', R.adaptive)}
+      </div>
+      <div class="panel"><h3>Season rules</h3>
+        ${this.slider('cr.rounds', isNew ? 'Rounds per season' : 'Rounds per season (from next season)', T.rounds, 1, MAX_ROUNDS, 1, `${T.rounds} ${T.rounds === 1 ? 'round' : 'rounds'}`)}
+        <div class="field"><label>Race distance</label>${this.chips('cn.distance', DISTANCES.map((d) => ({ value: d.id, label: `${d.name} · ${d.km} km` })), T.distance)}<div class="hint">Used when laps per race is set to 0.</div></div>
+        <div class="field"><label>AI difficulty</label>${this.chips('cn.level', DIFFICULTIES.map((d) => ({ value: d.level, label: d.name })), diff.level)}<div class="hint">${esc(diff.blurb)}.</div></div>
+        ${this.toggle('cr.creep', 'Rivals improve every season', 'The AI gets a little faster each year (off: the difficulty stays where you set it)', R.creep)}
+        <div class="field"><label>Prize money</label>${this.chips('cr.prize', [{ value: 0.5, label: '×0.5' }, { value: 1, label: '×1' }, { value: 2, label: '×2' }, { value: 5, label: '×5' }], R.prize)}<div class="hint">Multiplies race prizes and the end-of-season bonus: more money, faster car development.</div></div>
+      </div></div>`;
+  }
+
+  screen_career_rules() {
+    const c = this.save.career;
+    return `<section class="screen panel-screen full">
+      <div class="row"><h2>Career <span>rules</span></h2><div class="grow"></div><div class="hint">Changes apply from your next race (the number of rounds from next season).</div></div>
+      ${this.careerRulesPanels(c, false)}
+      <div class="footer"><button class="btn primary" data-act="careerhub">◀ Back to career</button></div></section>`;
   }
 
   screen_career_hub() {
@@ -655,7 +689,7 @@ export class Menu {
     const id = s.calendar[s.round];
     const def = TRACK_DEFS.find((d) => d.id === id);
     const tr = this.hooks.tracks[id];
-    const laps = tr ? lapsFor(tr.length, c.distance) : 5;
+    const laps = tr ? careerLaps(c, tr.length) : 5;
     const obj = objectiveFor(c.team);
     const team = TEAMS[c.team];
     const dr = driverStandings(s).slice(0, 8);
@@ -671,7 +705,7 @@ export class Menu {
       <div class="row"><h2>Career <span>season ${c.seasonNo}</span></h2><div class="grow"></div><div class="hint"><b style="color:#fff">${esc(team.name)}</b> · budget <b style="color:#ffd24a;font-size:1.3rem">${c.budget}</b></div></div>
       <div class="grid2" style="grid-template-columns:1.1fr 1fr">
         <div class="panel"><h3>Round ${s.round + 1} of ${s.calendar.length}</h3>
-          <div class="hubtrack">${tr ? trackThumb(tr) : ''}<div><b style="font-size:1.3rem">${esc(def.name)}</b><div class="hint">${esc(def.country)} · ${tr ? (tr.length / 1000).toFixed(2) + ' km' : ''} · ${laps} laps</div>
+          <div class="hubtrack">${tr ? trackThumb(tr) : ''}<div><b style="font-size:1.3rem">${esc(def.name)}</b><div class="hint">${esc(def.country)} · ${tr ? (tr.length / 1000).toFixed(2) + ' km' : ''} · ${laps} ${laps === 1 ? "lap" : "laps"}</div>
           <div class="hint" style="margin-top:.5rem">Forecast: <b style="color:#fff">${esc(WEATHER_NAMES[weatherFor(s)])}</b>${weatherFor(s) !== 'dry' ? ' — be ready to change tyres' : ''}</div>
           <div class="hint" style="margin-top:.3rem">Objective: finish <b style="color:#fff">P${obj.finish}</b> or better (+8 prize). Constructors target: P${obj.constructor}.</div></div></div>
           <div class="row" style="margin-top:.8rem"><button class="btn primary grow" data-act="careerrace" data-q="1">Qualify &amp; race</button><button class="btn grow" data-act="careerrace" data-q="0">Race now</button></div>
@@ -682,7 +716,7 @@ export class Menu {
         <div class="panel"><h3>Drivers' championship</h3><table class="results">${dr.length ? dr.map((d, i) => `<tr class="${d.name === 'You' ? 'me' : ''}"><td class="pos">${i + 1}</td><td>${esc(d.name)}</td><td>${esc(d.team)}</td><td><b>${d.pts}</b></td></tr>`).join('') : '<tr><td class="hint">No races yet</td></tr>'}</table></div>
         <div class="panel"><h3>Constructors</h3><table class="results">${cons.length ? cons.map((d, i) => `<tr class="${d.team === team.short ? 'me' : ''}"><td class="pos">${i + 1}</td><td>${esc(d.team)}</td><td><b>${d.pts}</b></td></tr>`).join('') : '<tr><td class="hint">No races yet</td></tr>'}</table></div>
       </div>
-      <div class="footer"><button class="btn sm" data-act="main">Main menu</button><div class="hint">${c.history.length ? `Previous seasons: ${c.history.map((h) => `S${h.seasonNo} P${h.driverPos}`).join(' · ')}` : ''}</div><button class="btn sm" data-act="careerwipe" data-confirm="0">Abandon career</button></div></section>`;
+      <div class="footer"><button class="btn sm" data-act="main">Main menu</button><div class="hint">${c.history.length ? `Previous seasons: ${c.history.map((h) => `S${h.seasonNo} P${h.driverPos}`).join(' · ')}` : ''}</div><div class="row"><button class="btn sm" data-act="careerrules">Career rules</button><button class="btn sm" data-act="careerwipe" data-confirm="0">Abandon career</button></div></div></section>`;
   }
 
   screen_career_end() {
@@ -766,10 +800,12 @@ export class Menu {
     if (t.dataset.chip) {
       const k = t.dataset.chip, v = t.dataset.value;
       const c = this.config;
-      if (k.startsWith('cn.')) {
-        const n = this.cnew || (this.cnew = { team: 6, level: 0.55, rounds: 4, distance: 'standard' });
+      if (k.startsWith('cn.') || k.startsWith('cr.')) {
+        const T = this.careerTarget();
         const f = k.slice(3);
-        n[f] = f === 'distance' ? v : +v;
+        if (k.startsWith('cr.')) T.rules[f] = f === 'weather' || f === 'pitCalls' ? v : +v;
+        else T[f] = f === 'distance' ? v : +v;
+        if (!this.cnewIsTarget(T)) this.persist();
         return this.rerender();
       }
       if (k === 'diff') c.level = +v;
@@ -796,6 +832,12 @@ export class Menu {
     }
     if (t.dataset.toggle) {
       const k = t.dataset.toggle;
+      if (k.startsWith('cr.')) {
+        const T = this.careerTarget();
+        T.rules[k.slice(3)] = !T.rules[k.slice(3)];
+        if (!this.cnewIsTarget(T)) this.persist();
+        return this.rerender();
+      }
       if (k.startsWith('a.')) this.config.assists[k.slice(2)] = !this.config.assists[k.slice(2)];
       else if (k === 's.line') this.save.settings.line = !(this.save.settings.line !== false);
       else if (k.startsWith('s.')) this.save.settings[k.slice(2)] = !this.save.settings[k.slice(2)];
@@ -835,6 +877,8 @@ export class Menu {
       case 'careerstart': return H.careerStart({ ...this.cnew });
       case 'careerrace': return H.careerRace(t.dataset.q === '1');
       case 'careercontinue': return H.openCareer();
+      case 'careerrules': return this.show('career_rules');
+      case 'careerhub': return this.show('career_hub');
       case 'careerwipe':
         if (t.dataset.confirm !== '1') {
           t.dataset.confirm = '1';
@@ -983,6 +1027,7 @@ export class Menu {
     if (!k) return;
     const v = +t.value;
     const c = this.config;
+    if (k.startsWith('cr.')) return this.onCareerSlider(k, v, t);
     if (k === 'laps') c.laps = v;
     else if (k === 'level') c.level = v / 100;
     else if (k === 'fieldSize') {
@@ -1029,6 +1074,46 @@ export class Menu {
       const bl = this.root.querySelector('#diff-blurb');
       if (bl) bl.textContent = d.blurb + ' — drag for any value in between. Rookie leaves you room to learn; Legend runs every car at the physical limit.';
     }
+  }
+
+  /** The object the career rules screens edit: the new-career draft, or the running career. */
+  careerTarget() {
+    if (this.current === 'career_new' || !this.save.career) {
+      const n = this.cnew || (this.cnew = { team: 6, level: 0.55, rounds: 4, distance: 'standard' });
+      if (!n.rules) n.rules = sanitizeRules({});
+      return n;
+    }
+    const c = this.save.career;
+    if (!c.rules) c.rules = sanitizeRules({});
+    return c;
+  }
+
+  cnewIsTarget(T) {
+    return T === this.cnew;
+  }
+
+  onCareerSlider(k, v, t) {
+    const T = this.careerTarget();
+    const R = T.rules;
+    if (k === 'cr.laps') R.laps = v;
+    else if (k === 'cr.field') {
+      R.fieldSize = v;
+      R.playerGrid = Math.min(R.playerGrid, v);
+      const g = this.root.querySelector('[data-slider="cr.grid"]'); // keep the start-position slider inside the new field
+      if (g) {
+        g.max = v;
+        g.value = R.playerGrid;
+        const gl = g.closest('.field').querySelector('label b');
+        if (gl) gl.textContent = 'P' + R.playerGrid;
+      }
+    } else if (k === 'cr.grid') R.playerGrid = Math.min(v, R.fieldSize);
+    else if (k === 'cr.rounds') T.rounds = v;
+    if (!this.cnewIsTarget(T)) {
+      clearTimeout(this._persistT);
+      this._persistT = setTimeout(() => this.persist(), 300);
+    }
+    const lab = t.closest('.field').querySelector('label b');
+    if (lab) lab.textContent = k === 'cr.laps' ? (v ? `${v} ${v === 1 ? 'lap' : 'laps'}` : 'By distance') : k === 'cr.grid' ? 'P' + R.playerGrid : k === 'cr.rounds' ? `${v} ${v === 1 ? 'round' : 'rounds'}` : v;
   }
 
   rerender() {

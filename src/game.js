@@ -401,21 +401,27 @@ class Game {
     const trackId = s.calendar[s.round];
     const track = this.tracks[trackId];
     const base = this.menu.config;
+    const rules = Career.sanitizeRules(c.rules);
+    const weather = rules.weather === 'forecast' ? Career.weatherFor(s) : rules.weather;
     const cfg = {
       ...base,
       mode: qualify ? 'qualifying' : 'race',
       trackId,
-      laps: Career.lapsFor(track.length, c.distance),
+      laps: Career.careerLaps(c, track.length),
       level: c.level,
-      fieldSize: 20,
-      playerGrid: 12,
+      fieldSize: rules.fieldSize,
+      playerGrid: Math.min(rules.playerGrid, rules.fieldSize),
       team: c.team,
       frontWing: null,
       rearWing: null,
-      mandatoryStop: false,
-      adaptive: false,
-      weather: Career.weatherFor(s),
-      compound: Career.weatherFor(s) === 'light' || Career.weatherFor(s) === 'heavy' ? 'wet' : 'medium',
+      mandatoryStop: rules.mandatoryStop,
+      adaptive: rules.adaptive,
+      tyreWear: rules.tyreWear,
+      damage: rules.damage,
+      collisions: rules.collisions,
+      pitCalls: rules.pitCalls,
+      weather,
+      compound: weather === 'light' || weather === 'heavy' ? 'wet' : 'medium',
       qualiTimes: null,
       seed: undefined,
       upgrades: { ...c.upgrades },
