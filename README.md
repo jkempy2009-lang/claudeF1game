@@ -45,26 +45,26 @@ npm run test:leak    # browser: GPU resources across repeated sessions
 
 **Engineering** – brake discs have their own temperature (cold carbon bites less, above about 880 C it fades, and they glow through the wheels at night); a pit wall that reads your measured tyre wear and calls the stop (radio advice or automatic); tyre-pressure setup; live telemetry traces (Y); bloom at dusk and night; accessibility options (colour-blind-safe racing line, reduced motion, larger HUD); on-screen touch controls with pit, DRS, ERS, camera and pause buttons.
 
-Reference clean-lap pace of the best car at each level (medium tyres; `node tools/pace-table.mjs` regenerates this table). Legend is calibrated to a very good human lap: about 1:19 at Hautes-Fagnes, 1:08.5 at Vettore and 1:06 at La Rade. In a race the top drivers keep about 2 % in hand:
+Reference clean-lap pace of the best car at each level (medium tyres; `node tools/pace-table.mjs` regenerates this table). Since the racing line was rebuilt (see below) every level is about 9 % quicker than it used to be: Legend now drives the physical limit of the car on the best line, the same line the on-screen guide shows you. In a race the top drivers keep about 2 % in hand:
 
-| | Rookie | Amateur | Pro | Elite | Legend |
-|---|---|---|---|---|---|
-| Autodromo del Vettore | 1:22.125 | 1:16.887 | 1:12.933 | 1:09.942 | 1:08.558 |
-| Circuit de la Rade | 1:20.525 | 1:15.154 | 1:10.825 | 1:07.533 | 1:05.533 |
-| Northfield Grand Prix Circuit | 1:39.229 | 1:32.792 | 1:27.950 | 1:24.354 | 1:22.679 |
-| Circuit des Hautes-Fagnes | 1:33.771 | 1:27.850 | 1:23.050 | 1:19.575 | 1:18.121 |
-| Autódromo Costa Azul | 1:37.921 | 1:31.287 | 1:26.196 | 1:22.525 | 1:20.783 |
-| Monte Aurora Ring | 1:23.471 | 1:17.512 | 1:13.067 | 1:09.871 | 1:08.287 |
-| Mirage International Circuit | 1:39.533 | 1:32.546 | 1:27.479 | 1:23.817 | 1:22.183 |
-| Parc Lumière | 1:42.112 | 1:34.571 | 1:28.792 | 1:24.746 | 1:22.446 |
-| Porto Vecchio Harbour Circuit | 1:41.471 | 1:34.104 | 1:28.767 | 1:24.858 | 1:22.529 |
-| Sakura Ridge Circuit | 2:01.779 | 1:53.392 | 1:47.600 | 1:43.279 | 1:41.096 |
-| Circuit de la Bastide | 1:29.575 | 1:23.462 | 1:19.046 | 1:15.975 | 1:14.296 |
-| Caldera Speedway | 1:27.937 | 1:22.158 | 1:17.883 | 1:14.712 | 1:13.508 |
+| | Rookie | Amateur | Pro | Elite | Legend | F1 |
+|---|---|---|---|---|---|---|
+| Autodromo del Vettore | 1:18.896 | 1:14.062 | 1:10.325 | 1:07.325 | 1:05.775 | 1:05.025 |
+| Circuit de la Rade | 1:12.879 | 1:08.258 | 1:04.417 | 1:01.475 | 0:59.687 | 0:58.575 |
+| Northfield Grand Prix Circuit | 1:26.979 | 1:21.804 | 1:17.812 | 1:14.546 | 1:12.967 | 1:12.187 |
+| Circuit des Hautes-Fagnes | 1:25.079 | 1:19.942 | 1:15.871 | 1:12.633 | 1:11.158 | 1:10.400 |
+| Autódromo Costa Azul | 1:28.087 | 1:22.667 | 1:18.325 | 1:14.908 | 1:13.304 | 1:12.337 |
+| Monte Aurora Ring | 1:15.867 | 1:10.929 | 1:07.058 | 1:04.000 | 1:02.400 | 1:01.542 |
+| Mirage International Circuit | 1:30.408 | 1:24.346 | 1:19.917 | 1:16.533 | 1:14.812 | 1:13.904 |
+| Parc Lumière | 1:34.104 | 1:27.742 | 1:22.708 | 1:18.900 | 1:16.479 | 1:15.279 |
+| Porto Vecchio Harbour Circuit | 1:31.467 | 1:25.246 | 1:20.679 | 1:17.025 | 1:14.779 | 1:13.729 |
+| Sakura Ridge Circuit | 1:48.150 | 1:41.342 | 1:36.050 | 1:32.125 | 1:30.237 | 1:29.117 |
+| Circuit de la Bastide | 1:21.325 | 1:16.154 | 1:12.129 | 1:09.146 | 1:07.683 | 1:06.754 |
+| Caldera Speedway | 1:18.837 | 1:13.796 | 1:10.100 | 1:07.267 | 1:05.929 | 1:05.179 |
 
 **After the flag** – a finish scene with a Victory / Podium / Points banner, then the classification with **telemetry charts** (lap time, fuel, tyre wear, top speed against the winner), a 30-second **instant replay** from trackside cameras, and **photo mode** with PNG capture.
 
-**Racing line guide** – a ribbon on the road ahead, coloured from the braking envelope of the circuit: green keep going, yellow ease off, red brake now. Toggle with L or in Settings.
+**Racing line guide** – a ribbon on the road ahead that starts under your car and eases onto the best line, with a white bar at each braking point and a square at each apex; the line itself is a full-width, late-apex line (7-12 % quicker than the old one in the real physics, and kept 1.9 m inside the edge, 2.6 m on street circuits, so a clean lap stays legal):  coloured from the braking envelope of the circuit: green keep going, yellow ease off, red brake now. Toggle with L or in Settings.
 
 **Driver aids** – ABS, traction control (4 levels), stability control, steering-lock assist, automatic/manual gearbox, pit autopilot, interactive pit stops; presets from Beginner to Simulator. Keyboard, gamepad (with vibration) and basic touch controls.
 
