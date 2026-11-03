@@ -186,7 +186,7 @@ export class AIDriver {
     const paceK = this.dp.pace * this.skill * this.raceK * this.paceAdapt * this.gripAdapt * air * it.push * it.yieldLift;
     let vt = prof.v[idx] * paceK * (this.mistake && this.mistake.active ? this.mistake.factor : 1);
     // use the whole car on the straights: with the wing open the drag falls and the car keeps accelerating past the plain profile speed
-    if (this.managePower && this.pitState === 'none' && Math.abs(kt) < 0.0025 && Math.abs(kPath) < 0.003) vt *= 1 + (inp.drs ? 0.05 : 0) + (inp.boost ? 0.02 : 0);
+    if (this.managePower && this.pitState === 'none' && Math.abs(kt) < 0.0025 && Math.abs(kPath) < 0.006) vt *= 1 + (inp.drs ? 0.05 : 0) + (inp.boost ? 0.02 : 0);
     // off the road (either side; the pit lane is not off the road): slow down and return
     const inPitArea = this.pitState !== 'none' && tr._pitBlend(s) > 0.01;
     if (car.onGrass || (!inPitArea && (car.d > tr.wl[car.i] + 1.5 || -car.d > tr.wr[car.i] + 1.5))) vt = Math.min(vt, 28);
@@ -310,7 +310,7 @@ export class AIDriver {
     inp.brake = brk;
 
     // --- DRS / ERS
-    const straight = Math.abs(kt) < 0.0025 && Math.abs(kPath) < 0.003;
+    const straight = Math.abs(kt) < 0.0025 && Math.abs(kPath) < 0.006;
     inp.drs = !!car.drsAllowed && thr > 0.95 && brk < 0.05 && straight;
     const underSc = race.sc && race.sc.state !== 'none';
     const gapAhead = car.gapAhead ?? 99;

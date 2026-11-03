@@ -267,7 +267,7 @@ function solvePenta(d0, d1, d2, b) {
  * banded least-squares problem (curvature + a little path length), with an active-set loop to
  * respect the track limits. Returns lateral offsets (+ left) per sample.
  */
-function computeRacingLine(track, margin = 1.1, lengthWeight = 0.04, smoothLen = 24) {
+export function computeRacingLine(track, margin = 1.1, lengthWeight = 0.001, smoothLen = 10) {
   const N = track.N;
   const M = N * 3;
   const cx = new Float64Array(M), cy = new Float64Array(M), nx = new Float64Array(M), ny = new Float64Array(M);
