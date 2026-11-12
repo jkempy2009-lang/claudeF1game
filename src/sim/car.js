@@ -43,7 +43,10 @@ export class Car {
 
     this.omega = new Float64Array(4);
     this.alphaLag = new Float64Array(4);
-    this.temp = new Float64Array(4).fill(85);
+    this.temp = new Float64Array(4).fill(85); // carcass (core): slow, sets the grip window and the degradation
+    this.tempS = new Float64Array(4).fill(85); // surface skin: flashes in a slide or lock-up, cooled by the airflow
+    this.grain = new Float64Array(4); // graining 0..1: torn surface from pushing on cold rubber, cleans up with running
+    this.gLoad = 1; // vertical load factor from the road's vertical curvature
     this.brakeTemp = new Float64Array(4).fill(260); // carbon discs, deg C: glow when hot, fade when cooked, weak when cold
     this.wear = new Float64Array(4);
     this.fz = new Float64Array(4);
@@ -132,6 +135,7 @@ export class Car {
     this.d = p.d;
     this.trackH = this.track.at(this.track.z, p.s);
     this.trackSlope = this.track.slope[p.i];
+    this.trackKv = this.track.kv ? this.track.kv[p.i] : 0;
     this.trackHeading = this.track.hdgAt(p.s);
   }
 
@@ -217,8 +221,11 @@ export class Car {
     const m = mass;
     const g = G;
     // front wing + front floor load the front axle; rear wing + diffuser the rear
-    let fFront = m * g * sp.weightFront + aero.downF;
-    let fRear = m * g * (1 - sp.weightFront) + aero.downR;
+    // a compression presses the car into the road, a crest unweights it (v^2 times the road's vertical curvature)
+    const gz = 1 + clamp((V * V * (this.trackKv || 0)) / g, -0.3, 0.35);
+    this.gLoad = gz;
+    let fFront = m * g * gz * sp.weightFront + aero.downF;
+    let fRear = m * g * gz * (1 - sp.weightFront) + aero.downR;
     const dLong = (m * this.axF * sp.hCg) / L;
     fFront -= dLong;
     fRear += dLong;
@@ -383,7 +390,9 @@ export class Car {
       const al = this.alphaLag[w];
 
       // grip
-      const tempF = clamp(1 - 0.2 * ((this.temp[w] - comp.tOpt) / comp.tRange) ** 2, 0.7, 1.02);
+      // the window is set by the carcass, nudged by the skin; a cooked skin (a slide, a lock-up) and a grained one cost grip on top
+      const tEff = this.temp[w] + 0.3 * (this.tempS[w] - this.temp[w]);
+      const tempF = clamp(1 - 0.2 * ((tEff - comp.tOpt) / comp.tRange) ** 2, 0.7, 1.02) * (1 - 0.08 * smoothstep(comp.tOpt + comp.tRange, comp.tOpt + comp.tRange + 45, this.tempS[w])) * (1 - 0.07 * this.grain[w]);
       const wearW = this.wear[w];
       const wearF = 1 - 0.06 * wearW - 0.2 * smoothstep(0.62, 1.0, wearW);
       let mu = Math.max(0.7, mu0 - sp.loadSens * (Fz - sp.fz0)) * comp.mu * tempF * wearF * surf.grip * (front ? sp.frontGrip : sp.rearGrip);
@@ -452,6 +461,17 @@ export class Car {
       if (locked) {
         this.temp[w] += 55 * dt * clamp(1 - (this.temp[w] - comp.tOpt) / 75, 0, 1);
         this.flat[w] = Math.min(1, this.flat[w] + dt * 0.5);
+      }
+      // surface skin: sits above the carcass by the sliding power (about 15 K in a hard corner, 100+ K locked), minus the airflow
+      {
+        const flash = Math.min(locked ? 150 : 110, P * 5.2e-4 * pressureHeat * (comp.wetTyre ? 0.55 : 1));
+        const target = this.temp[w] + flash - 0.06 * V * (1 + 0.6 * this.wetness);
+        const ts = this.tempS[w];
+        this.tempS[w] = ts + (target - ts) * Math.min(1, dt / (target > ts ? 0.4 : 0.9));
+        // graining: sliding a cold skin tears it; it cleans up again with laps in the window
+        const g0 = this.grain[w];
+        if (ts < comp.tOpt - 0.55 * comp.tRange && P > 9000 && absVl > 12) this.grain[w] = Math.min(1, g0 + dt * 0.05 * Math.min(3, P / 20000));
+        else if (g0 > 0 && absVl > 15) this.grain[w] = Math.max(0, g0 - dt * (Math.abs(this.temp[w] - comp.tOpt) < comp.tRange * 0.6 ? 0.02 : 0.006));
       }
       const overheat = Math.max(0, this.temp[w] - comp.tOpt - comp.tRange * 0.9) / 30;
       this.wear[w] = Math.min(1.2, this.wear[w] + ((P * dt) / (comp.wearLaps * WEAR_REF_J)) * (this.wearMult ?? 1) * pressureWear * (1 + 3 * overheat + (locked ? 5 : 0) + (comp.wetTyre ? 2.5 * (1 - smoothstep(0.05, 0.4, this.wetness)) : 0)) * dens);
@@ -530,6 +550,8 @@ export class Car {
     this.roll = lerp(this.roll, clamp(-this.ayF * 0.0005, -0.025, 0.025), 1 - Math.exp(-dt * 5));
     this.onGrass = grassHit >= 3;
     this.aeroDown = aero.downF + aero.downR;
+    // floor bottoming: the load on the springs (downforce plus a compression) against the ride height; 0 = clear, 1 = the plank is on the road
+    this.bottoming = clamp((this.aeroDown / (m * g) + 9 * (gz - 1) - 3.4) / 0.7, 0, 1) * (V > 55 ? 1 : 0);
     this.aeroDrag = aero.drag;
     this.latG = this.ayF / G;
     this.longG = this.axF / G;
@@ -550,6 +572,8 @@ export class Car {
     this.spec = { ...this.spec, compound };
     this.wear.fill(0);
     this.temp.fill(72);
+    this.tempS.fill(72);
+    this.grain.fill(0);
     this.puncture.fill(0);
     this.flat.fill(0);
   }

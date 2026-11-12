@@ -139,7 +139,7 @@ export class AIDriver {
         const tf = clamp(1 - 0.2 * ((car.temp[w] - comp.tOpt) / comp.tRange) ** 2, 0.7, 1.02);
         const wr = car.wear[w];
         const wf = 1 - 0.06 * wr - 0.2 * smoothstep(0.62, 1.0, wr);
-        g += tf * wf;
+        g += tf * wf * (1 - 0.07 * (car.grain ? car.grain[w] : 0));
       }
       g /= 4;
       // a broken wing, floor or punctured tyre costs grip as well: drive to what the car has left
@@ -229,7 +229,9 @@ export class AIDriver {
       // cold carbon bites less and cooked carbon fades: brake for what the discs can deliver right now
       const bt = car.brakeTemp;
       const brakeEff = bt ? (0.86 + 0.14 * smoothstep(120, 420, (bt[0] + bt[1] + bt[2] + bt[3]) / 4)) * (1 - 0.3 * smoothstep(880, 1150, Math.max(bt[0], bt[1], bt[2], bt[3]))) : 1;
-      const capBrake = Math.max(12, prof.env.brakeDecel(Math.max(V, 5), 0.92) * this.gripAdapt * this.gripAdapt * brakeEff);
+      // over a crest the car is light and stops less well, in a compression better; gravity along the slope adds or takes away
+      const gzK = 1 + ((car.gLoad || 1) - 1) / (1 + (V / 46) * (V / 46));
+      const capBrake = Math.max(8, prof.env.brakeDecel(Math.max(V, 5), 0.92) * this.gripAdapt * this.gripAdapt * brakeEff * gzK + 0.8 * 9.81 * (car.trackSlope || 0));
       const maxDist = (V * V) / (2 * 0.4 * capBrake) + 40;
       let aReq = 0;
       const step = Math.max(1, Math.round(6 / prof.ds));
@@ -287,7 +289,7 @@ export class AIDriver {
         thr = clamp(0.16 + (want + aDrag) / (aMax + aDrag), 0, 1);
         if (errNow > 3) thr = 1;
         // friction circle: the more lateral grip we are using, the less throttle the rears can take
-        const ayUse = Math.min(1, Math.abs(car.ayF) / Math.max(10, prof.env.latAccel(Math.max(V, 10), 0.97) * this.gripAdapt * this.gripAdapt));
+        const ayUse = Math.min(1, Math.abs(car.ayF) / Math.max(8, prof.env.latAccel(Math.max(V, 10), 0.97) * this.gripAdapt * this.gripAdapt * gzK));
         thr = Math.min(thr, 0.15 + 1.1 * Math.sqrt(Math.max(0, 1 - ayUse * ayUse)));
         // rear stepping out: lift
         const aR = Math.max(Math.abs(car.alpha[2]), Math.abs(car.alpha[3]));

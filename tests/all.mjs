@@ -24,6 +24,7 @@ const suites = [
   ['car power boost', 'tests/carpower.mjs'],
   ['rival decision matrix', 'tests/brain.mjs'],
   ['career rules', 'tests/careerrules.mjs'],
+  ['tyre model', 'tests/tyres.mjs'],
 ];
 let failed = 0;
 for (const [name, file] of suites) {

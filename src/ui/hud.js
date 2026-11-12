@@ -487,10 +487,10 @@ export class HUD {
     const dm = p.damageSummary();
     const dmg = dm.worst;
     const flat = Math.max(p.flat[0], p.flat[1], p.flat[2], p.flat[3]);
-    txt(el.tyD, dmg > 0.05 ? `FW ${Math.round(dm.fw * 100)}% · SP ${Math.round(Math.max(dm.sideL, dm.sideR) * 100)}% · RW ${Math.round(dm.rw * 100)}% · downforce −${Math.round(dm.aeroLoss * 100)}%` : flat > 0.2 ? 'Flat spots' : '');
+    txt(el.tyD, dmg > 0.05 ? `FW ${Math.round(dm.fw * 100)}% · SP ${Math.round(Math.max(dm.sideL, dm.sideR) * 100)}% · RW ${Math.round(dm.rw * 100)}% · downforce −${Math.round(dm.aeroLoss * 100)}%` : flat > 0.2 ? 'Flat spots' : p.grain && Math.max(p.grain[0], p.grain[1], p.grain[2], p.grain[3]) > 0.3 ? 'Graining: tyres too cold to push' : '');
     for (let w = 0; w < 4; w++) {
       const tb = el.tyreBoxes[w];
-      const temp = p.temp[w];
+      const temp = p.tempS ? p.tempS[w] : p.temp[w]; // the skin: reacts at once to a slide or a lock-up
       const opt = comp.tOpt;
       const dt = temp - opt;
       // blue = cold, green = in window, red = overheated

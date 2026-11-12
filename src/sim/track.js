@@ -267,6 +267,8 @@ function solvePenta(d0, d1, d2, b) {
  * banded least-squares problem (curvature + a little path length), with an active-set loop to
  * respect the track limits. Returns lateral offsets (+ left) per sample.
  */
+/** Corner asymmetry of the racing line: extra curvature cost on slow-corner exits, discount on their entries (0 = symmetric). */
+export const LINE_TUNE = { exitW: 0, entryW: 0 };
 const WALL_CLEAR = 3.2; // metres from the car's centre line to a barrier, for the racing line
 export function computeRacingLine(track, margin = 1.9, lengthWeight = 0.001, smoothLen = 10) {
   const N = track.N;
@@ -294,17 +296,41 @@ export function computeRacingLine(track, margin = 1.9, lengthWeight = 0.001, smo
     l0x[m] = cx[m + 1] - cx[m];
     l0y[m] = cy[m + 1] - cy[m];
   }
+  // Asymmetric corners: curvature costs more on the way out of a slow corner that opens onto a straight (the car is traction-limited
+  // there and every bit of straightness is carried all the way down the straight) and less on the way in (it is braking anyway).
+  // The solver then gives up some entry radius for a straighter exit: a later turn-in and a later apex.
+  const wt = new Float64Array(N).fill(1);
+  if (track.corners && (LINE_TUNE.exitW || LINE_TUNE.entryW)) {
+    const cs = track.corners, ds = track.ds;
+    for (let c = 0; c < cs.length; c++) {
+      const cor = cs[c], next = cs[(c + 1) % cs.length];
+      const radius = 1 / Math.max(cor.maxK, 1e-6);
+      const straightAfter = ((next.start - cor.end + N) % N) * ds;
+      const k = Math.min(1, Math.max(0, (90 - radius) / 50)) * Math.min(1, Math.max(0, (straightAfter - 120) / 250));
+      if (k <= 0) continue;
+      const apex = cor.apex ?? Math.round((cor.start + cor.end) / 2);
+      const a = cor.start - Math.round(50 / ds), b = cor.end + Math.round(70 / ds);
+      for (let n = a; n <= b; n++) {
+        const i = ((n % N) + N) % N;
+        const exit = n >= apex;
+        const edge = Math.min(1, (n - a) / 12, (b - n) / 12); // fade in and out
+        const v = exit ? 1 + LINE_TUNE.exitW * k * edge : 1 - LINE_TUNE.entryW * k * edge;
+        wt[i] = exit ? Math.max(wt[i], v) : Math.min(wt[i], v);
+      }
+    }
+  }
   const dotN = (j, k) => nx[j] * nx[k] + ny[j] * ny[k];
   const B0 = new Float64Array(M), B1 = new Float64Array(M), B2 = new Float64Array(M), rhs = new Float64Array(M);
   for (let m = 1; m < M - 1; m++) {
     const idx = [m - 1, m, m + 1];
     const co = [1, -2, 1];
+    const wm = wt[m % N];
     for (let p = 0; p < 3; p++) {
       const j = idx[p];
-      rhs[j] -= co[p] * (nx[j] * a0x[m] + ny[j] * a0y[m]);
+      rhs[j] -= wm * co[p] * (nx[j] * a0x[m] + ny[j] * a0y[m]);
       for (let q = p; q < 3; q++) {
         const k = idx[q];
-        const v = co[p] * co[q] * dotN(j, k);
+        const v = wm * co[p] * co[q] * dotN(j, k);
         if (k === j) B0[j] += v;
         else if (k - j === 1) B1[j] += v;
         else if (k - j === 2) B2[j] += v;
@@ -476,6 +502,9 @@ export class Track {
     }
     this.slope = new Float64Array(N);
     for (let i = 0; i < N; i++) this.slope[i] = (this.z[(i + 1) % N] - this.z[(i + N - 1) % N]) / (2 * this.ds);
+    // vertical curvature (1/m): positive in a compression (the road pushes up), negative over a crest (the car goes light)
+    this.kv = new Float64Array(N);
+    for (let i = 0; i < N; i++) this.kv[i] = (this.slope[(i + 1) % N] - this.slope[(i + N - 1) % N]) / (2 * this.ds);
 
     this.segInfo = lay.segs.map((sg) => ({ type: sg.t, name: sg.name, length: sg.length, s: mod(sg.start - startAt, this.length), dir: sg.dir, r: sg.r, angle: sg.ang }));
     this._buildCorners();

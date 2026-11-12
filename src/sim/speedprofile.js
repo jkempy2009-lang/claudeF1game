@@ -41,7 +41,18 @@ export function buildSpeedProfile(track, spec, opts = {}) {
   const vTop = 110;
   // high-speed corners get less of the envelope: little steering authority and a car that is a handful on the edge
   const hs = opts.highSpeedDerate ?? 0.2;
-  const lat = (v) => env.latAccel(v, latUse * (1 - hs * Math.min(1, Math.max(0, (v - 60) / 40))));
+  const lat0 = (v) => env.latAccel(v, latUse * (1 - hs * Math.min(1, Math.max(0, (v - 60) / 40))));
+  // elevation: over a crest the car goes light and has less grip, in a compression more (the static-weight share of the load scales
+  // with v^2 times the road's vertical curvature); gravity along the slope helps or hurts braking and acceleration
+  const kvArr = track.kv, slopeArr = track.slope;
+  let cur = 0; // sample the passes are working on (set before each lat()/circle() call)
+  const lat = (v) => {
+    const kv = kvArr ? kvArr[cur] : 0;
+    if (!kv) return lat0(v);
+    const gz = Math.min(0.35, Math.max(-0.3, (v * v * kv) / 9.81));
+    return lat0(v) * (1 + gz / (1 + (v / 46) * (v / 46)));
+  };
+  const gSlope = (i) => (slopeArr ? 0.8 * 9.81 * slopeArr[i] : 0);
 
   // corner limit: m v^2 |k| = latAccel(v)*m  -> solve v by bisection on f(v) = v^2 |k| - ay(v)
   const vCorner = new Float64Array(N);
@@ -51,6 +62,7 @@ export function buildSpeedProfile(track, spec, opts = {}) {
       vCorner[i] = vTop;
       continue;
     }
+    cur = i;
     let lo = 4, hi = vTop;
     for (let it = 0; it < 28; it++) {
       const mid = (lo + hi) / 2;
@@ -72,7 +84,8 @@ export function buildSpeedProfile(track, spec, opts = {}) {
   const vBrake = Float64Array.from(vCorner);
   for (let n = 2 * N; n > 0; n--) {
     const j = n % N, i = (n - 1 + N) % N;
-    const b = env.brakeDecel(vBrake[j], brakeUse) * circle(vBrake[j], kappa[j]);
+    cur = j;
+    const b = Math.max(2, env.brakeDecel(vBrake[j], brakeUse) * circle(vBrake[j], kappa[j]) + gSlope(j));
     const vp = Math.sqrt(vBrake[j] * vBrake[j] + 2 * b * ds);
     if (vp < vBrake[i]) vBrake[i] = vp;
   }
@@ -81,14 +94,16 @@ export function buildSpeedProfile(track, spec, opts = {}) {
   // forward pass (acceleration), two laps for the cyclic boundary
   for (let n = 0; n < twoLaps; n++) {
     const i = n % N, j = (n + 1) % N;
-    const a = env.accel(v[i], accelUse) * circle(v[i], kappa[i]);
+    cur = i;
+    const a = env.accel(v[i], accelUse) * circle(v[i], kappa[i]) - gSlope(i);
     const vn = Math.sqrt(Math.max(0, v[i] * v[i] + 2 * Math.max(a, 0) * ds));
     if (vn < v[j]) v[j] = vn;
   }
   // backward pass (braking)
   for (let n = twoLaps; n > 0; n--) {
     const j = n % N, i = (n - 1 + N) % N;
-    const b = env.brakeDecel(v[j], brakeUse) * circle(v[j], kappa[j]);
+    cur = j;
+    const b = Math.max(2, env.brakeDecel(v[j], brakeUse) * circle(v[j], kappa[j]) + gSlope(j));
     const vp = Math.sqrt(v[j] * v[j] + 2 * b * ds);
     if (vp < v[i]) v[i] = vp;
   }
