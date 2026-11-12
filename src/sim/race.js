@@ -3,6 +3,7 @@ import { makeSpec, COMPOUNDS, COMPOUND_IDS, DRY_COMPOUND_IDS, wetGripFactor } fr
 import { buildSpeedProfile, lineGeometry } from './speedprofile.js';
 import { AIDriver } from './ai.js';
 import { collideCars, collideWalls } from './collision.js';
+import { pitWindowCall } from './racecraft.js';
 import { TEAMS, DRIVERS } from './teams.js';
 import { SURF } from './track.js';
 import { upgradeEffects } from './career.js';
@@ -777,6 +778,30 @@ export class Race {
       const done = rs.stops >= 1;
       const lapsLeft = this.totalLaps - rs.laps;
       if (!drv.wantsPit && drv.pitState === 'none' && lapsLeft > 1) {
+        // timing against the car ahead: undercut (stop early out of its dirty air) or overcut (stay out when it stops)
+        if (rs.plannedStop != null && !done && this.opt.mode === 'race') {
+          const ah = car.ahead;
+          const stuck = !!ah && car.gapAhead != null && car.gapAhead < 1.5 && !ah.rs.inPitLane;
+          rs.stuckT = stuck ? (rs.stuckT || 0) + dt : 0;
+          const aheadPitted = !!rs.lastAhead && rs.lastAhead !== ah && (rs.lastAhead.rs.inPitLane || !!rs.lastAhead.rs.service);
+          if (ah && !ah.rs.inPitLane) rs.lastAhead = ah;
+          const call = pitWindowCall({ lap: rs.laps, planned: rs.plannedStop, lapsLeft, gapAhead: car.gapAhead, stuckT: rs.stuckT, aheadPitted, wear: ts.wear, used: rs.pitPlays || (rs.pitPlays = {}) });
+          // an undercut only works if you are the one doing it: one car at a time, and never into a busy pit lane
+          let busy = 0;
+          for (const o of this.cars) if (o !== car && (o.rs.inPitLane || o.rs.service || (o.driver && (o.driver.wantsPit || o.driver.pitState !== 'none')))) busy++;
+          if (call === 'undercut' && (busy >= 2 || this.time - (this.undercutT ?? -99) < 30)) {
+            // not now: keep the option for later in the window
+          } else if (call === 'undercut') {
+            this.undercutT = this.time;
+            rs.pitPlays.undercut = true;
+            drv.wantsPit = true;
+            this.pushEvent({ type: 'strategy', car, kind: 'undercut', on: ah });
+          } else if (call === 'overcut') {
+            rs.pitPlays.overcut = true;
+            rs.plannedStop += 1;
+            this.pushEvent({ type: 'strategy', car, kind: 'overcut', on: rs.lastAhead });
+          }
+        }
         if (rs.plannedStop != null && !done && rs.laps >= rs.plannedStop) drv.wantsPit = true;
         // the pit wall reads the same wear projection it gives the player; deep into the tyre cliff is the last resort
         rs.adviceT = (rs.adviceT || 0) + dt;

@@ -12,7 +12,7 @@ import { clamp, smoothstep } from '../util/math.js';
  * see why a rival did what it did.
  */
 
-export const ACTIONS = ['LINE', 'FOLLOW', 'DRAFT', 'ATTACK', 'COVER', 'BLOCK', 'YIELD'];
+export const ACTIONS = ['LINE', 'FOLLOW', 'DRAFT', 'ATTACK', 'COVER', 'BLOCK', 'YIELD', 'SWITCHBACK'];
 export const FEATURES = ['close', 'edge', 'brake', 'corner', 'straight', 'room', 'drs', 'threat', 'lapped', 'risk'];
 
 /**
@@ -38,7 +38,21 @@ export const MATRIX = {
   COVER:  { bias: -0.35, threat: 1.2, straight: 0.6, brake: -0.5 },
   BLOCK:  { bias: -0.55, threat: 1.1, brake: 0.9, corner: 0.5 },
   YIELD:  { bias: -2.0, lapped: 3.2, threat: 0.4 },
+  // not scored: a switchback is a committed two-part move, started when an outside pass is boxed out at the turn-in (see think)
+  SWITCHBACK: { bias: -9 },
 };
+
+/**
+ * Pit-wall timing against the car ahead, inside the planned pit window. Undercut: stuck within 1.5 s of a rival for a while,
+ * so stop early and use the fresh tyres in clean air. Overcut: the rival has just pitted and our tyres still have life, so
+ * stay out a lap longer and push. Returns 'undercut', 'overcut' or null. `used` = { undercut, overcut } already played.
+ */
+export function pitWindowCall({ lap, planned, lapsLeft, gapAhead, stuckT, aheadPitted, wear, used = {} }) {
+  if (planned == null || lapsLeft <= 3) return null;
+  if (!used.undercut && lap >= planned - 2 && lap < planned && gapAhead != null && gapAhead < 1.5 && stuckT > 12 && wear > 0.25) return 'undercut';
+  if (!used.overcut && !used.undercut && lap >= planned - 1 && lap <= planned && aheadPitted && wear < 0.6) return 'overcut';
+  return null;
+}
 
 /** Which personality trait scales an action's utility (0.55 .. 1.45 times). */
 const TRAIT = { ATTACK: 'aggr', COVER: 'defend', BLOCK: 'defend' };
@@ -67,11 +81,17 @@ export class RaceBrain {
     this.lastAhead = null;
     this.f = Object.fromEntries(FEATURES.map((k) => [k, 0]));
     this.scores = Object.fromEntries(ACTIONS.map((k) => [k, -Infinity]));
-    this.intent = { action: 'LINE', side: 0, target: null, brakeLate: 1, push: 1, ers: 1, fuel: 1, yieldLift: 1, rival: null };
+    this.intent = { action: 'LINE', side: 0, target: null, brakeLate: 1, push: 1, ers: 1, fuel: 1, yieldLift: 1, rival: null, saveErs: false, surge: false };
     this.fuelPerLap = 0;
     this._fuel0 = null;
     this._dist0 = 0;
     this.powerT = 0;
+    // multi-lap energy plan: 'none' | 'saving' (harvest behind a rival we cannot pass) | 'surge' (spend it all down one straight)
+    this.energy = 'none';
+    this.energyT = 0; // when the current phase started
+    this.stuckT = 0; // seconds spent tucked up behind a car of the same pace
+    this.swUntil = 0; // a switchback is being played until this time
+    this.swSide = 0;
   }
 
   /** One decision. `ctx`: { list, V, base, wl, wr, dCorner, inside, straight, now, race }. Returns the intent. */
@@ -88,6 +108,16 @@ export class RaceBrain {
     }
     const s = this.sense(ctx);
     const f = this.f;
+    // a switchback in progress: slow in on the outside, cut back under the rival for the exit
+    if (now < this.swUntil) {
+      if (s.ahead && s.ahead.ds > -2 && s.ahead.ds < 40) {
+        this.action = 'SWITCHBACK';
+        this.side = this.swSide;
+        return this.fill(it, ctx, s, null, 'SWITCHBACK');
+      }
+      this.swUntil = 0; // done: through, or the rival is gone
+      this.noAttackUntil = now;
+    }
     // feasibility masks: an action that cannot be played right now is not a candidate
     const ok = {
       LINE: true,
@@ -98,6 +128,7 @@ export class RaceBrain {
       BLOCK: this.traits.defend > 0.25 && !!s.behind && ctx.dCorner > 55 && ctx.dCorner < 330 && !!ctx.inside && !s.aside,
       YIELD: !!s.lapper,
     };
+    const prevAction = this.action, prevSide = this.side;
     let best = 'LINE', bestU = -Infinity;
     for (const a of ACTIONS) {
       if (!ok[a]) {
@@ -109,7 +140,7 @@ export class RaceBrain {
       for (const k of FEATURES) if (row[k]) u += row[k] * f[k];
       const tr = TRAIT[a];
       if (tr) u = (row.bias || 0) + (u - (row.bias || 0)) * (0.55 + 0.9 * this.traits[tr]);
-      if (a === 'ATTACK') u += 0.5 * (this.traits.riskTol - 0.5); // bold drivers go for gaps a careful one leaves alone
+      if (a === 'ATTACK') u += 0.5 * (this.traits.riskTol - 0.5) + (this.energy === 'surge' ? 1.0 : 0); // bold drivers go for gaps a careful one leaves alone; a saved-up battery is spent on a real attempt
       if (a === this.action) u += HYSTERESIS;
       this.scores[a] = u;
       if (u > bestU) {
@@ -133,6 +164,16 @@ export class RaceBrain {
       this.noAttackUntil = now + 1.5;
       this.since = now;
       best = 'FOLLOW';
+    }
+    // boxed out on the outside at the turn-in: do not just lift and fall in behind, switch back (slow in, inside line out)
+    // (the outside line stops being offered 150 m before the corner: an attacker still there, and not through, was boxed out)
+    if (prevAction === 'ATTACK' && ctx.inside && prevSide === -ctx.inside && ctx.dCorner < 150 && best !== 'ATTACK' && s.ahead && s.ahead.ds > 2.5 && this.traits.aggr > 0.5) {
+      this.swUntil = now + 4.5;
+      this.swSide = ctx.inside;
+      this.action = 'SWITCHBACK';
+      this.side = this.swSide;
+      this.since = now;
+      return this.fill(it, ctx, s, ok, 'SWITCHBACK');
     }
     this.side = best === 'ATTACK' ? s.atkSide : best === 'COVER' ? s.coverSide : best === 'BLOCK' ? ctx.inside : best === 'YIELD' ? s.yieldSide : 0;
     return this.fill(it, ctx, s, ok, best);
@@ -237,6 +278,11 @@ export class RaceBrain {
         const inZone = ctx.dCorner < 200 && s.atkInside;
         it.brakeLate = inZone ? 1 + clamp(0.035 + 0.09 * aggr * (1 - this.f.risk), 0, 0.11) * smoothstep(0, 0.4, now - this.since + 0.2) : 1;
         it.push = 1 + 0.012 * aggr;
+      } else if (action === 'SWITCHBACK' && ah) {
+        const o = ah.c;
+        it.target = clamp(o.d + this.side * (o.info && o.info.isPlayer ? HUMAN_W : CAR_W), -wr, wl); // under the rival on the way out
+        it.brakeLate = 0.96; // give up the entry...
+        it.push = 1.02; // ...for the exit
       } else if (action === 'DRAFT' && ah) {
         it.target = clamp(ah.c.d, -wr, wl); // sit in the wake
       } else if (action === 'FOLLOW' && ah) {
@@ -271,11 +317,33 @@ export class RaceBrain {
     if (now < this.powerT) return;
     this.powerT = now + 0.5;
     const lapsLeft = Math.max(0, race.lapsLeft(car));
-    const battling = action === 'ATTACK' || action === 'COVER' || action === 'BLOCK';
+    const battling = action === 'ATTACK' || action === 'COVER' || action === 'BLOCK' || action === 'SWITCHBACK';
     const soc = car.soc;
+    // Multi-lap energy plan. Tucked up behind a rival of the same pace, deploying a little every straight gets nowhere:
+    // harvest for a lap or two instead, then spend the whole battery in one go down a long straight, with DRS and the tow.
+    const tucked = !!(s && s.ahead) && this.f.close > 0.55 && Math.abs(this.closeRate) < 2.5 && (action === 'FOLLOW' || action === 'DRAFT' || action === 'ATTACK');
+    this.stuckT = tucked ? this.stuckT + 0.5 : Math.max(0, this.stuckT - 1);
+    if (this.energy === 'none' && this.stuckT > 12 && soc < 0.7 && lapsLeft > 1.5) {
+      this.energy = 'saving';
+      this.energyT = now;
+    } else if (this.energy === 'saving') {
+      const lapT = drv.track.length / 62; // a rough lap, in seconds
+      if (!tucked && this.stuckT <= 0) this.energy = 'none'; // the fight is over
+      else if ((soc > 0.82 || now - this.energyT > 2 * lapT || lapsLeft <= 1.2) && ctx.straight && ctx.dCorner > 330 && s && s.ahead && s.ahead.gapT < 1.1) {
+        this.energy = 'surge';
+        this.energyT = now;
+      }
+    } else if (this.energy === 'surge' && (now - this.energyT > 14 || soc < 0.06 || (!ctx.straight && now - this.energyT > 3))) {
+      this.energy = 'none';
+      this.stuckT = 0;
+    }
+    it.saveErs = this.energy === 'saving';
+    it.surge = this.energy === 'surge';
     // ERS: deploy (attack mode) in a fight, harvest when stuck behind a car or with a flat battery, balanced otherwise
     let ers = 1;
-    if (battling && soc > 0.18) ers = 2;
+    if (this.energy === 'saving') ers = 0;
+    else if (this.energy === 'surge') ers = 2;
+    else if (battling && soc > 0.18) ers = 2;
     else if (lapsLeft <= 1.4 && soc > 0.08) ers = 2;
     else if (action === 'FOLLOW' || action === 'DRAFT') ers = soc > 0.75 ? 1 : 0;
     else if (soc < 0.3) ers = 0;
@@ -307,6 +375,6 @@ export class RaceBrain {
 
   /** The full decision table of the last tick: for tests, debugging and curiosity. */
   explain() {
-    return { action: this.action, side: this.side, features: { ...this.f }, scores: { ...this.scores }, traits: { ...this.traits }, closeRate: this.closeRate };
+    return { action: this.action, side: this.side, energy: this.energy, features: { ...this.f }, scores: { ...this.scores }, traits: { ...this.traits }, closeRate: this.closeRate };
   }
 }

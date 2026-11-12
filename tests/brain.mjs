@@ -1,5 +1,5 @@
 // The rivals' decision matrix: for a set of racing situations, which action wins and why.
-import { RaceBrain, MATRIX, ACTIONS, FEATURES } from '../src/sim/racecraft.js';
+import { RaceBrain, MATRIX, ACTIONS, FEATURES, pitWindowCall } from '../src/sim/racecraft.js';
 import { difficultyParams } from '../src/sim/ai.js';
 import { mulberry32 } from '../src/util/math.js';
 let bad = 0;
@@ -116,6 +116,44 @@ ok('every action has a row and every weight names a real feature', ACTIONS.every
   m.brain.fuelPerLap = 3; m.car.fuel = 2; // 3 laps to go on two kilos
   const b = decide(m, []);
   ok('short on fuel: lean', b.intent.fuel === 0, `fuel ${b.intent.fuel}`);
+}
+// boxed out on the outside at the turn-in: a switchback, not a lift
+{
+  const m = mk(1.0); m.car.speed = 80;
+  // the inside (left, +1) is taken by a third car, so the attack goes round the outside
+  const lead = () => rival(12, 0.4, 70), inner = () => rival(16, 3.2, 72);
+  let b = decide(m, [lead(), inner()], { dCorner: 200, inside: 1, straight: false });
+  const first = `${b.action}/${b.side}`;
+  b = decide(m, [lead(), inner()], { dCorner: 120, inside: 1, straight: false });
+  ok('outside pass boxed out at the turn-in becomes a SWITCHBACK to the inside', first === 'ATTACK/-1' && b.action === 'SWITCHBACK' && b.side === 1, `${first} -> ${b.action}/${b.side}`);
+  ok('...slow in, fast out', b.intent.brakeLate < 1 && b.intent.push > 1, `brake ${b.intent.brakeLate} push ${b.intent.push}`);
+  b = decide(m, [rival(10, -2.6, 70)], { dCorner: 300, inside: -1, straight: false });
+  ok('...and it is held through the corner', b.action === 'SWITCHBACK', b.action);
+}
+// multi-lap energy plan: harvest behind a car of the same pace, then spend it all down a straight
+{
+  const m = mk(1.0); m.car.speed = 80; m.car.soc = 0.3;
+  const same = () => rival(13, 0, 80);
+  let b;
+  for (let k = 0; k < 40; k++) b = decide(m, [same()], { dCorner: 120, inside: 1, straight: false, wl: 1.0, wr: 1.0 }); // no room to pass
+  ok('stuck behind a car of the same pace: start saving the battery', b.energy === 'saving' && b.intent.saveErs && b.intent.ers === 0, `${b.energy} ers ${b.intent.ers} after ${b.stuckT.toFixed(0)} s`);
+  m.car.soc = 0.9;
+  for (let k = 0; k < 3; k++) b = decide(m, [same()], { dCorner: 600, inside: 0, straight: true });
+  ok('battery full and a long straight ahead: surge', b.energy === 'surge' && b.intent.surge && b.intent.ers === 2, `${b.energy} ers ${b.intent.ers}`);
+  m.car.soc = 0.03;
+  for (let k = 0; k < 3; k++) b = decide(m, [same()], { dCorner: 600, inside: 0, straight: true });
+  ok('battery spent: the plan ends', b.energy === 'none', b.energy);
+}
+// pit-wall timing against the car ahead
+{
+  const base = { lap: 9, planned: 10, lapsLeft: 12, gapAhead: 0.8, stuckT: 20, aheadPitted: false, wear: 0.5 };
+  ok('undercut: stuck within 1.5 s inside the window', pitWindowCall(base) === 'undercut');
+  ok('no undercut in clean air', pitWindowCall({ ...base, gapAhead: 3 }) === null);
+  ok('no undercut far before the window', pitWindowCall({ ...base, lap: 5 }) === null);
+  ok('no undercut on fresh tyres or at the end of the race', pitWindowCall({ ...base, wear: 0.1 }) === null && pitWindowCall({ ...base, lapsLeft: 2 }) === null);
+  ok('only once', pitWindowCall({ ...base, used: { undercut: true } }) === null);
+  ok('overcut: the car ahead has pitted and the tyres have life', pitWindowCall({ ...base, gapAhead: null, stuckT: 0, lap: 10, aheadPitted: true }) === 'overcut');
+  ok('no overcut on worn tyres', pitWindowCall({ ...base, gapAhead: null, stuckT: 0, lap: 10, aheadPitted: true, wear: 0.75 }) === null);
 }
 // the explanation is available
 {

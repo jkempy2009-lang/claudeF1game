@@ -317,6 +317,9 @@ export class AIDriver {
     const underSc = race.sc && race.sc.state !== 'none';
     const gapAhead = car.gapAhead ?? 99;
     inp.boost = !underSc && thr > 0.95 && straight && car.soc > 0.12 && (gapAhead < 1.8 || car.soc > 0.55 || race.lapsLeft(car) <= 1 || (this.intent.ers === 2 && car.soc > 0.1));
+    // the energy plan overrides the reflex: no boost while saving, everything on the surge
+    if (this.managePower && this.intent.saveErs) inp.boost = false;
+    else if (this.managePower && this.intent.surge && !underSc && thr > 0.9 && car.soc > 0.05) inp.boost = true;
     if (this.managePower && !underSc) {
       // engine and energy modes follow the racecraft plan (harvest behind a car, attack mode in a fight)
       car.ersMode = this.intent.ers;
@@ -381,7 +384,7 @@ export class AIDriver {
     this.intent = intent;
     this.blocker = intent.rival ? list.find((n) => n.c === intent.rival) || null : null;
     const act = intent.action;
-    this.rcMode = act === 'ATTACK' ? 'attack' : act === 'DRAFT' ? 'draft' : act === 'COVER' || act === 'BLOCK' ? 'defend' : act === 'YIELD' ? 'yield' : 'free';
+    this.rcMode = act === 'ATTACK' || act === 'SWITCHBACK' ? 'attack' : act === 'DRAFT' ? 'draft' : act === 'COVER' || act === 'BLOCK' ? 'defend' : act === 'YIELD' ? 'yield' : 'free';
     if (intent.target != null) target = clamp(intent.target - base, -12, 12);
 
     // a car is alongside: no new lateral commitments, hold the line we are on
