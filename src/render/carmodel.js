@@ -306,6 +306,14 @@ export class CarView {
         return tint(e, dk);
       });
       els.push(tint(box(2.52, 3.1, 0.07, 0.3, side * 0.96, side * 1.0), acc));
+      // cascade winglets above the outer wing, and a dive plane on the endplate
+      for (const [cx, cy, pitch] of [[2.86, 0.3, 0.16], [2.72, 0.345, 0.26]]) {
+        const e = wingElement(cx, cy, 0.17, 0.13, 0.014, pitch);
+        e.translate(0, 0, side * 0.8);
+        els.push(tint(e, dk));
+      }
+      els.push(tint(box(2.78, 2.9, 0.2, 0.33, side * 0.665, side * 0.675), dk));
+      { const e = wingElement(2.95, 0.2, 0.2, 0.05, 0.012, 0.3); e.translate(0, 0, side * 1.03); els.push(tint(e, acc)); }
       return new THREE.Mesh(mergeClean(els), trimMat);
     };
     this.frontWing = new THREE.Group();
@@ -327,14 +335,36 @@ export class CarView {
 
     // suspension arms (static: merged into the carbon mesh)
     const WF = 1.962, WR = -1.638;
-    for (const [wx, wz, tw] of [[WF, 1, 0.8], [WF, -1, 0.8], [WR, 1, 0.775], [WR, -1, 0.775]]) {
-      carbon.push(box(wx + 0.12, wx + 0.22, 0.24, 0.27, Math.min(wz * 0.25, wz * tw), Math.max(wz * 0.25, wz * tw)));
-      carbon.push(box(wx - 0.22, wx - 0.12, 0.2, 0.23, Math.min(wz * 0.25, wz * tw), Math.max(wz * 0.25, wz * tw)));
+    // wishbones: one pair per wheel, hinged at the tub so they follow the wheel as the suspension works (see update)
+    this.arms = [];
+    for (const [wx, wz, tw] of [[WF, -1, 0.8], [WF, 1, 0.8], [WR, -1, 0.775], [WR, 1, 0.775]]) { // same order as the wheels: FL, FR, RL, RR
+      const g = mergeGeometries([
+        box(wx + 0.12, wx + 0.22, 0.26, 0.285, Math.min(wz * 0.25, wz * tw), Math.max(wz * 0.25, wz * tw)),
+        box(wx - 0.22, wx - 0.12, 0.2, 0.225, Math.min(wz * 0.25, wz * tw), Math.max(wz * 0.25, wz * tw)),
+        box(wx - 0.02, wx + 0.02, 0.3, 0.325, Math.min(wz * 0.2, wz * tw), Math.max(wz * 0.2, wz * tw)), // push rod
+      ]);
+      g.translate(-wx, -0.24, -wz * 0.25);
+      const arm = new THREE.Mesh(g, S.carbon);
+      arm.position.set(wx, 0.24, wz * 0.25);
+      arm.userData = { side: wz, len: tw - 0.25 };
+      this.arms.push(arm);
     }
 
     const bodyMat = new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.28, metalness: 0.35, clearcoat: 1.0, clearcoatRoughness: 0.08 });
     this.bodyMat = bodyMat;
-    this.model.add(new THREE.Mesh(mergeClean(paint), bodyMat), new THREE.Mesh(mergeClean(carbon), S.carbon), this.frontWing, this.rearWing);
+    // aero furniture: bargeboards and turning vanes beside the tub, strakes along the floor edge, diffuser fences
+    for (const sd of [-1, 1]) {
+      for (let k = 0; k < 3; k++) {
+        const v = box(1.05 + k * 0.17, 1.2 + k * 0.17, 0.09, 0.3 + k * 0.035, sd * (0.5 + k * 0.045) - 0.006, sd * (0.5 + k * 0.045) + 0.006);
+        carbon.push(v);
+      }
+      carbon.push(box(0.98, 1.6, 0.085, 0.1, sd * 0.42, sd * 0.68)); // bargeboard footplate
+      for (let k = 0; k < 4; k++) carbon.push(box(0.1 + k * 0.22, 0.26 + k * 0.22, 0.06, 0.125, sd * 0.78 - 0.005, sd * 0.78 + 0.005)); // floor strakes
+      carbon.push(box(-0.9, 0.95, 0.045, 0.062, sd * 0.3, sd * 0.8)); // floor edge
+      for (let k = 0; k < 3; k++) carbon.push(box(-2.35, -1.9, 0.06, 0.2, sd * (0.14 + k * 0.17) - 0.006, sd * (0.14 + k * 0.17) + 0.006)); // diffuser fences
+    }
+    this.model.add(new THREE.Mesh(mergeClean(paint), bodyMat), new THREE.Mesh(mergeClean(carbon), S.carbon), this.frontWing, this.rearWing, ...this.arms);
+    if (fine && !this.ghost) this.buildSteeringWheel();
     // sidepods are separate meshes so they can crumple on their own when the car is hit from the side
     this.pods = podParts.map(({ geo, side }) => {
       const g = mergeClean([geo]);
@@ -384,7 +414,12 @@ export class CarView {
     const mkWheel = (front, left) => {
       const w = front ? 0.34 : 0.44;
       const parts = [];
-      const tyre = new THREE.CylinderGeometry(WHEEL_R, WHEEL_R, w, tyreSeg, 1);
+      // a tyre with rounded shoulders (a lathe profile), not a plain cylinder
+      const hw = w / 2;
+      const prof = [[0.235, -hw], [WHEEL_R - 0.06, -hw], [WHEEL_R - 0.022, -hw + 0.012], [WHEEL_R - 0.005, -hw + 0.04], [WHEEL_R, -hw + 0.075], [WHEEL_R, hw - 0.075], [WHEEL_R - 0.005, hw - 0.04], [WHEEL_R - 0.022, hw - 0.012], [WHEEL_R - 0.06, hw], [0.235, hw]];
+      const tyre = new THREE.LatheGeometry(prof.map(([r, y]) => new THREE.Vector2(r, y)), tyreSeg);
+      tyre.deleteAttribute('uv');
+      tyre.computeVertexNormals();
       tyre.rotateX(Math.PI / 2);
       parts.push(tint(tyre, new THREE.Color('#141414')));
       const rim = new THREE.CylinderGeometry(0.235, 0.235, w * 0.92, 14);
@@ -479,11 +514,34 @@ export class CarView {
     const slopePitch = Math.atan(car.trackSlope * Math.cos(car.theta - car.trackHeading));
     this.group.position.set(x, car.trackH, -y);
     this.group.rotation.set(0, th, 0);
-    this.pitchSmooth = lerp(this.pitchSmooth, -car.pitch + slopePitch, clamp(dt * 6, 0, 1));
-    this.rollSmooth = lerp(this.rollSmooth, -car.roll, clamp(dt * 6, 0, 1));
+    // Suspension: each corner's spring travel follows its live vertical load (about 4 cm at full downforce). The body heaves,
+    // pitches and rolls on the four travels while the wheels stay on the road, so the car squats, dives, leans and sits down at speed.
+    const tv = this.travel || (this.travel = new Float32Array(4));
+    const kS = clamp(dt * 12, 0, 1);
+    const m = car.mass * 9.81;
+    for (let w = 0; w < 4; w++) {
+      const stat = w < 2 ? (m * spec.weightFront) / 2 : (m * (1 - spec.weightFront)) / 2;
+      const kerb = car.surf && car.surf[w] === 1 ? Math.sin(this.spinAngle[w] * 3.0) * 0.012 : 0; // SURF.KERB: the ridges work the wheel
+      const want = clamp((car.fz[w] - stat) / 150000, -0.03, 0.05) + kerb;
+      tv[w] += (want - tv[w]) * kS;
+    }
+    const heave = -(tv[0] + tv[1] + tv[2] + tv[3]) / 4;
+    const bodyPitch = ((tv[2] + tv[3]) - (tv[0] + tv[1])) / 2 / spec.wheelbase - car.pitch * 0.5; // front compressed = nose down
+    const bodyRoll = ((tv[1] + tv[3]) - (tv[0] + tv[2])) / 2 / spec.trackF - car.roll * 0.5;
+    this.pitchSmooth = bodyPitch + slopePitch;
+    this.rollSmooth = bodyRoll;
     this.model.rotation.order = 'YZX';
     this.model.rotation.set(this.rollSmooth, 0, this.pitchSmooth);
+    this.model.position.y = heave;
     this.layoutWheels(car.a, car.b, spec.trackF, spec.trackR, spec.wheelbase, car.steer);
+    // put every wheel back on the road (the body moved, the wheels did not) and swing its wishbones to meet it
+    for (let w = 0; w < 4; w++) {
+      const as = this.wheelDefs[w].assembly;
+      const dy = -heave - as.position.x * bodyPitch + as.position.z * bodyRoll;
+      as.position.y = WHEEL_R + dy;
+      const arm = this.arms && this.arms[w];
+      if (arm) arm.rotation.x = (-arm.userData.side * dy) / arm.userData.len;
+    }
     for (let w = 0; w < 4; w++) {
       this.spinAngle[w] -= (car.omega[w] * dt) % (Math.PI * 2);
       this.wheelDefs[w].spin.rotation.z = this.spinAngle[w];
@@ -499,6 +557,7 @@ export class CarView {
     }
     // DRS flap, brake light, damage
     this.drsPivot.rotation.z = car.drsPos * 0.55;
+    if (this.steeringWheel) this.steeringWheel.rotation.x = clamp(-car.steer * 6, -2.2, 2.2);
     const br = car.brake > 0.08;
     // brake light; while the hybrid system harvests the lamp strobes amber/red
     this.harvT = (this.harvT || 0) + dt;
@@ -546,6 +605,90 @@ export class CarView {
     pos.needsUpdate = true;
     mesh.geometry.computeVertexNormals();
     mesh.userData.d = d;
+  }
+
+  /** A small F1 steering wheel in front of the driver, with a display for the gear, speed and shift lights (see updateDash). */
+  buildSteeringWheel() {
+    const sw = new THREE.Group();
+    const parts = [];
+    const body = new THREE.BoxGeometry(0.035, 0.13, 0.25);
+    parts.push(body);
+    for (const sd of [-1, 1]) {
+      const grip = new THREE.CapsuleGeometry(0.021, 0.1, 3, 8);
+      grip.rotateZ(sd * 0.0);
+      grip.translate(0, -0.005, sd * 0.135);
+      parts.push(grip);
+      const horn = new THREE.BoxGeometry(0.03, 0.035, 0.07);
+      horn.translate(0, 0.07, sd * 0.1);
+      parts.push(horn);
+    }
+    const col = new THREE.CylinderGeometry(0.02, 0.025, 0.22, 8);
+    col.rotateZ(Math.PI / 2);
+    col.translate(0.12, 0, 0);
+    parts.push(col);
+    sw.add(new THREE.Mesh(mergeGeometries(parts.map((g) => { const n = g.index ? g.toNonIndexed() : g; n.deleteAttribute('uv'); return n; })), shared.carbon));
+    // the display
+    const cv = document.createElement('canvas');
+    cv.width = 128;
+    cv.height = 64;
+    this.dashCtx = cv.getContext('2d');
+    this.dashTex = new THREE.CanvasTexture(cv);
+    this.dashTex.colorSpace = THREE.SRGBColorSpace;
+    const scr = new THREE.Mesh(new THREE.PlaneGeometry(0.115, 0.058), new THREE.MeshBasicMaterial({ map: this.dashTex, toneMapped: false }));
+    scr.rotation.y = -Math.PI / 2; // faces the driver
+    scr.position.set(-0.019, 0.012, 0);
+    sw.add(scr);
+    // buttons and dials
+    const btnGeo = [];
+    for (const [by, bz] of [[-0.04, -0.07], [-0.04, 0.07], [0.045, -0.085], [0.045, 0.085], [-0.045, 0], [-0.02, -0.095], [-0.02, 0.095]]) {
+      const b = new THREE.CylinderGeometry(0.008, 0.008, 0.008, 8);
+      b.rotateZ(Math.PI / 2);
+      b.translate(-0.02, by, bz);
+      btnGeo.push(b);
+    }
+    const cols = [0xff3b30, 0x34c759, 0xffcc00, 0x0a84ff, 0xff9f0a, 0xffffff, 0xffffff];
+    btnGeo.forEach((g, i) => { const c = new THREE.Color(cols[i]); const n = g.attributes.position.count; const arr = new Float32Array(n * 3); for (let k = 0; k < n; k++) arr.set([c.r, c.g, c.b], k * 3); g.setAttribute('color', new THREE.BufferAttribute(arr, 3)); g.deleteAttribute('uv'); });
+    sw.add(new THREE.Mesh(mergeGeometries(btnGeo), new THREE.MeshBasicMaterial({ vertexColors: true })));
+    sw.position.set(0.6, 0.835, 0);
+    sw.rotation.z = -0.22; // raked towards the driver
+    this.steeringWheel = new THREE.Group(); // spins about the column
+    this.steeringWheel.add(...sw.children);
+    sw.add(this.steeringWheel);
+    this.model.add(sw);
+    this.drawDash(null);
+  }
+
+  /** Redraws the wheel display: shift lights, gear, speed, delta bar. Called a few times a second for the car the camera sits in. */
+  drawDash(car, units = 'kmh') {
+    const g = this.dashCtx;
+    if (!g) return;
+    g.fillStyle = '#05070a';
+    g.fillRect(0, 0, 128, 64);
+    if (car) {
+      const k = clamp((car.rpm - 9500) / 4900, 0, 1), n = Math.round(k * 15);
+      const flash = car.rpm > 14700 && Math.floor(performance.now() / 70) % 2;
+      for (let i = 0; i < 15; i++) {
+        g.fillStyle = i < n && !flash ? (i < 5 ? '#27e36a' : i < 10 ? '#ff3b30' : '#3b82ff') : '#1c2128';
+        g.fillRect(4 + i * 8.1, 3, 6, 6);
+      }
+      g.fillStyle = '#ffffff';
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.font = '900 40px "Arial Black", Impact, sans-serif';
+      g.fillText(car.gear < 0 ? 'R' : String(car.gear), 64, 38);
+      g.font = '700 15px Arial, sans-serif';
+      g.textAlign = 'left';
+      g.fillStyle = '#9fe8ff';
+      g.fillText(String(Math.round(car.speed * (units === 'mph' ? 2.23694 : 3.6))), 5, 28);
+      g.fillStyle = '#ffd24a';
+      g.fillText(`${Math.round(car.soc * 100)}%`, 5, 50);
+      g.textAlign = 'right';
+      g.fillStyle = car.drsPos > 0.5 ? '#27e36a' : car.drsAllowed ? '#ffd24a' : '#3a4048';
+      g.fillText('DRS', 124, 28);
+      g.fillStyle = '#ffffff';
+      g.fillText(car.rs ? `P${car.rs.pos}` : '', 124, 50);
+    }
+    this.dashTex.needsUpdate = true;
   }
 
   setShadow(on) {

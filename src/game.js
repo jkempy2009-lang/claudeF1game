@@ -865,6 +865,47 @@ class Game {
 
   /** Motion blur strength 0..1: grows exponentially with speed, a little more with DRS / ERS boost. */
   /** Bloom strength: a whisper by day, a strong glow around lights at dusk and at night. */
+  /** Screen-space effects that need to know where things are: exhaust heat haze behind the nearest cars and the glare of a low sun. */
+  updateScreenFx(s) {
+    const u = this.post.mat.uniforms;
+    const cam = this.camera, v = this._fxV || (this._fxV = new THREE.Vector3());
+    const on = this.post.gradeOn && !this.save.settings.calm;
+    const hz = u.haze.value;
+    let n = 0;
+    if (on) {
+      const list = this._fxL || (this._fxL = []);
+      list.length = 0;
+      for (const car of s.race.cars) {
+        const g = s.views.get(car).group.position;
+        const d2 = (g.x - cam.position.x) ** 2 + (g.z - cam.position.z) ** 2;
+        if (d2 < 70 * 70 && car.speed > 8) list.push({ car, d2 });
+      }
+      list.sort((a, b) => a.d2 - b.d2);
+      for (const { car, d2 } of list) {
+        if (n >= 4) break;
+        const g = s.views.get(car).group;
+        v.set(g.position.x - Math.cos(g.rotation.y) * 3.6, g.position.y + 0.5, g.position.z + Math.sin(g.rotation.y) * 3.6).project(cam);
+        if (v.z > 1 || v.z < -1 || Math.abs(v.x) > 1.1 || Math.abs(v.y) > 1.1) continue;
+        const dist = Math.sqrt(d2) + 2;
+        hz[n++].set(v.x * 0.5 + 0.5, v.y * 0.5 + 0.5, clamp((0.55 / dist) * (0.5 + 0.5 * car.throttle), 0.006, 0.045));
+      }
+    }
+    for (let k = n; k < 4; k++) hz[k].z = 0;
+    // the sun
+    const night = s.nightK || 0, dusk = s.duskK || 0;
+    let k = 0;
+    if (on && night < 0.6 && s.world.sunDir) {
+      v.copy(cam.position).addScaledVector(s.world.sunDir, 4000).project(cam);
+      if (v.z < 1 && Math.abs(v.x) < 1.25 && Math.abs(v.y) < 1.25) {
+        const edge = clamp(1.25 - Math.max(Math.abs(v.x), Math.abs(v.y)), 0, 0.3) / 0.3;
+        k = edge * (0.45 + 0.75 * dusk) * (1 - night / 0.6) * (1 - 0.85 * (s.race.rain || 0));
+        u.sun.value.set(v.x * 0.5 + 0.5, v.y * 0.5 + 0.5, k);
+        u.sunCol.value.copy(s.world.sun.color);
+      }
+    }
+    if (!k) u.sun.value.z = 0;
+  }
+
   bloomFor(s) {
     const set = this.save.settings;
     if (set.bloom === false || this.perfNoFx || set.quality === 'low') return 0;
@@ -1058,7 +1099,13 @@ class Game {
     } else {
       camRig.update(dt, views.get(player), player, s.track);
       if (!camRig.shakeOn) camRig.impact = 0;
+      // the steering-wheel display, ten times a second, only when you can see it
+      if ((camRig.mode === 'cockpit' || camRig.mode === 'tcam') && (s.dashT = (s.dashT || 0) - dt) <= 0) {
+        s.dashT = 0.1;
+        views.get(player).drawDash(player, this.save.settings.units);
+      }
     }
+    this.updateScreenFx(s);
     // time of day (midday -> dusk over the race) and weather
     const raceLen = race.totalLaps * s.track.length;
     const prog = race.opt.mode === 'race' && s.cfg.timeOfDay !== 'day' ? clamp((race.sorted[0] ? race.sorted[0].rs.maxDist : 0) / raceLen, 0, 1) : 0;
@@ -1067,7 +1114,8 @@ class Game {
     const night = nightRace ? 1 : 0.55 * smooth01((prog - 0.72) / 0.28);
     s.nightK = night;
     s.duskK = dusk;
-    const atmo = world.setAtmosphere({ dusk, wet: race.wet, rain: race.rain, night });
+    const atmo = world.setAtmosphere({ dusk, wet: race.wet, rain: race.rain, night, lineDry: race.lineDry || 0, rubber: race.rubber || 0 });
+    world.setFlag(race.chequered ? 'chequered' : race.yellow || race.sc.state !== 'none' ? 'yellow' : race.phase === 'racing' && race.time - race.t0 < 8 ? 'green' : 'none');
     s.scene.fog.color.copy(atmo.fog);
     s.scene.fog.density = 1.1 / (s.track.theme.fogFar * atmo.fogMul);
     s.scene.background.copy(atmo.fog);

@@ -184,6 +184,7 @@ export class World {
     this.buildScenery();
     if (opts.profile) this.buildBrakeBoards(opts.profile);
     this.buildDrsMarkers();
+    this.buildLandmarks();
     this.buildFloodlights();
     this.buildMountains();
   }
@@ -214,7 +215,12 @@ export class World {
    * Time of day and weather in one call. dusk: 0 midday .. 1 sunset; wet: water on the track; rain: sky/rain intensity.
    * Returns the fog settings the scene should use. Cheap to call every frame (quantised, skipped when unchanged).
    */
-  setAtmosphere({ dusk = 0, wet = 0, rain = 0, night = 0 } = {}) {
+  setAtmosphere({ dusk = 0, wet = 0, rain = 0, night = 0, lineDry = 0, rubber = 0 } = {}) {
+    if (this.roadU) {
+      this.roadU.uWet.value = clamp(wet, 0, 1);
+      this.roadU.uLineDry.value = lineDry;
+      this.roadU.uRubber.value = 0.35 + 0.65 * rubber; // a used circuit is never perfectly clean
+    }
     const key = `${Math.round(dusk * 60)}/${Math.round(wet * 40)}/${Math.round(rain * 40)}/${Math.round(night * 40)}`;
     if (key === this._atmoKey) return this.atmo;
     this._atmoKey = key;
@@ -270,7 +276,7 @@ export class World {
     this.atmo.exposure = 1 + 0.18 * dusk + 0.3 * night;
     // wet asphalt: darker and glossy, reflecting the sky and the sun
     const wc = clamp(wet, 0, 1);
-    for (const m of [this.roadMat, this.kerbMat, ...(this.pitMats || [])]) {
+    for (const m of [this.kerbMat, ...(this.pitMats || [])]) { // the road itself is shaded per pixel (drying line, puddles, rubber)
       if (!m) continue;
       m.color.setRGB(1 - 0.42 * wc, 1 - 0.4 * wc, 1 - 0.34 * wc);
       m.roughness = (m === this.kerbMat ? 0.7 : 0.92) - 0.62 * wc;
@@ -293,6 +299,8 @@ export class World {
     const t = this.tex;
     t.asphalt = TX.asphaltTexture();
     t.runoff = TX.runoffTexture();
+    t.asphaltBump = TX.asphaltBumpTexture();
+    t.kerbBump = TX.kerbBumpTexture();
     t.grass = TX.grassTexture(th.grass[0], th.grass[1]);
     t.grassMow = TX.grassTexture(th.grass[0], th.grass[1], true);
     t.gravel = TX.gravelTexture();
@@ -456,8 +464,34 @@ export class World {
 
   buildRoad() {
     const tr = this.track, N = tr.N, T = this.tex;
-    const roadMat = new THREE.MeshStandardMaterial({ map: T.asphalt, roughness: 0.92, metalness: 0.0, color: 0xffffff });
+    const roadMat = new THREE.MeshStandardMaterial({ map: T.asphalt, bumpMap: T.asphaltBump, bumpScale: 1.6, roughness: 0.92, metalness: 0.0, color: 0xffffff });
     this.roadMat = roadMat;
+    // Per-pixel surface state: the racing line dries first after rain (puddles and reflections stay off line), and the line
+    // darkens and gains a sheen as rubber goes down. `lineOff` is each vertex's signed distance from the racing line.
+    this.roadU = { uWet: { value: 0 }, uLineDry: { value: 0 }, uRubber: { value: 0.35 } };
+    roadMat.customProgramCacheKey = () => 'road-surface';
+    roadMat.onBeforeCompile = (sh) => {
+      Object.assign(sh.uniforms, this.roadU);
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', '#include <common>\nattribute float lineOff;\nvarying float vLineOff;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvLineOff = lineOff;');
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', `#include <common>
+          uniform float uWet; uniform float uLineDry; uniform float uRubber;
+          varying float vLineOff;
+          float rsHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+          float rsNoise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+            return mix(mix(rsHash(i), rsHash(i + vec2(1.0, 0.0)), f.x), mix(rsHash(i + vec2(0.0, 1.0)), rsHash(i + vec2(1.0, 1.0)), f.x), f.y); }`)
+        .replace('#include <map_fragment>', `#include <map_fragment>
+          float rsBand = 1.0 - smoothstep(1.0, 3.0, abs(vLineOff));
+          float rsN = rsNoise(vMapUv * 2.3) * 0.65 + rsNoise(vMapUv * 7.1) * 0.35;
+          float rsWet = clamp(uWet * (1.0 - uLineDry * rsBand * (0.75 + 0.5 * rsN)), 0.0, 1.0);
+          float rsPud = smoothstep(0.56, 0.74, rsN) * smoothstep(0.3, 0.75, uWet) * (1.0 - rsBand * max(uLineDry, 0.5));
+          float rsRub = uRubber * (1.0 - smoothstep(0.5, 1.9, abs(vLineOff))) * (0.75 + 0.5 * rsNoise(vMapUv * vec2(9.0, 0.6))) * (1.0 - 0.6 * uWet);
+          diffuseColor.rgb *= (1.0 - 0.42 * rsWet) * (1.0 - 0.22 * rsPud) * (1.0 - 0.3 * rsRub);`)
+        .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+          roughnessFactor = clamp(roughnessFactor - 0.62 * rsWet - 0.22 * rsPud - 0.16 * rsRub, 0.04, 1.0);`);
+    };
     const full = ranges(N, () => true);
     const wl = tr.wl, wr = tr.wr;
     T.asphalt.repeat.set(1, 1);
@@ -466,17 +500,22 @@ export class World {
     const roadGeo = this.ribbonGeometry(0, N - 1, (i) => -wr[i], (i) => wl[i], { vLen: 7.5, uRepeat: (wl[0] + wr[0]) / 7.5 });
     // close the loop
     const loopGeo = this.ribbonGeometry(N - 1, 0, (i) => -wr[i], (i) => wl[i], { vLen: 7.5, uRepeat: roadW / 7.5 });
+    const ld = tr.lineD;
+    for (const [geo, a] of [[roadGeo, 0], [loopGeo, N - 1]]) {
+      const n = geo.attributes.position.count / 2;
+      const off = new Float32Array(n * 2);
+      for (let k = 0; k < n; k++) {
+        const i = (a + k) % N;
+        off[k * 2] = -wr[i] - ld[i];
+        off[k * 2 + 1] = wl[i] - ld[i];
+      }
+      geo.setAttribute('lineOff', new THREE.BufferAttribute(off, 1));
+    }
     this.road = this.addRibbons([roadGeo, loopGeo], roadMat, { order: 0 });
     this.road.material.polygonOffset = true;
     this.road.material.polygonOffsetFactor = 1;
     this.road.material.polygonOffsetUnits = 1;
 
-    // rubbered-in racing line
-    const lineMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.2, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
-    const ld = tr.lineD;
-    const l1 = this.ribbonGeometry(0, N - 1, (i) => ld[i] - 1.1, (i) => ld[i] + 1.1, { yOff: 0.006 });
-    const l2 = this.ribbonGeometry(N - 1, 0, (i) => ld[i] - 1.1, (i) => ld[i] + 1.1, { yOff: 0.006 });
-    const line = this.addRibbons([l1, l2], lineMat, { receive: false, order: 1 });
     // edge lines
     const edgeMat = new THREE.MeshBasicMaterial({ color: 0xf4f4f0, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
     const eg = [];
@@ -487,7 +526,7 @@ export class World {
     this.addRibbons(eg, edgeMat, { receive: false, order: 2 });
 
     // kerbs
-    const kerbMat = new THREE.MeshStandardMaterial({ map: T.kerb, roughness: 0.7, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
+    const kerbMat = new THREE.MeshStandardMaterial({ map: T.kerb, bumpMap: T.kerbBump, bumpScale: 3.5, roughness: 0.7, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
     this.kerbMat = kerbMat;
     const kg = [];
     for (const [a, b] of ranges(N, (i) => tr.kl[i] > 0.1)) kg.push(this.ribbonGeometry(a, b, (i) => wl[i], (i) => wl[i] + tr.kl[i], { yOff: 0.025, vLen: 2.0, uRepeat: 1 }));
@@ -1103,16 +1142,18 @@ export class World {
     const sticks = [];
     for (const z of zones) {
       const sEnd = z.end * tr.ds;
-      for (let k = 0; k < 4; k++) {
-        const s = sEnd - labels[k];
+      for (let k = 0; k < 8; k++) {
+        const side = k < 4 ? -1 : 1; // a board on each side of the road, as at a real circuit
+        const s = sEnd - labels[k % 4];
         const i0 = tr.idx(s);
-        const lat = -Math.min(tr.wr[i0] + tr.kr[i0] + 1.6, tr.wallDist(i0, -1) - 0.5);
+        if (side > 0 && tr.pit && tr.inPitRange(s)) continue;
+        const lat = side < 0 ? -Math.min(tr.wr[i0] + tr.kr[i0] + 1.6, tr.wallDist(i0, -1) - 0.5) : Math.min(tr.wl[i0] + tr.kl[i0] + 1.6, tr.wallDist(i0, 1) - 0.5);
         tr.pointAt(s, lat, pt);
         const g = new THREE.PlaneGeometry(0.9, 0.9);
         g.translate(0, 1.15, 0);
         g.rotateY(pt.heading - Math.PI / 2); // facing oncoming traffic
         g.translate(pt.x, pt.h, -pt.y);
-        byLabel[k].push(g);
+        byLabel[k % 4].push(g);
         sticks.push([pt.x, pt.h + 0.55, -pt.y]);
       }
     }
@@ -1131,6 +1172,113 @@ export class World {
       this.group.add(im);
     }
     this.brakeZones = zones;
+  }
+
+  /** Bridges over the track at the two sector lines, and marshal posts with flags every 350 m or so. */
+  buildLandmarks() {
+    const tr = this.track, L = tr.length;
+    const pt = {};
+    const steel = new THREE.MeshStandardMaterial({ color: 0x2b3038, roughness: 0.55, metalness: 0.5 });
+    const parts = [], banners = [];
+    [1, 2].forEach((n) => {
+      const s = (L * n) / 3;
+      if (tr.pit && tr.inPitRange(s)) return;
+      const i = tr.idx(s);
+      const dl = tr.wallDist(i, 1) + 0.9, dr = -(tr.wallDist(i, -1) + 0.9);
+      const span = dl - dr;
+      tr.pointAt(s, (dl + dr) / 2, pt);
+      const h = pt.heading, x = pt.x, y = pt.h, z = -pt.y;
+      const place = (g, lx, ly, lz) => { g.translate(lx, ly, lz); g.rotateY(h); g.translate(x, y, z); return g; };
+      parts.push(place(new THREE.BoxGeometry(3.2, 1.25, span + 1.2), 0, 7.0, 0)); // the deck
+      parts.push(place(new THREE.BoxGeometry(3.4, 0.12, span + 1.4), 0, 7.68, 0));
+      for (const lz of [-span / 2, span / 2]) {
+        parts.push(place(new THREE.BoxGeometry(0.7, 7.0, 0.7), -1.1, 3.5, lz));
+        parts.push(place(new THREE.BoxGeometry(0.7, 7.0, 0.7), 1.1, 3.5, lz));
+        parts.push(place(new THREE.BoxGeometry(2.9, 0.25, 0.25), 0, 2.4, lz)); // cross braces
+        parts.push(place(new THREE.BoxGeometry(2.9, 0.25, 0.25), 0, 4.8, lz));
+      }
+      for (const face of [-1, 1]) {
+        const b = new THREE.PlaneGeometry(Math.min(span * 0.82, 26), 0.95);
+        b.rotateY((face * -Math.PI) / 2);
+        banners.push({ g: place(b, face * -1.63, 7.0, 0), n });
+      }
+    });
+    if (parts.length) {
+      const m = new THREE.Mesh(mergeGeometries(parts.map((g) => g.toNonIndexed())), steel);
+      m.castShadow = this.quality !== 'low';
+      m.receiveShadow = true;
+      this.group.add(m);
+      for (const n of [1, 2]) {
+        const list = banners.filter((b) => b.n === n).map((b) => b.g);
+        if (!list.length) continue;
+        const tex = TX.labelTexture(`SECTOR ${n + 1}   ·   APEX GRAND PRIX   ·   SECTOR ${n + 1}`, '#c9201f', '#ffffff', 1024, 64);
+        this.group.add(new THREE.Mesh(mergeGeometries(list), new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide })));
+      }
+    }
+
+    // marshal posts: a platform behind the barrier, a marshal in orange, and a flag that is only shown when there is one to show
+    const posts = [];
+    const nPosts = Math.max(6, Math.round(L / 350));
+    for (let k = 0; k < nPosts; k++) {
+      const s = ((k + 0.5) / nPosts) * L;
+      const i = tr.idx(s);
+      let side = k % 2 ? 1 : -1;
+      if (side < 0 && tr.pit && tr.inPitRange(s)) side = 1;
+      tr.pointAt(s, side * (tr.wallDist(i, side) + 1.3), pt);
+      posts.push({ x: pt.x, y: pt.h, z: -pt.y, h: pt.heading, side });
+    }
+    const mt = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), sc = new THREE.Vector3(1, 1, 1), pv = new THREE.Vector3();
+    const inst = (geo, mat, dy) => {
+      const im = new THREE.InstancedMesh(geo, mat, posts.length);
+      posts.forEach((p, k) => {
+        q.setFromAxisAngle(up, p.h);
+        mt.compose(pv.set(p.x, p.y + dy, p.z), q, sc);
+        im.setMatrixAt(k, mt);
+      });
+      this.group.add(im);
+      return im;
+    };
+    inst(new THREE.BoxGeometry(1.7, 0.9, 1.7), new THREE.MeshStandardMaterial({ color: 0x8a8f96, roughness: 0.9 }), 0.45);
+    inst(new THREE.CapsuleGeometry(0.2, 0.75, 3, 8), new THREE.MeshStandardMaterial({ color: 0xff6a00, roughness: 0.8 }), 0.9 + 0.62);
+    inst(new THREE.SphereGeometry(0.14, 10, 8), new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.5 }), 0.9 + 1.32);
+    inst(new THREE.CylinderGeometry(0.02, 0.02, 1.5, 5), steel, 0.9 + 1.55);
+    const flags = posts.map((p) => {
+      const g = new THREE.PlaneGeometry(0.95, 0.62, 8, 1);
+      g.translate(0.5, 0, 0);
+      g.rotateY((p.side * -Math.PI) / 2); // out over the wall, towards the track
+      g.translate(0.25, 0.9 + 1.95, 0);
+      g.rotateY(p.h);
+      g.translate(p.x, p.y, p.z);
+      return g;
+    });
+    this.flagMat = new THREE.ShaderMaterial({
+      side: THREE.DoubleSide,
+      uniforms: { time: { value: 0 }, col: { value: new THREE.Color(0xffd400) }, chequer: { value: 0 } },
+      vertexShader: `uniform float time; varying vec2 vUv;
+        void main() { vUv = uv; vec3 p = position;
+          float w = sin(time * 9.0 + uv.x * 6.0 + position.x * 0.7) * 0.09 * uv.x;
+          p.y += w; p.x += w * 0.5; p.z += w * 0.5;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0); }`,
+      fragmentShader: `uniform vec3 col; uniform float chequer; varying vec2 vUv;
+        void main() { vec3 c = col;
+          if (chequer > 0.5) { float k = mod(floor(vUv.x * 6.0) + floor(vUv.y * 4.0), 2.0); c = mix(vec3(0.04), vec3(0.96), k); }
+          gl_FragColor = vec4(c * (0.82 + 0.18 * sin(vUv.x * 14.0)), 1.0);
+          #include <colorspace_fragment>
+        }`,
+    });
+    this.flags = new THREE.Mesh(mergeGeometries(flags), this.flagMat);
+    this.flags.frustumCulled = false;
+    this.flags.visible = false;
+    this.group.add(this.flags);
+  }
+
+  /** Marshal flags: 'none', 'yellow', 'green' or 'chequered'. */
+  setFlag(kind) {
+    if (kind === this._flag || !this.flags) return;
+    this._flag = kind;
+    this.flags.visible = kind !== 'none';
+    this.flagMat.uniforms.chequer.value = kind === 'chequered' ? 1 : 0;
+    this.flagMat.uniforms.col.value.setHex(kind === 'green' ? 0x18c24a : 0xffd400);
   }
 
   /** Floodlight masts along the circuit: glowing lamp heads and pools of light on the asphalt, shown at night. */
@@ -1264,6 +1412,7 @@ export class World {
 
   update(dt, time) {
     this.sky.material.uniforms.time.value = time;
+    if (this.flagMat) this.flagMat.uniforms.time.value = time;
     if (this.water) this.water.position.y = this.waterLevel + Math.sin(time * 0.5) * 0.05;
   }
 }

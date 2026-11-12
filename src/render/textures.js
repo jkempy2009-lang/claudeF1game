@@ -101,6 +101,38 @@ export function grassTexture(a = '#4a7d2f', b = '#5e9238', mow = false) {
   return toTexture(c);
 }
 
+/** Height map for the asphalt grain (bump mapping): coarse aggregate, a few patches and tar seams. */
+export function asphaltBumpTexture() {
+  const [c, g] = canvas(256, 256);
+  const rnd = mulberry32(17);
+  g.fillStyle = '#808080';
+  g.fillRect(0, 0, 256, 256);
+  speckle(g, 256, 256, 26, rnd, ['#787878', '#8a8a8a'], 18, 50, 0.5);
+  speckle(g, 256, 256, 6500, rnd, ['#3c3c3c', '#c4c4c4', '#5a5a5a', '#a8a8a8', '#ffffff'], 0.5, 1.5, 0.7);
+  g.strokeStyle = 'rgba(30,30,30,0.6)';
+  g.lineWidth = 1.2;
+  for (let i = 0; i < 5; i++) {
+    g.beginPath();
+    let x = rnd() * 256, y = rnd() * 256;
+    g.moveTo(x, y);
+    for (let k = 0; k < 6; k++) { x += (rnd() - 0.5) * 50; y += (rnd() - 0.5) * 50; g.lineTo(x, y); }
+    g.stroke();
+  }
+  return toTexture(c, { srgb: false });
+}
+
+/** Height map for the kerbs: saw-tooth ridges across the direction of travel. */
+export function kerbBumpTexture() {
+  const [c, g] = canvas(64, 128);
+  for (let y = 0; y < 128; y++) {
+    const t = (y % 16) / 16;
+    const v = Math.round(60 + 190 * t);
+    g.fillStyle = `rgb(${v},${v},${v})`;
+    g.fillRect(0, y, 64, 1);
+  }
+  return toTexture(c, { srgb: false });
+}
+
 export function gravelTexture() {
   const [c, g] = canvas(256, 256);
   const rnd = mulberry32(41);

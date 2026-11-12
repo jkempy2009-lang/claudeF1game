@@ -110,6 +110,46 @@ export class AudioEngine {
     eng.connect(this.master);
     this.eng = eng;
 
+    // ---- transmission whine: straight-cut gears sing with the shaft speed, loudest under load
+    const gw = ctx.createOscillator(), gw2 = ctx.createOscillator();
+    gw.type = 'sawtooth';
+    gw2.type = 'triangle';
+    const gwf = ctx.createBiquadFilter();
+    gwf.type = 'bandpass';
+    gwf.frequency.value = 1800;
+    gwf.Q.value = 4;
+    this.whineGain = ctx.createGain();
+    this.whineGain.gain.value = 0;
+    gw.connect(gwf);
+    gw2.connect(gwf);
+    gwf.connect(this.whineGain);
+    this.whineGain.connect(this.master);
+    gw.start();
+    gw2.start();
+    this.whine = [gw, gw2, gwf];
+    // ---- turbocharger: a whistle that spools up with boost; the wastegate flutters when you lift (see flutter())
+    const tb = ctx.createOscillator();
+    tb.type = 'sine';
+    this.turboGain = ctx.createGain();
+    this.turboGain.gain.value = 0;
+    tb.connect(this.turboGain);
+    this.turboGain.connect(this.master);
+    tb.start();
+    this.turbo = tb;
+    this.spool = 0;
+    // ---- floor scrape: the plank on the asphalt at speed
+    const scn = noise();
+    const scf = ctx.createBiquadFilter();
+    scf.type = 'bandpass';
+    scf.frequency.value = 3400;
+    scf.Q.value = 1.1;
+    this.scrapeGain = ctx.createGain();
+    this.scrapeGain.gain.value = 0;
+    scn.connect(scf);
+    scf.connect(this.scrapeGain);
+    this.scrapeGain.connect(this.master);
+    scn.start();
+
     // ---- wind
     const wn = noise();
     const wf = ctx.createBiquadFilter();
@@ -238,6 +278,9 @@ export class AudioEngine {
       set(this.rumbleGain.gain, 0, 0.1);
       set(this.rainGain.gain, 0, 0.1);
       set(this.sprayGain.gain, 0, 0.1);
+      set(this.whineGain.gain, 0, 0.1);
+      set(this.turboGain.gain, 0, 0.1);
+      set(this.scrapeGain.gain, 0, 0.1);
       for (const v of this.voices) { set(v.g.gain, 0, 0.1); v.car = null; }
       this.lastGear = player.gear;
       this.prevThr = player.throttle;
@@ -270,6 +313,19 @@ export class AudioEngine {
     const lift = this.prevThr > 0.6 && thr < 0.1 && rpm > 8500 && V > 25;
     if (lift) this.pops(3 + Math.floor(Math.random() * 5), clamp((rpm - 7000) / 8000, 0.2, 1));
     else if (thr < 0.05 && rpm > 9500 && V > 40 && Math.random() < dt * 3.2) this.pops(1 + Math.floor(Math.random() * 2), clamp((rpm - 8000) / 7000, 0.15, 0.8));
+    // gearbox whine (pitched by the shaft speed), turbo spool and wastegate flutter, floor scrape
+    const gf = (rpm / 60) * 8.5;
+    set(this.whine[0].frequency, gf, 0.03);
+    set(this.whine[1].frequency, gf * 1.5, 0.03);
+    set(this.whine[2].frequency, clamp(gf * 1.2, 500, 5000), 0.05);
+    set(this.whineGain.gain, 0.016 * (0.35 + 0.65 * thr) * clamp(V / 35, 0, 1), 0.06);
+    const spoolT = thr * clamp((rpm - 5000) / 7000, 0, 1);
+    const wasSpool = this.spool;
+    this.spool += (spoolT - this.spool) * Math.min(1, dt * (spoolT > this.spool ? 2.4 : 5));
+    set(this.turbo.frequency, 2600 + 6200 * this.spool, 0.05);
+    set(this.turboGain.gain, 0.011 * this.spool * this.spool, 0.05);
+    if (this.prevThr > 0.7 && thr < 0.25 && wasSpool > 0.55 && V > 20) this.flutter(wasSpool);
+    set(this.scrapeGain.gain, clamp((player.bottoming || 0) * 0.09, 0, 0.09), 0.03);
     this.prevThr = thr;
     // gear change thump
     if (player.gear !== this.lastGear) {
@@ -362,6 +418,30 @@ export class AudioEngine {
   }
 
   /** delay: seconds from now, on the audio clock (so a busy frame cannot bunch up an arpeggio). */
+  /** Wastegate / compressor flutter on a throttle lift: a short stuttering burst of rushing air. */
+  flutter(strength = 1) {
+    if (!this.started || !this.enabled) return;
+    const ctx = this.ctx, t = ctx.currentTime;
+    const s = this.makeNoise(true);
+    const f = ctx.createBiquadFilter();
+    f.type = 'bandpass';
+    f.frequency.value = 2100;
+    f.Q.value = 1.6;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    for (let k = 0; k < 7; k++) {
+      const a = 0.05 * strength * (1 - k / 8);
+      g.gain.setValueAtTime(a, t + k * 0.042);
+      g.gain.setValueAtTime(a * 0.12, t + k * 0.042 + 0.022);
+    }
+    g.gain.setValueAtTime(0.0001, t + 0.32);
+    s.connect(f);
+    f.connect(g);
+    g.connect(this.master);
+    s.start(t);
+    s.stop(t + 0.35);
+  }
+
   blip(freq, dur = 0.1, gain = 0.1, type = 'sine', slide = 0, delay = 0) {
     if (!this.started) return;
     const ctx = this.ctx, t = ctx.currentTime + delay;

@@ -273,6 +273,13 @@ export class Effects {
       st.spark -= k;
       while (k-- > 0) this.spark(car.x, car.trackH + 0.08, -car.y, 3, 6, car);
     } else st.spark = 0;
+    // the plank touching down at speed: a shower of titanium sparks from under the rear of the floor
+    if (car.bottoming > 0.05) {
+      st.plank = (st.plank || 0) + dt * 55 * car.bottoming;
+      let k = Math.floor(st.plank);
+      st.plank -= k;
+      while (k-- > 0) this.spark(car.x, car.trackH + 0.05, -car.y, 5, 11, car);
+    }
   }
 
   spark(x, y, z, speedMin, speedMax, car) {

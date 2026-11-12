@@ -22,13 +22,25 @@ export class PostFX {
     this.scene = new THREE.Scene();
     this.cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
     this.mat = new THREE.ShaderMaterial({
-      uniforms: { tDiffuse: { value: null }, tBloom: { value: null }, bloom: { value: 0 }, strength: { value: 0 }, aspect: { value: 1 }, center: { value: new THREE.Vector2(0.5, 0.46) }, grade: { value: 1 } },
+      uniforms: { tDiffuse: { value: null }, tBloom: { value: null }, bloom: { value: 0 }, strength: { value: 0 }, aspect: { value: 1 }, center: { value: new THREE.Vector2(0.5, 0.46) }, grade: { value: 1 },
+        time: { value: 0 }, haze: { value: [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()] }, sun: { value: new THREE.Vector3() }, sunCol: { value: new THREE.Color(1, 0.9, 0.75) } },
       vertexShader: VERT,
       fragmentShader: `
         uniform sampler2D tDiffuse; uniform sampler2D tBloom; uniform float bloom; uniform float strength; uniform float aspect; uniform vec2 center; uniform float grade;
+        uniform float time; uniform vec3 haze[4]; uniform vec3 sun; uniform vec3 sunCol;
         varying vec2 vUv;
         void main() {
-          vec2 d = vUv - center;
+          // heat haze: the air behind a hot exhaust bends the picture (haze[i] = screen position and radius of each plume)
+          vec2 uv = vUv;
+          for (int i = 0; i < 4; i++) {
+            if (haze[i].z > 0.0) {
+              vec2 hd = (vUv - haze[i].xy) * vec2(aspect, 1.0);
+              hd.y -= haze[i].z * 0.5; // the plume rises
+              float f = exp(-dot(hd, hd) / (haze[i].z * haze[i].z));
+              uv += f * 0.0011 * vec2(sin(vUv.y * 130.0 + time * 17.0), cos(vUv.x * 110.0 + time * 14.0));
+            }
+          }
+          vec2 d = uv - center;
           float r = length(d * vec2(aspect, 1.0));
           float m = smoothstep(0.16, 0.8, r) * strength;
           vec4 col = vec4(0.0);
@@ -39,8 +51,17 @@ export class PostFX {
               col += texture2D(tDiffuse, center + d * (1.0 - m * 0.16 * t));
             }
             col /= float(N);
-          } else col = texture2D(tDiffuse, vUv); // no blur: one sample (the grade pass alone must stay cheap)
+          } else col = texture2D(tDiffuse, uv); // no blur: one sample (the grade pass alone must stay cheap)
           vec3 rgb = col.rgb + texture2D(tBloom, vUv).rgb * bloom;
+          // sun glare: a soft bloom and a horizontal streak when the low sun is in shot and not hidden (tested on the picture itself)
+          if (sun.z > 0.0) {
+            vec3 sp = texture2D(tDiffuse, sun.xy).rgb;
+            float seen = smoothstep(0.75, 1.8, max(sp.r, max(sp.g, sp.b)));
+            vec2 sd = (vUv - sun.xy) * vec2(aspect, 1.0);
+            float r2 = dot(sd, sd);
+            float gl = exp(-r2 * 26.0) * 0.55 + exp(-r2 * 3.2) * 0.16 + exp(-abs(sd.y) * 46.0) * exp(-abs(sd.x) * 2.6) * 0.2;
+            rgb += sunCol * gl * sun.z * seen;
+          }
           gl_FragColor = vec4(rgb, 1.0);
           #include <tonemapping_fragment>
           #include <colorspace_fragment>
@@ -150,6 +171,7 @@ export class PostFX {
     this.mat.uniforms.strength.value = doBlur ? this.strength : 0;
     this.mat.uniforms.bloom.value = doBloom ? this.bloom : 0;
     this.mat.uniforms.grade.value = doGrade ? 1 : 0;
+    this.mat.uniforms.time.value = performance.now() / 1000;
     if (!doBloom) this.mat.uniforms.tBloom.value = this.rt.texture;
     r.render(this.scene, this.cam);
   }

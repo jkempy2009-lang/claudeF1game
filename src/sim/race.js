@@ -1019,7 +1019,19 @@ export class Race {
     else this.wet = Math.max(0, this.wet - 0.0045 * dt);
     if (this.rain > 0.04 && this.wet > this.rain * 1.05 + 0.1) this.wet -= 0.004 * dt; // light rain only wets the track so much
     this.maxWet = Math.max(this.maxWet || 0, this.wet);
-    for (const c of this.cars) c.wetness = this.wet;
+    // once the rain stops the cars clear the water from the racing line first; rubber goes down on the same line over the race
+    const rainK = clamp((this.rain - 0.02) / 0.06, 0, 1);
+    this.lineDry = (1 - rainK) * clamp((1 - this.wet) * 2.2, 0, 1) * 0.85;
+    let dist = 0;
+    for (const c of this.cars) dist += c.rs ? c.rs.maxDist || 0 : 0;
+    this.rubber = clamp(dist / (this.track.length * this.cars.length * 10), 0, 1);
+    const ld = this.track.lineD;
+    for (const c of this.cars) {
+      const off = Math.abs(c.d - ld[c.i]);
+      const band = off < 1.2 ? 1 : off > 3.2 ? 0 : 1 - (off - 1.2) / 2;
+      c.wetness = this.wet * (1 - this.lineDry * band);
+      c.rubberGrip = 1 + 0.012 * this.rubber * band * (1 - this.wet);
+    }
     const pl = this.player;
     if (pl) pl.rs.maxDamage = Math.max(pl.rs.maxDamage || 0, pl.damageSummary().worst);
   }

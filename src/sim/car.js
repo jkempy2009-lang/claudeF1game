@@ -398,7 +398,7 @@ export class Car {
       let mu = Math.max(0.7, mu0 - sp.loadSens * (Fz - sp.fz0)) * comp.mu * tempF * wearF * surf.grip * (front ? sp.frontGrip : sp.rearGrip);
       if (!front && sp.launchGrip) mu *= 1 + sp.launchGrip * (1 - smoothstep(12, 48, absVl)); // extra rear traction off the line (the boosted car), fading out by about 170 km/h
       if (this.puncture[w] > 0) mu *= 1 - 0.55 * this.puncture[w];
-      mu *= pressureGrip * (1 - 0.16 * this.flat[w]) * wetGripFactor(comp, this.wetness) * (sf === SURF.KERB ? 1 - 0.14 * this.wetness : 1);
+      mu *= pressureGrip * (this.rubberGrip || 1) * (1 - 0.16 * this.flat[w]) * wetGripFactor(comp, this.wetness) * (sf === SURF.KERB ? 1 - 0.14 * this.wetness : 1);
       const sx = kap / sp.kappaPeak;
       const sy = Math.tan(al) / Math.tan(sp.alphaPeak);
       const s = Math.hypot(sx, sy) + 1e-9;
