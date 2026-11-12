@@ -518,16 +518,17 @@ export class CarView {
     // pitches and rolls on the four travels while the wheels stay on the road, so the car squats, dives, leans and sits down at speed.
     const tv = this.travel || (this.travel = new Float32Array(4));
     const kS = clamp(dt * 12, 0, 1);
-    const m = car.mass * 9.81;
+    const live = !!car.fz; // a replayed car is only a pose: no loads, so it sits at its static ride height
+    const m = (car.mass || 800) * 9.81;
     for (let w = 0; w < 4; w++) {
       const stat = w < 2 ? (m * spec.weightFront) / 2 : (m * (1 - spec.weightFront)) / 2;
       const kerb = car.surf && car.surf[w] === 1 ? Math.sin(this.spinAngle[w] * 3.0) * 0.012 : 0; // SURF.KERB: the ridges work the wheel
-      const want = clamp((car.fz[w] - stat) / 150000, -0.03, 0.05) + kerb;
+      const want = live ? clamp((car.fz[w] - stat) / 150000, -0.03, 0.05) + kerb : 0;
       tv[w] += (want - tv[w]) * kS;
     }
     const heave = -(tv[0] + tv[1] + tv[2] + tv[3]) / 4;
-    const bodyPitch = ((tv[2] + tv[3]) - (tv[0] + tv[1])) / 2 / spec.wheelbase - car.pitch * 0.5; // front compressed = nose down
-    const bodyRoll = ((tv[1] + tv[3]) - (tv[0] + tv[2])) / 2 / spec.trackF - car.roll * 0.5;
+    const bodyPitch = ((tv[2] + tv[3]) - (tv[0] + tv[1])) / 2 / spec.wheelbase - (car.pitch || 0) * 0.5; // front compressed = nose down
+    const bodyRoll = ((tv[1] + tv[3]) - (tv[0] + tv[2])) / 2 / spec.trackF - (car.roll || 0) * 0.5;
     this.pitchSmooth = bodyPitch + slopePitch;
     this.rollSmooth = bodyRoll;
     this.model.rotation.order = 'YZX';
