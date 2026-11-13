@@ -1,5 +1,5 @@
 // The rivals' decision matrix: for a set of racing situations, which action wins and why.
-import { RaceBrain, MATRIX, ACTIONS, FEATURES, pitWindowCall } from '../src/sim/racecraft.js';
+import { RaceBrain, MATRIX, ACTIONS, FEATURES, pitWindowCall, RC_TUNE } from '../src/sim/racecraft.js';
 import { difficultyParams } from '../src/sim/ai.js';
 import { mulberry32 } from '../src/util/math.js';
 let bad = 0;
@@ -131,7 +131,9 @@ ok('every action has a row and every weight names a real feature', ACTIONS.every
   ok('...and it is held through the corner', b.action === 'SWITCHBACK', b.action);
 }
 // multi-lap energy plan: harvest behind a car of the same pace, then spend it all down a straight
+// (off by default - it raised contact in 20-car races - so the mechanism is switched on for this test)
 {
+  RC_TUNE.saving = true;
   const m = mk(1.0); m.car.speed = 80; m.car.soc = 0.3;
   const same = () => rival(13, 0, 80);
   let b;
@@ -143,6 +145,11 @@ ok('every action has a row and every weight names a real feature', ACTIONS.every
   m.car.soc = 0.03;
   for (let k = 0; k < 3; k++) b = decide(m, [same()], { dCorner: 600, inside: 0, straight: true });
   ok('battery spent: the plan ends', b.energy === 'none', b.energy);
+  RC_TUNE.saving = false;
+  const off = mk(1.0); off.car.speed = 80; off.car.soc = 0.3;
+  let bo;
+  for (let k = 0; k < 40; k++) bo = decide(off, [rival(13, 0, 80)], { dCorner: 120, inside: 1, straight: false, wl: 1.0, wr: 1.0 });
+  ok('with the plan switched off (the default) a stuck rival does not start saving', bo.energy === 'none', bo.energy);
 }
 // pit-wall timing against the car ahead
 {

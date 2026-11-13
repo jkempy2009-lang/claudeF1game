@@ -1,6 +1,6 @@
 import { wetGripFactor } from './carspec.js';
 import { clamp, lerp, loopDelta, mod, smoothstep, wrapAngle, mulberry32 } from '../util/math.js';
-import { RaceBrain } from './racecraft.js';
+import { RaceBrain, RC_TUNE } from './racecraft.js';
 
 const CAR_LEN = 5.5;
 const RACE_MARGIN = 0.02; // share of the hot-lap pace a top driver leaves in hand in a race
@@ -89,7 +89,9 @@ export class AIDriver {
         if (this.box.s != null) {
           // slide into the working lane for the box, and back out afterwards
           const rel = loopDelta(s, this.box.s, tr.length);
-          const toBox = smoothstep(-70, -18, rel) * (1 - smoothstep(10, 55, rel));
+          // stay in the fast lane until just before our own box and pull straight back out after it: the working lane in front
+          // of the other garages belongs to the cars being serviced there (boxes are 14 m apart)
+          const toBox = RC_TUNE.pitTight ? smoothstep(-17, -5, rel) * (1 - smoothstep(2, 12, rel)) : smoothstep(-70, -18, rel) * (1 - smoothstep(10, 55, rel));
           target = lerp(target, this.box.d, toBox);
         }
         d = lerp(d, target, smoothstep(0, 0.45, b));
@@ -274,7 +276,8 @@ export class AIDriver {
         const tc = clamp(Math.max(n.ds - CAR_LEN, 1) / closing, 0, 2.5);
         // a car coming out of the pits at 80 km/h is a hazard at 300 km/h of closing speed whichever side of the lane it is on
         const merging = !!(n.c.rs && n.c.rs.inPitLane) || (n.c.driver && n.c.driver.pitState === 'out');
-        const reach = merging && !this.car.rs.inPitLane ? 9 : 2.6 + clamp(0.07 * closing - 0.5, 0, 3);
+        // in the pit lane itself the lanes are narrow: anything not clearly in the other lane is in the way
+        const reach = merging && !this.car.rs.inPitLane ? 9 : RC_TUNE.pitTight && this.pitState !== 'none' && this.car.rs && this.car.rs.inPitLane ? 3.3 : 2.6 + clamp(0.07 * closing - 0.5, 0, 3);
         if (Math.min(Math.abs(n.dd), Math.abs(n.dd + (n.ddot || 0) * tc)) > reach) continue;
         const gap = Math.max(n.ds - CAR_LEN - 4, 0.8);
         const aLead = Math.max(0, -(n.c.axF || 0)) * 0.7;
@@ -456,7 +459,12 @@ export class AIDriver {
     if (st === 'none') {
       // commit when we pass the decision point shortly before the entry
       const toEntry = mod(tr.pit.start - s, tr.length);
-      if (this.wantsPit && this.box.s != null && toEntry < 340 && toEntry > 30 && race.phase === 'racing') this.pitState = 'in';
+      if (this.wantsPit && this.box.s != null && toEntry < 340 && toEntry > 30 && race.phase === 'racing') {
+        // one car per garage: if the team-mate is already in the lane or on its way in, stay out and stop next lap
+        const team = car.info ? car.info.teamIdx : -1;
+        const taken = race.cars.some((o) => o !== car && o.info && o.info.teamIdx === team && o.rs && (o.rs.inPitLane || o.rs.service || (o.driver && o.driver.pitState !== 'none') || (o.rs.pilot && o.rs.pilot.pitState !== 'none')));
+        if (!taken || !RC_TUNE.pitTeam) this.pitState = 'in';
+      }
     } else if (st === 'in') {
       // missed the entry (spun, ran wide, or the car behind was in the way): give up and call again next lap
       if (!tr.inPitRange(s) && mod(tr.pit.start - s, tr.length) > 380) { this.pitState = 'none'; return; }

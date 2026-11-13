@@ -12,6 +12,12 @@ import { clamp, smoothstep } from '../util/math.js';
  * see why a rival did what it did.
  */
 
+/** Switches for the optional behaviours, so each can be measured on its own (tools/racing-quality.mjs reads RC_OFF=a,b,c). */
+// Measured over 8 seeds at Northfield (20 cars, F1 level): `saving` on its own nearly doubled car-to-car contact (53 -> 94), because a car
+// that stops deploying is swamped by the train behind it; `pitTight` (a late merge into the garage lane) also doubled contact.
+// Both stay off until they are reworked. Undercut, surge and switchback made no measurable difference.
+export const RC_TUNE = { switchback: true, surge: true, saving: false, undercut: true, pitTight: false, pitTeam: true };
+
 export const ACTIONS = ['LINE', 'FOLLOW', 'DRAFT', 'ATTACK', 'COVER', 'BLOCK', 'YIELD', 'SWITCHBACK'];
 export const FEATURES = ['close', 'edge', 'brake', 'corner', 'straight', 'room', 'drs', 'threat', 'lapped', 'risk'];
 
@@ -49,8 +55,8 @@ export const MATRIX = {
  */
 export function pitWindowCall({ lap, planned, lapsLeft, gapAhead, stuckT, aheadPitted, wear, used = {} }) {
   if (planned == null || lapsLeft <= 3) return null;
-  if (!used.undercut && lap >= planned - 2 && lap < planned && gapAhead != null && gapAhead < 1.5 && stuckT > 12 && wear > 0.25) return 'undercut';
-  if (!used.overcut && !used.undercut && lap >= planned - 1 && lap <= planned && aheadPitted && wear < 0.6) return 'overcut';
+  if (RC_TUNE.undercut && !used.undercut && lap >= planned - 2 && lap < planned && gapAhead != null && gapAhead < 1.5 && stuckT > 12 && wear > 0.25) return 'undercut';
+  if (RC_TUNE.undercut && !used.overcut && !used.undercut && lap >= planned - 1 && lap <= planned && aheadPitted && wear < 0.6) return 'overcut';
   return null;
 }
 
@@ -167,7 +173,7 @@ export class RaceBrain {
     }
     // boxed out on the outside at the turn-in: do not just lift and fall in behind, switch back (slow in, inside line out)
     // (the outside line stops being offered 150 m before the corner: an attacker still there, and not through, was boxed out)
-    if (prevAction === 'ATTACK' && ctx.inside && prevSide === -ctx.inside && ctx.dCorner < 150 && best !== 'ATTACK' && s.ahead && s.ahead.ds > 2.5 && this.traits.aggr > 0.5) {
+    if (RC_TUNE.switchback && prevAction === 'ATTACK' && ctx.inside && prevSide === -ctx.inside && ctx.dCorner < 150 && best !== 'ATTACK' && s.ahead && s.ahead.ds > 2.5 && this.traits.aggr > 0.5) {
       this.swUntil = now + 4.5;
       this.swSide = ctx.inside;
       this.action = 'SWITCHBACK';
@@ -323,14 +329,14 @@ export class RaceBrain {
     // harvest for a lap or two instead, then spend the whole battery in one go down a long straight, with DRS and the tow.
     const tucked = !!(s && s.ahead) && this.f.close > 0.55 && Math.abs(this.closeRate) < 2.5 && (action === 'FOLLOW' || action === 'DRAFT' || action === 'ATTACK');
     this.stuckT = tucked ? this.stuckT + 0.5 : Math.max(0, this.stuckT - 1);
-    if (this.energy === 'none' && this.stuckT > 12 && soc < 0.7 && lapsLeft > 1.5) {
+    if (RC_TUNE.saving && this.energy === 'none' && this.stuckT > 12 && soc < 0.7 && lapsLeft > 1.5) {
       this.energy = 'saving';
       this.energyT = now;
     } else if (this.energy === 'saving') {
       const lapT = drv.track.length / 62; // a rough lap, in seconds
       if (!tucked && this.stuckT <= 0) this.energy = 'none'; // the fight is over
       else if ((soc > 0.82 || now - this.energyT > 2 * lapT || lapsLeft <= 1.2) && ctx.straight && ctx.dCorner > 330 && s && s.ahead && s.ahead.gapT < 1.1) {
-        this.energy = 'surge';
+        this.energy = RC_TUNE.surge ? 'surge' : 'none';
         this.energyT = now;
       }
     } else if (this.energy === 'surge' && (now - this.energyT > 14 || soc < 0.06 || (!ctx.straight && now - this.energyT > 3))) {
