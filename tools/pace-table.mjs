@@ -1,4 +1,5 @@
 // Prints the README pace table: clean-lap time of the best car for every circuit at each difficulty preset.
+// With JSON=<file> the same numbers are written as JSON (see src/sim/pacetable.js).
 import { Track } from '../src/sim/track.js';
 import { TRACK_DEFS } from '../src/sim/trackdefs.js';
 import { Car } from '../src/sim/car.js';
@@ -8,6 +9,7 @@ import { AIDriver } from '../src/sim/ai.js';
 import { formatTime } from '../src/util/math.js';
 import { DIFFICULTIES, CAR_BASE } from '../src/sim/race.js';
 const DT = 1 / 240;
+const json = {};
 console.log('| | ' + DIFFICULTIES.map((d) => d.name).join(' | ') + ' |');
 console.log('|---|' + DIFFICULTIES.map(() => '---').join('|') + '|');
 for (const def of TRACK_DEFS) {
@@ -32,6 +34,9 @@ for (const def of TRACK_DEFS) {
       last = car.s;
     }
     row.push(formatTime(Math.min(...times.slice(1))));
+    (json[def.id] = json[def.id] || []).push(+Math.min(...times.slice(1)).toFixed(2));
   }
   console.log(`| ${def.name} | ${row.join(' | ')} |`);
 }
+// JSON=<file>: also write { trackId: [seconds per difficulty preset] } (the menu's rival-pace hint is built from this)
+if (process.env.JSON) (await import('node:fs')).writeFileSync(process.env.JSON, JSON.stringify(json));

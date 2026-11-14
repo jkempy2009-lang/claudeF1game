@@ -8,7 +8,7 @@ import { RC_TUNE } from '../src/sim/racecraft.js';
 for (const k of (process.env.RC_OFF || '').split(',').filter(Boolean)) RC_TUNE[k] = false;
 const level = +(process.argv[2] || 0.8), tid = process.argv[3] || 'northfield', seeds = (process.argv[4] || '1,2').split(',').map(Number), laps = +(process.argv[5] || 5);
 const track = new Track(TRACK_DEFS.find((d) => d.id === tid));
-const cause = {}, where = {}, examples = [], pitZones = {}, pitEx = [];
+const cause = {}, where = {}, examples = [], pitZones = {}, pitEx = [], origins = {}, originEx = [], hurtCars = new Set();
 for (const seed of seeds) {
   const race = new Race(track, { mode: 'race', laps, level, fieldSize: 20, playerGrid: 12, seed, tyreWear: 3, collisions: true, damage: true });
   const p = race.player;
@@ -23,6 +23,11 @@ for (const seed of seeds) {
     if (i % 24 === 0) for (const c of race.cars) { const h = hist.get(c); const off = c.d > track.wl[c.i] + 1 || -c.d > track.wr[c.i] + 1; if (off && t - h.firstOff > 12) { h.firstOff = t; h.offInfo = { s: c.s, v: c.speed, dmg: c.damageSummary().severity, punct: Math.max(...c.puncture), wear: c.tyreSummary().wear, act: c.driver ? c.driver.brain.action : 'bot', pit: c.driver ? c.driver.pitState : '', mist: !!(c.driver && c.driver.mistake && c.driver.mistake.active), carHitAgo: t - h.carHit, T: c.temp[0], Ts: c.tempS[0], gz: c.gLoad, grain: Math.max(...c.grain) }; } }
     for (const e of race.events) {
       if (e.type === 'impact' && e.speed > 2) { if (e.wall) hist.get(e.car).wallHit = t; else { hist.get(e.car).carHit = t; hist.get(e.other).carHit = t; } }
+      if (e.type === 'impact') for (const c of e.wall ? [e.car] : [e.car, e.other]) {
+        // the impact that first left this car hurt: everything it does afterwards is a consequence of this one
+        const h = hist.get(c), hurt = c.damageSummary().severity > 0.35 || Math.max(...c.puncture) > 0;
+        if (hurt && !h.origin) { const o = e.wall ? null : c === e.car ? e.other : e.car, dr = c.driver; h.origin = `seed${seed} t${t.toFixed(0)} lap${c.rs.lap} ${c.info.code} ${e.wall ? 'WALL' : 'car ' + o.info.code + (o === p ? ' (test bot)' : '')} closing ${(e.speed * 3.6).toFixed(0)} km/h at s${c.s.toFixed(0)} d${c.d.toFixed(1)} v${(c.speed * 3.6).toFixed(0)} act:${dr ? dr.brain.action : 'bot'} pit:${dr ? dr.pitState : ''} wear${c.tyreSummary().wear.toFixed(2)} carHit${(t - h.carHit).toFixed(1)}s ago`; h.originKind = e.wall ? (t - h.carHit < 4 ? 'wall, after car contact' : dr && dr.pitState !== 'none' ? 'wall, while pitting' : t < 25 ? 'wall, opening lap' : 'wall, on its own') : t < 25 ? 'car contact, opening lap' : 'car contact'; }
+      }
       if (e.type === 'recover' && e.car !== p) {
         const h = hist.get(e.car), o = h.offInfo || {};
         let k;
@@ -33,6 +38,7 @@ for (const seed of seeds) {
         else if (o.wear > 0.75) k = 'worn-out tyres';
         else k = 'solo: ran off on its own';
         cause[k] = (cause[k] || 0) + 1;
+        if (k.startsWith('already')) { h.recov = (h.recov || 0) + 1; if (h.recov === 1) { origins[h.originKind || 'unknown'] = (origins[h.originKind || 'unknown'] || 0) + 1; originEx.push(h.origin || `seed${seed} ${e.car.info.code} (no impact recorded)`); } hurtCars.add(seed + e.car.info.code); }
         if (k.startsWith('in the pit')) {
           const c = e.car, pt = track.pit, rel = ((c.s - pt.start + track.length) % track.length);
           const zone = rel > track.length - 400 ? 'approach (before the ramp)' : rel < pt.rampIn ? 'entry ramp' : rel < pt.len - pt.rampOut ? 'pit lane' : rel < pt.len ? 'exit ramp' : 'after the exit';
@@ -50,3 +56,5 @@ console.log('solo run-offs by track position (m):', JSON.stringify(where));
 console.log(examples.join('\n'));
 console.log('pit-lane recoveries by zone:', JSON.stringify(pitZones));
 console.log(pitEx.join('\n'));
+console.log(`damaged cars needing recovery: ${hurtCars.size} cars; what first damaged them:`, JSON.stringify(origins));
+console.log(originEx.join('\n'));

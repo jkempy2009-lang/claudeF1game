@@ -87,6 +87,9 @@ for (const [name, bad] of [
       await page.click('[data-chip=pitCalls][data-value=auto]');
       step('pit wall option selectable', (await page.evaluate(() => window.apex.menu.config.pitCalls)) === 'auto');
       await page.click('[data-chip=pitCalls][data-value=radio]');
+      // rival pace hint: with a record on this circuit the setup screen offers the level that laps as fast as the player
+      const pace = await page.evaluate(() => { const m = window.apex.menu, c = m.config; const before = { rec: m.save.records[c.trackId], level: c.level }; m.save.records[c.trackId] = { best: 9999 }; m.rerender(); const slow = document.querySelector('#pace-hint').textContent; document.querySelector('[data-act=matchpace]').click(); const lv = m.config.level; if (before.rec) m.save.records[c.trackId] = before.rec; else delete m.save.records[c.trackId]; m.config.level = before.level; m.rerender(); return { slow, lv, plain: document.querySelector('#pace-hint').textContent }; });
+      step('rival pace hint and match-my-pace', /Rivals lap here in about \d:\d\d\.\d/.test(pace.plain) && /slower than them/.test(pace.slow) && Math.abs(pace.lv - 0.08) < 1e-9);
     }
   }
   step('setup tabs', true);

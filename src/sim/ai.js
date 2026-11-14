@@ -136,14 +136,16 @@ export class AIDriver {
     if (this.gripT <= 0) {
       this.gripT = 0.5;
       const comp = car.compound;
-      let g = 0;
+      let g = 0, gF = 0, gR = 0;
       for (let w = 0; w < 4; w++) {
         const tf = clamp(1 - 0.2 * ((car.temp[w] - comp.tOpt) / comp.tRange) ** 2, 0.7, 1.02);
         const wr = car.wear[w];
         const wf = 1 - 0.06 * wr - 0.2 * smoothstep(0.62, 1.0, wr);
-        g += tf * wf * (1 - 0.07 * (car.grain ? car.grain[w] : 0));
+        const gw = tf * wf * (1 - 0.07 * (car.grain ? car.grain[w] : 0));
+        if (w < 2) gF += gw / 2; else gR += gw / 2;
       }
-      g /= 4;
+      // the weaker axle is what lets go first: a car with dead rears and fair fronts does not have the average of the two
+      g = RC_TUNE.weakAxle ? Math.min(gF, gR) : (gF + gR) / 2;
       // a broken wing, floor or punctured tyre costs grip as well: drive to what the car has left
       const punct = Math.max(car.puncture[0], car.puncture[1], car.puncture[2], car.puncture[3]);
       g *= wetGripFactor(comp, car.wetness || 0);
@@ -187,6 +189,9 @@ export class AIDriver {
     const it = this.intent;
     const paceK = this.dp.pace * this.skill * this.raceK * this.paceAdapt * this.gripAdapt * air * it.push * it.yieldLift;
     let vt = prof.v[idx] * paceK * (this.mistake && this.mistake.active ? this.mistake.factor : 1);
+    // off the racing line (defending the inside, going round the outside) the corner is tighter than the profile assumes
+    const offLine = RC_TUNE.offLine && Math.abs(this.offset) > 0.6 && this.pitState === 'none';
+    if (offLine) vt = Math.min(vt, this.offLineV(s + look, prof) * paceK);
     // use the whole car on the straights: with the wing open the drag falls and the car keeps accelerating past the plain profile speed
     if (this.managePower && this.pitState === 'none' && Math.abs(kt) < 0.0025 && Math.abs(kPath) < 0.006) vt *= 1 + (inp.drs ? 0.05 : 0) + (inp.boost ? 0.02 : 0);
     // off the road (either side; the pit lane is not off the road): slow down and return
@@ -206,14 +211,15 @@ export class AIDriver {
     if (this.pitState !== 'none') {
       const limStart = tr.pit.limitStart;
       const toLimit = mod(limStart - s, tr.length);
+      const pitV = this.pitEntryV(car, tr, s);
       if (this.pitState === 'in' && toLimit < 500 && !tr.inPitLimiter(s)) {
         // arrive at the limit at the start of the entry ramp (the turn-in), not after it
         const toRamp = mod(tr.pit.start - s, tr.length);
         const d = toRamp < tr.length - 80 ? Math.max(0, toRamp - 6) : 0;
-        vt = Math.min(vt, Math.sqrt(PIT_LIMIT * PIT_LIMIT * 0.94 + 2 * 9 * d));
+        vt = Math.min(vt, Math.sqrt(pitV * pitV * 0.94 + 2 * 9 * d));
       }
       if (tr.inPitLimiter(s) || this.pitState === 'stopped') {
-        vt = Math.min(vt, PIT_LIMIT * 0.97);
+        vt = Math.min(vt, pitV * 0.97);
         inp.pitLimit = PIT_LIMIT;
       }
       if (this.pitState === 'in' && this.box.s != null && tr.inPitLimiter(s)) {
@@ -240,7 +246,8 @@ export class AIDriver {
       const base = tr.idx(s);
       for (let k = 1, dist = 0; dist < maxDist; k += step) {
         dist = k * prof.ds;
-        const vj = prof.v[(base + k) % tr.N] * paceK;
+        let vj = prof.v[(base + k) % tr.N] * paceK;
+        if (offLine && V > vj * 0.6) vj = Math.min(vj, this.offLineV(s + dist, prof) * paceK);
         if (V > vj) {
           const a = (V * V - vj * vj) / (2 * Math.max(dist - 2, 1));
           if (a > aReq) aReq = a;
@@ -252,7 +259,7 @@ export class AIDriver {
           // be at the limit before the entry ramp starts turning: braking and the first steering must not overlap
           const toRamp = mod(tr.pit.start - s, tr.length);
           const toLimit = mod(tr.pit.limitStart - s, tr.length);
-          const vL = PIT_LIMIT * 0.97;
+          const vL = this.pitEntryV(car, tr, s) * 0.97;
           const dist = toRamp < tr.length - 80 ? toRamp * 0.8 : toLimit;
           if (toLimit < 500 && V > vL) aReq = Math.max(aReq, (V * V - vL * vL) / (2 * Math.max(dist - 3, 1)));
         } else if (this.box.s != null) {
@@ -428,6 +435,41 @@ export class AIDriver {
       cap = Math.min(cap, lerp(vt, Math.max(c, 2), overlap));
     }
     return cap;
+  }
+
+
+
+  /**
+   * Corner speed on the path the car is actually planning (racing line + its current offset, kept on the road) at
+   * distance s. The speed profile is for the racing line, which uses the whole width; a car holding the inside to defend
+   * turns a much tighter arc, and one that brakes for the profile's speed there arrives too fast and spins. Returns
+   * Infinity where the offset path is no tighter than the line.
+   */
+  offLineV(s, prof) {
+    const tr = this.track, kt = tr.at(tr.curv, s);
+    if (Math.abs(kt) < 0.003) return Infinity;
+    const off = this.offset;
+    const D = (x) => { const i = tr.idx(x); return clamp(this.basePath(x) + off, -tr.wr[i] + 1.6, tr.wl[i] - 1.6); };
+    const d0 = D(s);
+    const k = Math.abs(kt / Math.max(0.3, 1 - kt * d0) + (D(s + 10) - 2 * d0 + D(s - 10)) / 100);
+    const i = tr.idx(s);
+    if (k <= Math.abs(prof.kappa[i]) * 1.08 || k < 0.004) return Infinity;
+    let v = prof.v[i];
+    for (let n = 0; n < 3; n++) v = Math.sqrt(prof.env.latAccel(v, 0.88 * (1 - 0.2 * clamp((v - 60) / 40, 0, 1))) / k);
+    return Math.min(v, prof.v[i]);
+  }
+
+  /**
+   * Speed to take the pit entry at. A car on a punctured tyre (45 % of its grip on that corner), or one with its wings off
+   * and its tyres worn through, cannot make the entry ramp at the limiter speed and spins into the pit wall, so it crawls
+   * in until it is straight in the lane. A healthy car is unaffected.
+   */
+  pitEntryV(car, tr, s) {
+    if (this.pitState !== 'in') return PIT_LIMIT;
+    const p = car.puncture;
+    // gripAdapt is the driver's own estimate of what the car has left (wings, floor, dead or punctured tyres)
+    if (!(p[0] > 0 || p[1] > 0 || p[2] > 0 || p[3] > 0) && this.gripAdapt > 0.85) return PIT_LIMIT;
+    return tr.inPitRange(s) && tr._pitBlend(s) > 0.97 ? PIT_LIMIT : PIT_LIMIT * 0.6;
   }
 
   updateMistakes(race) {

@@ -22,6 +22,7 @@ const suites = [
   ['driver identity', 'tests/driver.mjs'],
   ['ghost sharing', 'tests/ghost.mjs'],
   ['car power boost', 'tests/carpower.mjs'],
+  ['rival pace table', 'tests/pacetable.mjs'],
   ['rival decision matrix', 'tests/brain.mjs'],
   ['career rules', 'tests/careerrules.mjs'],
   ['tyre model', 'tests/tyres.mjs'],

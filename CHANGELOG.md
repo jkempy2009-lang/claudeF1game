@@ -4,6 +4,29 @@
 
 Everything below was added or fixed in this release, grouped by area.
 
+### Latest: why rivals crashed, traced and fixed
+A new tool, `tools/incident-causes.mjs`, records for every marshal recovery what happened to that car in the ten seconds before it, and what first damaged it. It showed that rivals almost never ran off on their own on the racing line; the recoveries came from three specific faults:
+
+- **Defending rivals braked for the wrong corner.** The speed profile is for the racing line, which uses the whole width of the road. A rival that moved to the inside to cover or block kept braking for that speed on a much tighter arc, arrived too fast, ran out of steering lock and spun into the wall, then limped round being recovered again and again. Drivers now work out the corner speed of the path they are actually on (`AIDriver.offLineV`, switch `RC_TUNE.offLine`) and brake for that. A defender or an attacker on the inside is now slower through the corner than a car on the line, which is also how it works in real racing.
+- **A recovered car could be stranded outside the pit wall.** A car that was put back on the road while heading for its pit box stayed in the "pitting" state on the circuit side of the pit wall and drove at the wall until it was recovered again, every nine seconds. It now rejoins in the pit lane only if it was already in it, and otherwise abandons the stop.
+- **Badly damaged cars spun on the pit entry.** A car with a puncture, or with its wings off and its tyres worn through, took the entry ramp at the limiter speed and spun. It now crawls in at 60 % of the limit until it is straight in the lane. Healthy cars are unaffected.
+
+Measured on Northfield (20 cars, 5 laps, triple tyre wear so that everybody has to stop), summed over the seeds given, with the off-line corner speed switched off and on in otherwise identical code:
+
+| Level | Seeds | Car contacts | Wall hits | Marshal recoveries | Position changes |
+|---|---|---|---|---|---|
+| Elite | 8 | 57 → 26 | 152 → 103 | 48 → 15 | 1069 → 848 |
+| Legend | 4 | 44 → 21 | 124 → 24 | 40 → 14 | 640 → 455 |
+| F1 | 8 | 64 → 58 | 218 → 185 | 76 → 71 | 1042 → 958 |
+| Legend, Vettore | 4 | 46 → 36 | 32 → 48 | 13 → 7 | 530 → 519 |
+
+What this does and does not show: Elite and Legend are clearly cleaner. F1 level is not: the difference there is inside the noise (one set of four seeds was worse, the other much better). There are 10 to 25 % fewer position changes, partly because fewer cars are crashing out of the way and partly because a car off the line is now honestly slower.
+
+- **Rivals drive to their weaker axle.** What was left at F1 level was cars on worn tyres still being driven at F1 pace: a driver judged his grip from the average of the four tyres, but a car with dead rears and fair fronts lets go at the rear. A rival lapping alone at F1 level on Northfield spun on its fifth lap for exactly this reason. Drivers now take the weaker of the two axles (`RC_TUNE.weakAxle`). On top of the change above, F1 level over the same 8 seeds: car contacts 58 → 51, wall hits 185 → 80, marshal recoveries 71 → 32, finishers 152 → 159 of 160. Elite over 4 seeds: contacts 7 → 5, wall hits 20 → 14, recoveries 5 → 4, finishers 77 → 80 of 80. The cost, and it is a real one: a rival's first laps on fresh tyres are unchanged (the pace table is the same to a hundredth), but it now fades as its tyres go. Alone on mediums at Legend level on Northfield, lap six is 1:14.9 instead of 1:13.9. The rivals are slower late in a stint than they were; in exchange they stop crashing.
+
+- **Rival pace next to your own.** The race setup screen now says how fast the rivals lap the chosen circuit at the chosen difficulty (measured, the README pace table), compares it with your record there, and offers **Match my pace**, which sets the level whose rivals lap as fast as you do. `tests/pacetable.mjs` keeps the table in step with the circuits and difficulty presets; `JSON=file node tools/pace-table.mjs` regenerates it.
+- **Checked by eye for the first time:** the sector bridges and the marshal posts with their yellow flags were shipped without ever being looked at; both now have screenshots and render correctly. Still not seen in a screenshot: bottoming sparks. Still not heard by anybody: the audio mix.
+
 ### New game modes
 - **Driving school**: seven short lessons (launch and top speed, clean braking, clean laps, DRS, slipstream and overtaking, a pit stop, wet driving), each on a suitable circuit with an on-screen checklist and a radio tip. Progress is saved; `tests/school.mjs` drives every lesson headlessly and `tests/e2e.mjs` covers the screens.
 - **Qualifying** (main menu: *Qualify & race*, or the *Qualifying session first* toggle in the race setup): a 3-minute session with all 20 cars on track. Cars leave the grid 2.4 s apart, collisions are off, DRS is free, the session ends when the clock runs out and each car completes the lap in progress. The classification screen shows every car's best lap and gap; *Start race from Pn* builds the race grid from the result (player and AI alike).

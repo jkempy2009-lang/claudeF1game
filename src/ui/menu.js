@@ -1,6 +1,7 @@
 import { TRACK_DEFS } from '../sim/trackdefs.js';
 import { TEAMS } from '../sim/teams.js';
 import { DIFFICULTIES } from '../sim/race.js';
+import { rivalLap, matchLevel } from '../sim/pacetable.js';
 import { COMPOUNDS, COMPOUND_IDS } from '../sim/carspec.js';
 import { formatTime } from '../util/math.js';
 import { drawLineChart } from './charts.js';
@@ -431,7 +432,8 @@ export class Menu {
       ${timetrial ? this.ghostPanel() : `<div class="panel"><h3>Race</h3>
         ${this.slider('laps', 'Laps', c.laps, 1, 30, 1, `${c.laps} · about ${Math.max(1, est)} min`)}
         <div class="field"><label>AI difficulty<b>${Math.round(c.level * 100)}%</b></label>${this.chips('diff', DIFFICULTIES.map((d) => ({ value: d.level, label: d.name })), diff.level)}
-        <input type="range" data-slider="level" min="0" max="100" step="1" value="${Math.round(c.level * 100)}"><div class="hint" id="diff-blurb">${esc(diff.blurb)} — drag for any value in between. Rookie leaves you room to learn; Legend runs every car at the physical limit.</div></div>
+        <input type="range" data-slider="level" min="0" max="100" step="1" value="${Math.round(c.level * 100)}"><div class="hint" id="diff-blurb">${esc(diff.blurb)} — drag for any value in between. Rookie leaves you room to learn; Legend runs every car at the physical limit.</div>
+        <div class="hint" id="pace-hint">${this.paceHint()}</div></div>
         ${this.slider('fieldSize', 'Cars on the grid', c.fieldSize, 2, 20, 1, c.fieldSize)}
         ${this.slider('playerGrid', 'Your starting position', Math.min(c.playerGrid, c.fieldSize), 1, c.fieldSize, 1, 'P' + Math.min(c.playerGrid, c.fieldSize))}
       </div>`}
@@ -928,6 +930,14 @@ export class Menu {
         c.pressure = 0;
         this.persist();
         return this.rerender();
+      case 'matchpace': {
+        const rec = this.save.records[c.trackId];
+        const m = rec ? matchLevel(c.trackId, rec.best) : null;
+        if (m == null) return;
+        c.level = Math.round(m * 100) / 100;
+        this.persist();
+        return this.rerender();
+      }
       case 'fullscreen': {
         try {
           if (document.fullscreenElement) document.exitFullscreen();
@@ -1073,7 +1083,27 @@ export class Menu {
       t.closest('.field').querySelectorAll('.chip').forEach((ch) => ch.classList.toggle('on', +ch.dataset.value === d.level));
       const bl = this.root.querySelector('#diff-blurb');
       if (bl) bl.textContent = d.blurb + ' — drag for any value in between. Rookie leaves you room to learn; Legend runs every car at the physical limit.';
+      const ph = this.root.querySelector('#pace-hint');
+      if (ph) ph.innerHTML = this.paceHint();
     }
+  }
+
+  /**
+   * What the chosen difficulty means on the chosen circuit: the rivals' clean-lap time (measured, see sim/pacetable.js) next
+   * to the player's own record there, and a button that sets the level to the one that laps as fast as the player does.
+   */
+  paceHint() {
+    const c = this.config;
+    const lap = rivalLap(c.trackId, c.level);
+    if (lap == null) return '';
+    const rec = this.save.records[c.trackId];
+    const best = rec && rec.best > 0 && rec.best < Infinity ? rec.best : 0;
+    let out = `Rivals lap here in about <b>${formatTime(lap, 1)}</b> at this level.`;
+    if (!best) return out + ' Set a lap in Time trial and the game can match them to your pace.';
+    const gap = best - lap, m = matchLevel(c.trackId, best);
+    out += ` Your record is <b>${formatTime(best, 1)}</b>: ${Math.abs(gap) < 0.15 ? 'the same pace' : `${Math.abs(gap).toFixed(1)} s a lap ${gap > 0 ? 'slower' : 'quicker'} than them`}.`;
+    if (m != null && Math.abs(m - c.level) > 0.015) out += ` <button class="btn sm" data-act="matchpace">Match my pace (${Math.round(m * 100)}%)</button>`;
+    return out;
   }
 
   /** The object the career rules screens edit: the new-career draft, or the running career. */

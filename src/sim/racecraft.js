@@ -16,7 +16,10 @@ import { clamp, smoothstep } from '../util/math.js';
 // Measured over 8 seeds at Northfield (20 cars, F1 level): `saving` on its own nearly doubled car-to-car contact (53 -> 94), because a car
 // that stops deploying is swamped by the train behind it; `pitTight` (a late merge into the garage lane) also doubled contact.
 // Both stay off until they are reworked. Undercut, surge and switchback made no measurable difference.
-export const RC_TUNE = { switchback: true, surge: true, saving: false, undercut: true, pitTight: false, pitTeam: true };
+// `offLine` (brake for the corner speed of the path you are on, not the racing line's) roughly halved contact and cut marshal
+// recoveries by two thirds at Elite and Legend; `weakAxle` (pace yourself to the weaker axle, not the average tyre) halved the
+// recoveries left at F1 level. Numbers and method in CHANGELOG.md; tools/quality-seeds.sh and tools/incident-causes.mjs repeat them.
+export const RC_TUNE = { switchback: true, surge: true, saving: false, undercut: true, pitTight: false, pitTeam: true, offLine: true, weakAxle: true };
 
 export const ACTIONS = ['LINE', 'FOLLOW', 'DRAFT', 'ATTACK', 'COVER', 'BLOCK', 'YIELD', 'SWITCHBACK'];
 export const FEATURES = ['close', 'edge', 'brake', 'corner', 'straight', 'room', 'drs', 'threat', 'lapped', 'risk'];

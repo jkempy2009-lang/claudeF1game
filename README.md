@@ -39,7 +39,7 @@ npm run test:leak    # browser: GPU resources across repeated sessions
 
 **Weather and light** – Dry, Light rain, Heavy rain or Changeable. Rain cuts slick grip by about 30 %, soaks the track, throws up spray; fit Wets in the pits. The light moves from midday to dusk over the race, or run a full **night race** with floodlights and headlights.
 
-**AI** – identical cars by default (only the drivers differ), six difficulty presets (Rookie to Legend, plus **F1**: flawless professionals) and a continuous slider. Every rival runs a **decision matrix** ten times a second (`src/sim/racecraft.js`): ten perception features (gap, pace edge, braking zone, room alongside, DRS, a threat behind, a lapping leader, risk from rain / damage / penalties...) are weighed against seven actions (line, follow, draft, attack, cover, block, yield) by a table of weights scaled by each driver's own aggression, defence and risk appetite. So they tuck into your tow, dive for the inside with a later brake point, abandon a dive that is not alongside by the turn-in, cover a straight with one move, close the door on the inside in the braking zone, and pull aside for a lapping leader. They also run their own ERS mode, fuel mix and DRS / boost, and keep accelerating on straights with the wing open. Press **Y** for the live telemetry and the panel under it shows the decision matrix of the cars next to you. The drivers draft, pull out to pass, choose the inside of the next corner, defend once, give room, use the wet-weather tyres, take a cheap stop under the safety car and pit for damage. Nothing is cheated: AI cars run the identical car model and Legend laps about as quickly as a strong human lap (Vettore 1:08.0, Rade 1:05.3, Hautes-Fagnes 1:17.8, Northfield 1:22.3).
+**AI** – identical cars by default (only the drivers differ), six difficulty presets (Rookie to Legend, plus **F1**: flawless professionals) and a continuous slider. Every rival runs a **decision matrix** ten times a second (`src/sim/racecraft.js`): ten perception features (gap, pace edge, braking zone, room alongside, DRS, a threat behind, a lapping leader, risk from rain / damage / penalties...) are weighed against seven actions (line, follow, draft, attack, cover, block, yield) by a table of weights scaled by each driver's own aggression, defence and risk appetite. So they tuck into your tow, dive for the inside with a later brake point, abandon a dive that is not alongside by the turn-in, cover a straight with one move, close the door on the inside in the braking zone, and pull aside for a lapping leader. They also run their own ERS mode, fuel mix and DRS / boost, and keep accelerating on straights with the wing open. Press **Y** for the live telemetry and the panel under it shows the decision matrix of the cars next to you. The drivers draft, pull out to pass, choose the inside of the next corner, defend once, give room, use the wet-weather tyres, take a cheap stop under the safety car and pit for damage. A driver off the racing line (defending the inside, going round the outside) brakes for the corner speed of the path he is actually on, and every driver paces himself to the weaker of his two axles, so they fade as their tyres go instead of spinning. Nothing is cheated: AI cars run the identical car model; the pace table below gives their clean lap at every level, and the race setup screen shows it next to your own record.
 
 **Your car** – the Team & car tab has an *Engine & grip* choice for your car only: **Standard** (default) is the same car as every rival (0-100 km/h in about 2.6 s), **Quick** adds 8 % power and a firmer launch, **Rocket** adds 30 %. It is the way to fight through the field from the back of the grid; Career uses its own upgrades instead. The G-meter dot shows the force you feel (braking throws it forward).
 
@@ -47,22 +47,22 @@ npm run test:leak    # browser: GPU resources across repeated sessions
 
 **Engineering** – brake discs have their own temperature (cold carbon bites less, above about 880 C it fades, and they glow through the wheels at night); a pit wall that reads your measured tyre wear and calls the stop (radio advice or automatic); tyre-pressure setup; live telemetry traces (Y); bloom at dusk and night; accessibility options (colour-blind-safe racing line, reduced motion, larger HUD); on-screen touch controls with pit, DRS, ERS, camera and pause buttons.
 
-Reference clean-lap pace of the best car at each level (medium tyres; `node tools/pace-table.mjs` regenerates this table). Since the racing line was rebuilt (see below) every level is about 9 % quicker than it used to be: Legend now drives the physical limit of the car on the best line, the same line the on-screen guide shows you. In a race the top drivers keep about 2 % in hand:
+Reference clean-lap pace of the best car at each level (medium tyres; `node tools/pace-table.mjs` regenerates this table). Since the racing line was rebuilt (see below) every level is about 9 % quicker than it used to be: Legend now drives the physical limit of the car on the best line, the same line the on-screen guide shows you. In a race the top drivers keep about 2 % in hand. The same numbers are built into the game (`src/sim/pacetable.js`): the race setup screen shows the rivals' lap time for the circuit and level you have picked next to your own record there, with a **Match my pace** button that sets the level whose rivals lap as fast as you do:
 
 | | Rookie | Amateur | Pro | Elite | Legend | F1 |
 |---|---|---|---|---|---|---|
-| Autodromo del Vettore | 1:18.896 | 1:14.062 | 1:10.325 | 1:07.325 | 1:05.775 | 1:05.025 |
-| Circuit de la Rade | 1:12.879 | 1:08.258 | 1:04.417 | 1:01.475 | 0:59.687 | 0:58.575 |
-| Northfield Grand Prix Circuit | 1:26.979 | 1:21.804 | 1:17.812 | 1:14.546 | 1:12.967 | 1:12.187 |
-| Circuit des Hautes-Fagnes | 1:25.079 | 1:19.942 | 1:15.871 | 1:12.633 | 1:11.158 | 1:10.400 |
-| Autódromo Costa Azul | 1:28.087 | 1:22.667 | 1:18.325 | 1:14.908 | 1:13.304 | 1:12.337 |
-| Monte Aurora Ring | 1:15.867 | 1:10.929 | 1:07.058 | 1:04.000 | 1:02.400 | 1:01.542 |
-| Mirage International Circuit | 1:30.408 | 1:24.346 | 1:19.917 | 1:16.533 | 1:14.812 | 1:13.904 |
-| Parc Lumière | 1:34.104 | 1:27.742 | 1:22.708 | 1:18.900 | 1:16.479 | 1:15.279 |
-| Porto Vecchio Harbour Circuit | 1:31.467 | 1:25.246 | 1:20.679 | 1:17.025 | 1:14.779 | 1:13.729 |
-| Sakura Ridge Circuit | 1:48.150 | 1:41.342 | 1:36.050 | 1:32.125 | 1:30.237 | 1:29.117 |
-| Circuit de la Bastide | 1:21.325 | 1:16.154 | 1:12.129 | 1:09.146 | 1:07.683 | 1:06.754 |
-| Caldera Speedway | 1:18.837 | 1:13.796 | 1:10.100 | 1:07.267 | 1:05.929 | 1:05.179 |
+| Autodromo del Vettore | 1:18.912 | 1:14.046 | 1:10.308 | 1:07.308 | 1:05.783 | 1:05.021 |
+| Circuit de la Rade | 1:12.933 | 1:08.087 | 1:04.396 | 1:01.458 | 0:59.675 | 0:58.554 |
+| Northfield Grand Prix Circuit | 1:26.937 | 1:21.775 | 1:17.804 | 1:14.533 | 1:12.946 | 1:12.175 |
+| Circuit des Hautes-Fagnes | 1:25.025 | 1:19.917 | 1:15.854 | 1:12.612 | 1:11.137 | 1:10.362 |
+| Autódromo Costa Azul | 1:28.196 | 1:22.612 | 1:18.317 | 1:14.908 | 1:13.283 | 1:12.346 |
+| Monte Aurora Ring | 1:15.862 | 1:10.900 | 1:07.042 | 1:03.983 | 1:02.379 | 1:01.500 |
+| Mirage International Circuit | 1:30.454 | 1:24.337 | 1:19.908 | 1:16.525 | 1:14.812 | 1:13.912 |
+| Parc Lumière | 1:34.271 | 1:27.737 | 1:22.704 | 1:18.900 | 1:16.508 | 1:15.271 |
+| Porto Vecchio Harbour Circuit | 1:31.675 | 1:25.304 | 1:20.737 | 1:17.062 | 1:14.804 | 1:13.783 |
+| Sakura Ridge Circuit | 1:47.967 | 1:41.154 | 1:35.837 | 1:31.879 | 1:30.062 | 1:28.971 |
+| Circuit de la Bastide | 1:21.308 | 1:16.133 | 1:12.133 | 1:09.121 | 1:07.625 | 1:06.758 |
+| Caldera Speedway | 1:18.746 | 1:13.762 | 1:10.046 | 1:07.187 | 1:05.821 | 1:05.129 |
 
 **After the flag** – a finish scene with a Victory / Podium / Points banner, then the classification with **telemetry charts** (lap time, fuel, tyre wear, top speed against the winner), a 30-second **instant replay** from trackside cameras, and **photo mode** with PNG capture.
 
