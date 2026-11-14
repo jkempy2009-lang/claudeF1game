@@ -1287,7 +1287,17 @@ export class Race {
   resetToTrack(car, penalty = 0) {
     if (car.rs.service) return; // a car in its pit box is not moved by the marshals
     const tr = this.track;
-    const p = tr.pointAt(car.s, clamp(tr.lineAt(car.s) * 0.5, -tr.wr[car.i] + 3, tr.wl[car.i] - 3));
+    // A car that was on its way into or out of the pits: inside the lane proper it is put back in the lane (the fast lane, to
+    // carry on to its box or the exit); anywhere else it goes back on the circuit and the stop is called off until next lap.
+    // (It used to be put on the circuit still trying to reach its box through the pit wall, and was recovered again every 9 s.)
+    const pilot = car.driver || car.rs.pilot;
+    const pitting = !!pilot && (pilot.pitState === 'in' || pilot.pitState === 'out');
+    const inLane = pitting && !!tr.pit && tr.inPitRange(car.s) && tr._pitBlend(car.s) > 0.9;
+    if (pitting && !inLane) {
+      pilot.pitState = 'none';
+      car.pitStopped = false;
+    }
+    const p = inLane ? tr.pointAt(car.s, tr.pitCentre(car.s) + 1.4) : tr.pointAt(car.s, clamp(tr.lineAt(car.s) * 0.5, -tr.wr[car.i] + 3, tr.wl[car.i] - 3));
     car.reset(p.x, p.y, p.heading, 6); // the marshals put the car back; damage stays until the pit crew repairs it
     car.rs.resets++;
     car.rs.lastS = car.s;
