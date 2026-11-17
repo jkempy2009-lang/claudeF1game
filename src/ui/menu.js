@@ -9,7 +9,7 @@ import { setupStats } from '../sim/setupstats.js';
 import { ACHIEVEMENTS, DEFAULT_STATS } from '../sim/achievements.js';
 import { LESSONS, sanitizeSchool } from '../sim/school.js';
 import { KEY_ACTIONS, keyLabel, mergeKeys, sanitizeKeys } from './input.js';
-import { CHAMP_CAL, DEFAULT_RULES, MAX_ROUNDS, careerLaps, sanitizeRules, sanitizeCareer, UPGRADE_KEYS, UPGRADE_INFO, UPGRADE_MAX, upgradeCost, objectiveFor, DISTANCES, driverStandings, constructorStandings, lapsFor, weatherFor, WEATHER_NAMES, WEATHER_IDS, cleanNumMap, cleanStrMap, cleanResults, teamMate, isSprintRound, sprintDone, sprintLaps, SPRINT_POINTS, practiceBonus, PRACTICE_BONUS, sponsorOffers, SPONSOR_GOALS, repLabel, repNeeded, retainerFor, teamStrength, teamRank, raceObjective, careerMate, contractRetainer, contractTerms } from '../sim/career.js';
+import { CHAMP_CAL, DEFAULT_RULES, MAX_ROUNDS, careerLaps, sanitizeRules, sanitizeCareer, UPGRADE_KEYS, UPGRADE_INFO, UPGRADE_MAX, upgradeCost, objectiveFor, DISTANCES, driverStandings, constructorStandings, lapsFor, weatherFor, WEATHER_NAMES, WEATHER_IDS, cleanNumMap, cleanStrMap, cleanResults, teamMate, isSprintRound, isSprintSlot, SPRINT_MIN_RACE_LAPS, sprintDone, sprintLaps, SPRINT_POINTS, practiceBonus, PRACTICE_BONUS, sponsorOffers, SPONSOR_GOALS, repLabel, repNeeded, retainerFor, teamStrength, teamRank, raceObjective, careerMate, contractRetainer, contractTerms } from '../sim/career.js';
 
 export const SAVE_KEY = 'apex-grand-prix.v1';
 
@@ -712,11 +712,16 @@ export class Menu {
       return `<div class="hint" style="margin-top:.9rem">Sprint weekend · you were <b style="color:#fff">P${me ? me.pos : '?'}</b> in the sprint${me && me.pts ? ` (+${me.pts} points)` : ''}; the Grand Prix starts in the sprint's finishing order.</div>
         <div class="row" style="margin-top:.5rem"><button class="btn primary grow" data-act="careerrace" data-q="0">Grand Prix · ${laps} laps</button></div>`;
     }
-    if (isSprintRound(s, c.rules)) {
-      return `<div class="hint" style="margin-top:.9rem"><b style="color:#ffd24a">Sprint weekend.</b> A ${sprintLaps(laps)}-lap sprint (points for the top eight: ${SPRINT_POINTS.join('-')}) sets the grid for the ${laps}-lap Grand Prix.</div>
+    // the switch sits where the sprint is announced, not only in the rules
+    const sw = (on) => `<button class="btn sm" data-toggle="cr.sprints" style="margin-left:.4rem">Sprint weekends: ${on ? 'on' : 'off'}</button>`;
+    if (isSprintRound(s, c.rules, s.round, laps)) {
+      return `<div class="hint" style="margin-top:.9rem"><b style="color:#ffd24a">Sprint weekend.</b> A ${sprintLaps(laps)}-lap sprint (points for the top eight: ${SPRINT_POINTS.join('-')}) sets the grid for the ${laps}-lap Grand Prix.${sw(true)}</div>
         <div class="row" style="margin-top:.5rem"><button class="btn primary grow" data-act="careerrace" data-q="1">Qualify &amp; sprint</button><button class="btn grow" data-act="careerrace" data-q="s">Sprint now</button></div>`;
     }
-    return `<div class="row" style="margin-top:.9rem"><button class="btn primary grow" data-act="careerrace" data-q="1">Qualify &amp; race</button><button class="btn grow" data-act="careerrace" data-q="0">Race now</button></div>`;
+    let note = '';
+    if (isSprintSlot(s, c.rules)) note = `<div class="hint" style="margin-top:.9rem">This would be a sprint weekend, but a ${laps}-lap race is too short for a sprint before it (they need races of ${SPRINT_MIN_RACE_LAPS} laps or more).${sw(true)}</div>`;
+    else if (c.rules && !c.rules.sprints && isSprintSlot(s, { ...c.rules, sprints: true }) && laps >= SPRINT_MIN_RACE_LAPS) note = `<div class="hint" style="margin-top:.9rem">Sprint weekends are off.${sw(false)}</div>`;
+    return note + `<div class="row" style="margin-top:.9rem"><button class="btn primary grow" data-act="careerrace" data-q="1">Qualify &amp; race</button><button class="btn grow" data-act="careerrace" data-q="0">Race now</button></div>`;
   }
 
   careerResultPanel(r) {
@@ -753,7 +758,7 @@ export class Menu {
         ${this.toggle('cr.collisions', 'Car-to-car collisions', 'Off: cars pass through each other', R.collisions)}
         ${this.toggle('cr.mandatoryStop', 'Mandatory pit stop', 'Everyone must stop once (a penalty if not)', R.mandatoryStop)}
         ${this.toggle('cr.adaptive', 'Adaptive AI pace', 'Cars far ahead ease off, cars far behind push', R.adaptive)}
-        ${this.toggle('cr.sprints', 'Sprint weekends', 'Every third round from the second: a short sprint with points for the top eight sets the Grand Prix grid', R.sprints)}
+        ${this.toggle('cr.sprints', 'Sprint weekends', `Every third round from the second: a sprint of a third of the race distance, with points for the top eight, sets the Grand Prix grid. Needs races of ${SPRINT_MIN_RACE_LAPS} laps or more`, R.sprints)}
       </div>
       <div class="panel"><h3>Season rules</h3>
         ${this.slider('cr.rounds', isNew ? 'Rounds per season' : 'Rounds per season (from next season)', T.rounds, 1, MAX_ROUNDS, 1, `${T.rounds} ${T.rounds === 1 ? 'round' : 'rounds'}`)}

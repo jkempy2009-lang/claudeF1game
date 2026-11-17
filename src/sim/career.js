@@ -152,13 +152,24 @@ export function practiceBonus(season) {
 /** Sprint points, P1 to P8 (SPEC 9: career weekend formats). */
 export const SPRINT_POINTS = [8, 7, 6, 5, 4, 3, 2, 1];
 
-/** Sprint weekends: the second round and every third after it, in a season of four rounds or more. */
-export function isSprintRound(season, rules, round = season.round) {
+/** The shortest Grand Prix that has room for a sprint before it (a sprint must be shorter than the race it sets up). */
+export const SPRINT_MIN_RACE_LAPS = 3;
+
+/** Sprint weekends: the second round and every third after it, in a season of four rounds or more (the slot alone). */
+export function isSprintSlot(season, rules, round = season.round) {
   return !!(rules && rules.sprints) && season.calendar.length >= 4 && round % 3 === 1 && round < season.calendar.length;
 }
 
-/** A sprint is about a third of the Grand Prix distance. */
-export const sprintLaps = (laps) => Math.max(2, Math.round(laps / 3));
+/**
+ * A sprint weekend: a sprint slot whose Grand Prix (raceLaps) is long enough for a shorter sprint before it.
+ * With raceLaps left out only the slot is checked.
+ */
+export function isSprintRound(season, rules, round = season.round, raceLaps = null) {
+  return isSprintSlot(season, rules, round) && (raceLaps == null || raceLaps >= SPRINT_MIN_RACE_LAPS);
+}
+
+/** A sprint is about a third of the Grand Prix distance, at least one lap. */
+export const sprintLaps = (laps) => Math.max(1, Math.round(laps / 3));
 
 /** The sprint of this round has been run (its result sets the Grand Prix grid). */
 export const sprintDone = (season) => !!(season.sprint && season.sprint.round === season.round);

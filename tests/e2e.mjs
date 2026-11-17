@@ -295,6 +295,13 @@ for (const [name, bad] of [
   await page.evaluate(() => { const a = window.apex; a.session.practice.quali = true; a.toMain(true); });
   await page.waitForSelector('[data-act=careerrace][data-q="s"]', { timeout: 30000 });
   step('ending practice returns to the hub with its result', await page.evaluate(() => { const s = window.apex.save.career.season; return s.practice && s.practice.round === s.round && s.practice.quali === true; }));
+  // the sprint switch on the hub: off turns the weekend back into a normal one, on brings the sprint back
+  await page.click('button[data-toggle="cr.sprints"]');
+  await page.waitForSelector('[data-act=careerrace][data-q="0"]', { timeout: 20000 });
+  const offOk = await page.evaluate(() => window.apex.save.career.rules.sprints === false && !document.querySelector('[data-act=careerrace][data-q="s"]'));
+  await page.click('button[data-toggle="cr.sprints"]');
+  await page.waitForSelector('[data-act=careerrace][data-q="s"]', { timeout: 20000 });
+  step('sprint weekends switch off and on from the hub', offOk && (await page.evaluate(() => window.apex.save.career.rules.sprints === true)));
   // round 2 of 4 is a sprint weekend: the sprint runs first, scores, and leaves the Grand Prix to run from its order
   await page.click('[data-ctab=overview]').catch(() => null);
   await page.waitForSelector('[data-act=careerrace][data-q="s"]', { timeout: 20000 });

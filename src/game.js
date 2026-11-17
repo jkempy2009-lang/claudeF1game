@@ -432,8 +432,9 @@ class Game {
     const c = this.save.career;
     if (!cfg.career || !c) return {};
     const rules = Career.sanitizeRules(c.rules);
-    if (!Career.isSprintRound(c.season, rules) || Career.sprintDone(c.season)) return {};
-    return { sprint: true, laps: Career.sprintLaps(Career.careerLaps(c, this.tracks[cfg.trackId].length)) };
+    const raceLaps = Career.careerLaps(c, this.tracks[cfg.trackId].length);
+    if (!Career.isSprintRound(c.season, rules, c.season.round, raceLaps) || Career.sprintDone(c.season)) return {};
+    return { sprint: true, laps: Career.sprintLaps(raceLaps) };
   }
 
   /** qualify: true (qualifying first), false (straight to the race) or 'sprint' (the sprint, from the qualifying grid rules). */

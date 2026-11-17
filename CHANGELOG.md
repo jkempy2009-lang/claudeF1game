@@ -4,6 +4,10 @@
 
 Everything below was added or fixed in this release, grouped by area.
 
+### Latest: sprint weekends fixed for short races, and a switch on the hub
+- **A sprint is now always shorter than its race.** It was a third of the distance but at least 2 laps, so a career set to 1-lap races got a 2-lap sprint before a 1-lap Grand Prix. Now it is a third of the distance, at least 1 lap, and sprint weekends only happen when the Grand Prix is 3 laps or more (3-4 laps: a 1-lap sprint; 6: 2; 15: 5). On a round that would have been a sprint weekend but whose race is too short, the hub says so.
+- **Switch sprints off where they are announced.** The race-weekend tab now has a *Sprint weekends: on / off* button next to the sprint notice (the same setting as in Career rules).
+
 ### Latest: formation lap and career practice (SPEC-v2 section 9, the last items)
 - **Formation lap** (a new *Session* option, off by default; it also applies to career races). At the start the field pulls away in grid order and drives a slow lap: the front at about 110 km/h, everyone else closing to ten metres behind the car ahead. Each car weaves on the straights and now and then drops back, then sprints and brakes hard to close up again. When the front of the field is back at the grid, every car is put in its own grid box (the lining-up is a cut, not driven) with the heat it built up, and the lights come on. No lap is counted, and no timing, rules or pit calls run during the lap. Measured over 10 and 20 cars at three circuits: front brakes reach the grid at 330-490 °C (they leave at 260 °C); the tyres keep their blanket heat (85 → 83 °C); no contact. `tests/formation.mjs` checks all of this.
 - **Career practice.** Before a weekend's first session the hub offers a practice: alone on the circuit, with a run plan. A qualifying simulation (one clean lap within 2 % of the rivals' pace at your difficulty) earns +0.6 % grip for the weekend; a long run (four clean laps in a row within 1.5 % of their average) earns -10 % tyre wear. *End practice* in the pause menu goes back to the hub with what was earned. Practice laps do not set records or ghosts.

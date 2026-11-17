@@ -207,7 +207,9 @@ ok('a new season: fresh head-to-head, developed teams, record kept', career.h2h.
   ok('sprints: rounds 2 and 5 of 7 are sprint weekends', rounds.join() === [false, true, false, false, true, false, false].join(), rounds.join());
   ok('sprints: off in the rules, none', !C.isSprintRound(k.season, { ...R, sprints: false }, 1));
   ok('sprints: none in a season of three rounds', !C.isSprintRound(C.newCareer({ team: 4, rounds: 3 }).season, R, 1));
-  ok('sprints: a third of the distance, at least 2 laps', C.sprintLaps(15) === 5 && C.sprintLaps(3) === 2);
+  ok('sprints: a third of the distance, at least 1 lap', C.sprintLaps(15) === 5 && C.sprintLaps(3) === 1 && C.sprintLaps(4) === 1 && C.sprintLaps(5) === 2);
+  ok('sprints: none before a Grand Prix of 1 or 2 laps (the sprint must be shorter)', !C.isSprintRound(k.season, R, 1, 1) && !C.isSprintRound(k.season, R, 1, 2) && C.isSprintRound(k.season, R, 1, 3));
+  ok('sprints: the sprint is always shorter than its race', [3, 4, 5, 6, 8, 10, 15, 20, 30].every((n) => C.sprintLaps(n) < n));
   k.season.round = 1;
   const mk = (name, code, team, isPlayer, time) => ({ info: { name, code, team: { short: team }, isPlayer }, time, dnf: time == null ? 'Engine' : null, gridPos: 1 });
   const cls = [mk('A Driver', 'AAA', 'T1', false, 100), mk('You', 'YOU', 'T2', true, 101), ...Array.from({ length: 8 }, (_, i) => mk('D' + i, 'D' + i, 'T3', false, 102 + i)), mk('Out', 'OUT', 'T4', false, null)];
