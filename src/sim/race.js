@@ -170,7 +170,8 @@ export class Race {
     // seats: 2 per team; the player takes one seat in their team
     const seats = [];
     TEAMS.forEach((team, ti) => {
-      for (let k = 0; k < 2; k++) seats.push({ team, ti, driver: DRIVERS[ti * 2 + k], seat: ti * 2 + k });
+      // a career brings its own grid (drivers who have moved, retired or come up as rookies): opt.lineup, 20 seats
+      for (let k = 0; k < 2; k++) seats.push({ team, ti, driver: (opt.lineup && opt.lineup[ti * 2 + k]) || DRIVERS[ti * 2 + k], seat: ti * 2 + k });
     });
     const pTeam = clamp(opt.playerTeam, 0, TEAMS.length - 1);
     const playerSeat = seats.findIndex((s) => s.ti === pTeam);

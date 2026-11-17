@@ -381,3 +381,7 @@ body.calm *, body.calm *::before, body.calm *::after { animation-duration: 0.01m
 .repbar span { display: block; height: 100%; border-radius: 0.45rem; background: linear-gradient(90deg, #2f7dd1, #31d17a 60%, #ffd24a); }
 .repbar i { position: absolute; top: -0.25rem; width: 2px; height: 1.4rem; background: #fff; }
 .gold { color: #ffd24a; }
+.goal { display: flex; justify-content: space-between; gap: 0.8rem; padding: 0.3rem 0; border-bottom: 1px solid var(--line); font-size: 0.92rem; }
+.goal i { font-style: normal; font-weight: 800; color: #ffd24a; }
+.goal.met i { color: #31d17a; }
+.goal.miss i { color: #ff6b6b; }

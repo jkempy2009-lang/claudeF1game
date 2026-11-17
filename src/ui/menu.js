@@ -8,7 +8,7 @@ import { drawLineChart } from './charts.js';
 import { ACHIEVEMENTS, DEFAULT_STATS } from '../sim/achievements.js';
 import { LESSONS, sanitizeSchool } from '../sim/school.js';
 import { KEY_ACTIONS, keyLabel, mergeKeys, sanitizeKeys } from './input.js';
-import { CHAMP_CAL, DEFAULT_RULES, MAX_ROUNDS, careerLaps, sanitizeRules, sanitizeCareer, UPGRADE_KEYS, UPGRADE_INFO, UPGRADE_MAX, upgradeCost, objectiveFor, DISTANCES, driverStandings, constructorStandings, lapsFor, weatherFor, WEATHER_NAMES, WEATHER_IDS, cleanNumMap, cleanStrMap, cleanResults, teamMate, sponsorOffers, SPONSOR_GOALS, repLabel, repNeeded, retainerFor, teamStrength, teamRank, raceObjective } from '../sim/career.js';
+import { CHAMP_CAL, DEFAULT_RULES, MAX_ROUNDS, careerLaps, sanitizeRules, sanitizeCareer, UPGRADE_KEYS, UPGRADE_INFO, UPGRADE_MAX, upgradeCost, objectiveFor, DISTANCES, driverStandings, constructorStandings, lapsFor, weatherFor, WEATHER_NAMES, WEATHER_IDS, cleanNumMap, cleanStrMap, cleanResults, teamMate, sponsorOffers, SPONSOR_GOALS, repLabel, repNeeded, retainerFor, teamStrength, teamRank, raceObjective, careerMate, contractRetainer, contractTerms } from '../sim/career.js';
 
 export const SAVE_KEY = 'apex-grand-prix.v1';
 
@@ -710,7 +710,7 @@ export class Menu {
     const c = this.save.career;
     const s = c.season;
     const team = TEAMS[c.team];
-    const TABS = [['overview', 'Race weekend'], ['calendar', 'Calendar'], ['development', 'Development'], ['standings', 'Standings'], ['driver', 'Driver']];
+    const TABS = [['overview', 'Race weekend'], ['calendar', 'Calendar'], ['development', 'Development'], ['standings', 'Standings'], ['driver', 'Driver'], ['market', 'Driver market']];
     const tab = TABS.some(([k]) => k === this.ctab) ? this.ctab : 'overview';
     return `<section class="screen panel-screen full">
       <div class="row"><h2>Career <span>season ${c.seasonNo}</span></h2><div class="grow"></div>
@@ -727,7 +727,7 @@ export class Menu {
     const tr = this.hooks.tracks[id];
     const laps = tr ? careerLaps(c, tr.length) : 5;
     const obj = { finish: raceObjective(c.team, c.rules.fieldSize) };
-    const mate = teamMate(c.team);
+    const mate = careerMate(c);
     const h = c.h2h;
     const bar = (a, b) => { const t = a + b; return `<div class="h2h"><b>${a}</b><div class="h2hbar"><span style="width:${t ? Math.round((a / t) * 100) : 50}%"></span></div><b>${b}</b></div>`; };
     const offers = sponsorOffers(c);
@@ -739,7 +739,7 @@ export class Menu {
         <div class="panel"><h3>Round ${s.round + 1} of ${s.calendar.length}</h3>
           <div class="hubtrack">${tr ? trackThumb(tr) : ''}<div><b style="font-size:1.3rem">${esc(def.name)}</b><div class="hint">${esc(def.country)} · ${tr ? (tr.length / 1000).toFixed(2) + ' km' : ''} · ${laps} ${laps === 1 ? 'lap' : 'laps'}</div>
           <div class="hint" style="margin-top:.5rem">Forecast: <b style="color:#fff">${esc(WEATHER_NAMES[weatherFor(s)])}</b>${weatherFor(s) !== 'dry' ? ' — be ready to change tyres' : ''}</div>
-          <div class="hint" style="margin-top:.3rem">Team target: finish <b style="color:#fff">P${obj.finish}</b> or better (+8 prize). Retainer: <b style="color:#fff">+${Math.round(retainerFor(c.team) * (c.rules.prize || 1))}</b> every race.</div></div></div>
+          <div class="hint" style="margin-top:.3rem">Team target: finish <b style="color:#fff">P${obj.finish}</b> or better (+8 prize). Retainer: <b style="color:#fff">+${Math.round(contractRetainer(c) * (c.rules.prize || 1))}</b> every race.</div></div></div>
           <h3 style="margin-top:1rem">Sponsor challenge <small class="hint">optional · pick one</small></h3>
           <div class="sponsors">${sp || '<div class="hint">No sponsor is interested in this race.</div>'}</div>
           <div class="row" style="margin-top:.9rem"><button class="btn primary grow" data-act="careerrace" data-q="1">Qualify &amp; race</button><button class="btn grow" data-act="careerrace" data-q="0">Race now</button></div>
@@ -748,6 +748,8 @@ export class Menu {
           <div class="hint">The first driver you have to beat is the one in the same car.</div>
           <div class="h2hrow"><small>Races</small>${bar(h.race[0], h.race[1])}</div>
           <div class="h2hrow"><small>Qualifying</small>${bar(h.quali[0], h.quali[1])}</div>
+          <h3 style="margin-top:1rem">Season goals <small class="hint">from ${esc(team.short)}</small></h3>
+          ${(c.goals || []).map((g) => `<div class="goal"><span>${esc(g.text)}</span><i>+${Math.round(g.pay * (c.rules.prize || 1))}</i></div>`).join('')}
           <h3 style="margin-top:1rem">Paddock news</h3>
           ${c.news.length ? c.news.slice(0, 4).map((n, i) => `<div class="news ${i ? '' : 'top'}">${esc(n)}</div>`).join('') : `<div class="hint">Your first race for ${esc(team.short)}. Nobody has written anything about you yet.</div>`}
         </div>
@@ -812,9 +814,32 @@ export class Menu {
           <div class="repbar"><span style="width:${c.rep}%"></span><i style="left:${repNeeded(rank)}%" title="What ${esc(team.short)} expects"></i></div>
           <div class="hint" style="margin:.4rem 0 .8rem"><b style="color:#fff">${c.rep.toFixed(0)}</b> / 100. It rises when you beat the team's target, your team-mate and the podium, and falls with missed targets, penalties and retirements. The marker is what ${esc(team.short)} expects of its driver: fall 18 below it without meeting the constructors' target and the seat is gone.</div>
           ${ladder}</div>
-        <div class="panel"><h3>Career record</h3>
+        <div class="panel"><h3>Contract</h3>
+          <div class="hint"><b style="color:#fff">${esc(team.name)}</b> · ${c.contract.years > 0 ? `${c.contract.years} more season${c.contract.years === 1 ? '' : 's'} after this one` : 'ends this season'} · pay <b style="color:#ffd24a">×${c.contract.pay.toFixed(2)}</b> (${contractRetainer(c)} a race)</div>
+          ${c.interest && c.interest.length ? `<div class="hint" style="margin-top:.4rem">Interested in you: <b style="color:#fff">${c.interest.map((i) => esc(TEAMS[i].short)).join(', ')}</b></div>` : '<div class="hint" style="margin-top:.4rem">Teams look at who is impressing them at the halfway point of the season.</div>'}
+          <h3 style="margin-top:1rem">Career record</h3>
           <div class="bigstats"><div><small>Races</small><b>${st.races}</b></div><div><small>Wins</small><b>${st.wins}</b></div><div><small>Podiums</small><b>${st.podiums}</b></div><div><small>Poles</small><b>${st.poles}</b></div><div><small>Fastest laps</small><b>${st.fastest}</b></div><div><small>Points</small><b>${st.points}</b></div><div><small>Best finish</small><b>${st.best ? 'P' + st.best : '–'}</b></div><div><small>Titles</small><b>${st.titles}</b></div></div>
           <h3 style="margin-top:1rem">Seasons</h3>${hist ? `<table class="results">${hist}</table>` : '<div class="hint">Your first season.</div>'}</div>
+      </div>`;
+  }
+
+  /** Every team's two drivers this season (age, talent), the free agent, and last winter's moves. */
+  career_market(c) {
+    const ds = new Map((c.drivers || []).map((d) => [d.id, d]));
+    const order = [...TEAMS.keys()].sort((a, b) => teamStrength(c, b) - teamStrength(c, a));
+    const cell = (id) => {
+      if (id === -1) return `<td><b style="color:#fff">You</b></td><td></td><td></td>`;
+      const d = ds.get(id);
+      if (!d) return '<td class="hint">—</td><td></td><td></td>';
+      const stars = '●'.repeat(Math.max(1, Math.round(d.talent * 5))).padEnd(5, '○');
+      return `<td>${esc(d.name)}</td><td class="hint">${d.age}</td><td class="hint" title="talent ${Math.round(d.talent * 100)}">${stars}</td>`;
+    };
+    const rows = order.map((ti) => `<tr class="${ti === c.team ? 'me' : ''}"><td><span class="tc" style="--c:${TEAMS[ti].color}"></span>${esc(TEAMS[ti].short)}</td>${cell(c.lineup ? c.lineup[ti * 2] : -3)}${cell(c.lineup ? c.lineup[ti * 2 + 1] : -3)}</tr>`).join('');
+    const reserve = c.reserve != null && ds.get(c.reserve) ? ds.get(c.reserve).name : null;
+    return `<div class="grid2" style="grid-template-columns:1.6fr 1fr">
+        <div class="panel" style="overflow:auto"><h3>The grid, season ${c.seasonNo}</h3><table class="results"><tr><th>Team</th><th>Driver</th><th>Age</th><th>Talent</th><th>Driver</th><th>Age</th><th>Talent</th></tr>${rows}</table>
+          ${reserve ? `<div class="hint" style="margin-top:.5rem">Without a seat: ${esc(reserve)}.</div>` : ''}</div>
+        <div class="panel"><h3>Last winter</h3>${(c.lastMarket || []).length ? c.lastMarket.map((n) => `<div class="news">${esc(n)}</div>`).join('') : '<div class="hint">The first season: the market opens when it ends. Drivers age a year every winter (the young improve, the old decline), some retire and rookies take their seats, and the ones who outperform their car move up.</div>'}</div>
       </div>`;
   }
 
@@ -822,16 +847,29 @@ export class Menu {
     const c = this.save.career;
     const r = c.seasonRecap;
     const team = TEAMS[c.team];
-    const offers = (r.offers || []).map((i) => `<button class="team" data-coffer="${i}" style="--c:${TEAMS[i].color};--c2:${TEAMS[i].accent}"><i></i><div><b>${esc(TEAMS[i].name)}</b><div class="hint">Offer: join for season ${c.seasonNo + 1} · car ${Math.round(55 + TEAMS[i].rating * 45)}% · pays ${retainerFor(i)} a race</div><div class="bar"><span style="width:${Math.round(55 + TEAMS[i].rating * 45)}%"></span></div></div></button>`).join('');
+    const terms = (t) => (t ? `${t.years} season${t.years === 1 ? '' : 's'} · pay ×${t.pay.toFixed(2)}` : '');
+    const offers = (r.offers || []).map((i) => `<button class="team" data-coffer="${i}" style="--c:${TEAMS[i].color};--c2:${TEAMS[i].accent}"><i></i><div><b>${esc(TEAMS[i].name)}</b><div class="hint">${esc(terms((r.terms || {})[i] || contractTerms(c, i)))} · car ${Math.round(55 + teamStrength(c, i) * 45)}% · ${retainerFor(i)} a race at ×1</div><div class="bar"><span style="width:${Math.round(55 + teamStrength(c, i) * 45)}%"></span></div></div></button>`).join('');
+    // staying: under contract, renewed, or (dropped with nobody else interested) kept on for a year
+    let stay = '';
+    if (!r.dropped && (c.contract.years > 0 || r.renewal)) {
+      const what = c.contract.years > 0 ? `Stay with ${esc(team.short)}: ${c.contract.years} more season${c.contract.years === 1 ? '' : 's'} under contract` : `Renew with ${esc(team.short)}: ${esc(terms(r.renewal))}`;
+      stay = `<button class="team on" data-coffer="${c.team}" style="--c:${team.color};--c2:${team.accent}"><i></i><div><b>${what}</b><div class="hint">Keep your car development</div></div></button>`;
+    } else if (r.dropped && !offers) {
+      stay = `<button class="team on" data-coffer="${c.team}" style="--c:${team.color};--c2:${team.accent}"><i></i><div><b>One more year with ${esc(team.short)}</b><div class="hint">Nobody else made an offer, so the team keeps you on a one-year deal</div></div></button>`;
+    }
+    const goals = (r.goals || []).map((g) => `<div class="goal ${g.met ? 'met' : 'miss'}"><span>${esc(g.text)}</span><i>${g.met ? '✓' : '✗'}</i></div>`).join('');
+    const market = (r.market || []).map((n) => `<div class="news">${esc(n)}</div>`).join('');
     return `<section class="screen panel-screen full">
       <div class="row"><h2>Season ${r.seasonNo} <span>${r.champion ? 'champion!' : 'complete'}</span></h2></div>
       <div class="grid2"><div class="panel"><h3>Your season</h3>
         <div class="bigstats"><div><small>Drivers'</small><b>P${r.driverPos}</b></div><div><small>${esc(team.short)}</small><b>P${r.teamPos}</b></div><div><small>Points</small><b>${r.points}</b></div><div><small>Wins</small><b>${r.wins}</b></div><div><small>Podiums</small><b>${r.podiums}</b></div></div>
-        <div class="hint" style="margin-top:.6rem">Constructors objective (P${r.constructorObjective}): <b style="color:${r.metConstructor ? '#31d17a' : '#ff6b6b'}">${r.metConstructor ? 'achieved' : 'missed'}</b>. Season bonus added to your budget: now <b style="color:#ffd24a">${c.budget}</b>.</div>
-        <div class="hint" style="margin-top:.4rem">Reputation: <b style="color:#fff">${c.rep.toFixed(0)}</b> / 100 · ${esc(repLabel(c.rep))}. Every team develops its car over the winter, so the order next year will not be quite this one.</div></div>
+        ${goals ? `<h3 style="margin-top:.8rem">Season goals</h3>${goals}` : ''}
+        <div class="hint" style="margin-top:.6rem">Budget now <b style="color:#ffd24a">${c.budget}</b> · reputation <b style="color:#fff">${c.rep.toFixed(0)}</b> / 100 (${esc(repLabel(c.rep))}). Every team develops its car over the winter, so the order next year will not be quite this one.</div></div>
         <div class="panel"><h3>Contracts for next season</h3><div class="teams">${offers || '<div class="hint">No offers this year. Build your reputation to attract bigger teams.</div>'}
-          ${r.dropped ? `<div class="hint" style="color:#ff6b6b;margin-top:.4rem">${esc(team.short)} has not renewed your contract: your reputation fell too far below what the team expects.</div>${offers ? '' : `<button class="team on" data-coffer="${c.team}" style="--c:${team.color};--c2:${team.accent}"><i></i><div><b>One more year with ${esc(team.short)}</b><div class="hint">Nobody else made an offer, so the team keeps you on</div></div></button>`}` : `<button class="team on" data-coffer="${c.team}" style="--c:${team.color};--c2:${team.accent}"><i></i><div><b>Stay with ${esc(team.short)}</b><div class="hint">Keep your car development</div></div></button>`}</div></div></div>
-      <div class="footer"><button class="btn sm" data-act="main">Main menu</button><div class="hint">Moving teams starts car development again.</div></div></section>`;
+          ${r.dropped ? `<div class="hint" style="color:#ff6b6b;margin-top:.4rem">${esc(team.short)} has not renewed your contract: your reputation fell too far below what the team expects.</div>` : ''}
+          ${stay}</div></div></div>
+      ${market ? `<div class="panel" style="margin-top:1rem"><h3>The driver market this winter</h3>${market}</div>` : ''}
+      <div class="footer"><button class="btn sm" data-act="main">Main menu</button><div class="hint">Moving teams starts car development again; a new contract sets your pay.</div></div></section>`;
   }
 
   screen_season_end(data) {

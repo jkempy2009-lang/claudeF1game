@@ -438,6 +438,7 @@ class Game {
       seed: undefined,
       upgrades: { ...c.upgrades },
       teamForm: c.teamForm ? c.teamForm.slice() : null,
+      lineup: Career.lineupFor(c),
       career: true,
     };
     this.startRace(cfg);
@@ -554,6 +555,7 @@ class Game {
       qualiTimes: cfg.mode === 'race' ? cfg.qualiTimes || null : null,
       upgrades: cfg.upgrades || null,
       teamForm: cfg.teamForm || null,
+      lineup: cfg.lineup || null,
       weather: cfg.weather || 'dry',
       equalCars: cfg.career ? false : cfg.equalCars !== false,
       carPower: cfg.carPower,

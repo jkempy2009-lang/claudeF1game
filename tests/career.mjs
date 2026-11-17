@@ -103,7 +103,7 @@ for (let rd = 0; rd < career.season.calendar.length; rd++) {
 }
 ok('the head-to-head counts every race, and qualifying only when there was one', career.h2h.race[0] + career.h2h.race[1] === 4 && career.h2h.quali[0] + career.h2h.quali[1] === 1, JSON.stringify(career.h2h));
 ok('career statistics add up', career.stats.races === 4 && career.stats.points === (career.season.points.You || 0) && career.stats.podiums >= career.stats.wins && (career.stats.best === 0 || career.stats.best >= 1), JSON.stringify(career.stats));
-ok('four headlines, newest first, plain text', career.news.length === 4 && career.news.every((n) => typeof n === 'string' && n.length > 10 && !/[<>]/.test(n)));
+ok('a headline for every race (and the mid-season rumours), plain text', career.news.length >= 4 && career.news.every((n) => typeof n === 'string' && n.length > 10 && !/[<>]/.test(n)));
 ok('reputation moved with the results and stayed in range', repMoves >= 2 && career.rep >= 0 && career.rep <= 100, `${rep0} -> ${career.rep}, ${repMoves} moves`);
 ok('season is complete', C.seasonDone(career.season));
 const ds = C.driverStandings(career.season);
@@ -126,5 +126,55 @@ ok('a new season: fresh head-to-head, developed teams, record kept', career.h2h.
   const n = new Race(track, { mode: 'race', laps: 2, level: 0.5, fieldSize: 8, playerTeam: 6, seed: 4, tyreWear: 3, upgrades: { power: 0, aero: 0, grip: 0, ers: 0, tyres: 0, pit: 0 } });
   ok('hybrid upgrade: a bigger battery on the player car only', u.player.spec.ersCapacity > n.player.spec.ersCapacity * 1.15 && u.cars.find((c) => !c.info.isPlayer).spec.ersCapacity === n.cars.find((c) => !c.info.isPlayer).spec.ersCapacity);
   ok('tyre upgrade: the player car wears its tyres more slowly', Math.abs(u.player.wearMult - 3 * 0.8) < 1e-9 && n.player.wearMult === 3 && u.cars.find((c) => !c.info.isPlayer).wearMult === 3);
+}
+// ---- the driver market, contracts and goals over many seasons (standings faked: the market only reads them)
+{
+  const k = C.newCareer({ team: 8, rounds: 2 });
+  const fake = (pts) => { const s = k.season; s.round = s.calendar.length; s.points = { You: pts }; s.teamOf = { You: TEAMS[k.team].short }; s.teamPoints = {}; for (const id of k.lineup) { if (id < 0) continue; const d = k.drivers.find((x) => x.id === id); s.points[d.name] = Math.round(d.talent * 50); s.teamOf[d.name] = 'x'; } };
+  const valid = () => k.lineup.length === 20 && k.lineup.filter((x) => x === -1).length === 1 && k.lineup[k.team * 2] === -1 && new Set(k.lineup.filter((x) => x >= 0)).size === 19 && k.lineup.every((x) => x === -1 || k.drivers.some((d) => d.id === x));
+  ok('a new career has its own grid, the player in the first seat of the team', valid() && k.drivers.length === 20 && C.careerMate(k).name === k.drivers.find((d) => d.id === k.lineup[17]).name);
+  const ages0 = k.drivers.map((d) => d.age);
+  let retired = 0, rookies = 0, moved = 0, allValid = true;
+  const names0 = new Set(k.drivers.map((d) => d.name));
+  for (let season = 0; season < 8; season++) {
+    fake(season * 20);
+    const rc = C.endSeason(k);
+    retired += rc.market.filter((n) => /retires/.test(n)).length;
+    rookies += rc.market.filter((n) => /^Rookie/.test(n)).length;
+    moved += rc.market.filter((n) => /moves up|joins/.test(n)).length;
+    const to = rc.offers.length ? rc.offers[0] : k.team;
+    const termsTo = rc.terms[to];
+    C.nextSeason(k, to);
+    if (termsTo) allValid &&= k.contract.years === termsTo.years && k.contract.pay === termsTo.pay;
+    allValid &&= valid();
+  }
+  ok('eight winters: the grid stays valid through every move', allValid);
+  ok("drivers age, retire and are replaced by rookies (a retiring reserve leaves no seat to fill)", retired > 0 && rookies >= retired - 1 && k.drivers.some((d) => !names0.has(d.name)), `${retired} retired, ${rookies} rookies`);
+  ok('drivers who outperform their car move up', moved > 0, `${moved} moves`);
+  ok('...and nobody is older than 38', k.drivers.every((d) => d.age <= 38));
+  const lu = C.lineupFor(k);
+  ok('lineupFor: driver objects for 19 seats and null for the player', lu.length === 20 && lu.filter((x) => x === null).length === 1 && lu.filter(Boolean).every((d) => d.name && d.code && d.talent > 0));
+  // a race runs with that grid
+  const track = new Track(TRACK_DEFS.find((d) => d.id === 'vettore'));
+  const race = new Race(track, { mode: 'race', laps: 2, level: 0.5, fieldSize: 20, playerTeam: k.team, seed: 3, lineup: lu, equalCars: false });
+  const raced = new Set(race.cars.filter((c) => !c.info.isPlayer).map((c) => c.info.name));
+  ok('a career race uses the career grid', lu.filter(Boolean).every((d) => raced.has(d.name)));
+  ok('the team-mate in the race is the career team-mate', race.cars.find((c) => !c.info.isPlayer && c.info.teamIdx === k.team).info.name === C.careerMate(k).name);
+  // contracts: terms grow with reputation; a contract runs down a year each season
+  const hi = { ...k, rep: 95 }, lo = { ...k, rep: 10 };
+  const tHi = C.contractTerms(hi, 9), tLo = C.contractTerms(lo, 9);
+  ok('a team pays a driver it wants badly more, for longer', tHi.pay > tLo.pay && tHi.years > tLo.years, JSON.stringify([tHi, tLo]));
+  const k2 = C.newCareer({ team: 5, rounds: 1 });
+  k2.contract = { years: 2, pay: 1.2 };
+  fake.call(null, 0);
+  const s2 = k2.season; s2.round = 1; s2.points = { You: 0 }; s2.teamOf = { You: 'x' }; s2.teamPoints = {};
+  const r2 = C.endSeason(k2);
+  ok('a season ends: one year less on the contract, stay is offered while it runs', k2.contract.years === 1 && r2.contractLeft === 1 && !r2.renewal);
+  C.nextSeason(k2, k2.team);
+  ok('staying under contract keeps the terms', k2.contract.years === 1 && k2.contract.pay === 1.2);
+  ok('the retainer follows the contract', C.contractRetainer(k2) === Math.round(C.retainerFor(k2.team) * 1.2));
+  ok('season goals are set for the new season and judged at its end', k2.goals.length === 3 && r2.goals.length === 3 && r2.goals.every((g) => typeof g.met === 'boolean'));
+  const saved = C.sanitizeCareer(JSON.parse(JSON.stringify(k)));
+  ok('the market survives a save and load', !!saved && saved.lineup.join() === k.lineup.join() && saved.drivers.length === k.drivers.length && saved.contract.years === k.contract.years);
 }
 process.exit(bad ? 1 : 0);
