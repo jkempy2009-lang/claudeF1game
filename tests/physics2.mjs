@@ -3,7 +3,7 @@
 import { Car, PHYS, FL, FR, RL, RR } from '../src/sim/car.js';
 import { makeSpec } from '../src/sim/carspec.js';
 import { FlatTrack } from './mocktrack.js';
-import { Track } from '../src/sim/track.js';
+import { Track, SURF } from '../src/sim/track.js';
 import { TRACK_DEFS } from '../src/sim/trackdefs.js';
 import { Race, DT as RDT } from '../src/sim/race.js';
 import { AIDriver } from '../src/sim/ai.js';
@@ -206,19 +206,51 @@ const drive = (c, secs, inp) => { for (let t = 0; t < secs; t += DT) c.step(DT, 
   for (let n = 0; n < 240 * 8; n++) q.step(RDT, { throttle: 0, brake: 1, steer: 0 });
   ok('qualifying: cars on their out-lap are flagged to give way to flying laps', q.cars.every((c) => c.qualiYield === true));
 
-  // corner cutting: through the cut the car was 0.6 s quicker than its best: an immediate penalty
-  const c = new Race(track, { mode: 'race', laps: 5, level: 0.7, fieldSize: 2, seed: 4 });
+  // track limits are judged per excursion, on the advantage gained (SPEC 7.3, reworked): a long trip off the road that
+  // gains nothing is neither a warning nor a penalty
+  const c = new Race(track, { mode: 'race', laps: 5, level: 0.7, fieldSize: 3, seed: 4 });
   c.start(); c.phase = 'racing'; c.t0 = c.time;
   const p = c.player, rs = p.rs;
-  rs.lapCpBest = Array.from({ length: track.cpCount }, (_, k) => k * 2);
-  rs.cutCp = 3; rs.cpIdx = 5;
-  rs.cpTimes[3 + 8] = 100; rs.cpTimes[5 + 8] = 103.4; // the best took 4.0 s over these two checkpoints
-  let pen = null;
-  c.updateRules(p, 0.01);
-  for (const e of c.events) if (e.type === 'penalty') pen = e;
-  ok('leaving the track and gaining 0.6 s is penalised at once', !!pen && pen.secs === 5 && /gaining an advantage/.test(pen.reason), pen ? pen.reason : 'none');
-  rs.cutCp = 3; rs.cpIdx = 5; rs.cpTimes[5 + 8] = 104.1; c.events.length = 0;
-  c.updateRules(p, 0.01);
-  ok('...losing time through it is not', !c.events.some((e) => e.type === 'penalty'));
+  rs.lapCpBest = Array.from({ length: track.cpCount }, (_, k) => k * 2); // the best lap: 2 s between checkpoints
+  const excursion = (secsOff, timeThrough, opts = {}) => {
+    c.events.length = 0;
+    rs.cpIdx = 3; rs.cpTimes[3 + 8] = 100;
+    p.surf.fill(SURF.GRAVEL);
+    for (let t = 0; t < secsOff; t += 0.01) { c.time += 0.01; c.updateRules(p, 0.01); }
+    if (opts.passed) { opts.passed.rs.pos = 3; rs.pos = 2; }
+    p.surf.fill(SURF.ASPHALT);
+    for (let t = 0; t < 0.6; t += 0.01) { c.time += 0.01; c.updateRules(p, 0.01); }
+    rs.cpIdx += 2; rs.cpTimes[rs.cpIdx + 8] = 100 + timeThrough;
+    for (let t = 0; t < 6; t += 0.01) { c.time += 0.01; c.updateRules(p, 0.01); }
+    return { pens: c.events.filter((e) => e.type === 'penalty'), warns: c.events.filter((e) => e.type === 'warning') };
+  };
+  // through the stretch the best took 4 s (checkpoints 3 to 5)
+  let tl = excursion(10, 9.5);
+  ok('ten seconds in the gravel, losing time: no warning, no penalty, the lap stands', !tl.pens.length && !tl.warns.length && rs.warnings === 0 && !rs.invalidLap);
+  tl = excursion(1.5, 3.4);
+  ok('off the track and 0.6 s quicker: a penalty at once', tl.pens.length === 1 && tl.pens[0].secs === 5 && /gaining an advantage/.test(tl.pens[0].reason), tl.pens.map((e) => e.reason).join());
+  tl = excursion(1, 3.8);
+  ok('off the track and 0.2 s quicker: one warning and the lap deleted, no penalty', !tl.pens.length && tl.warns.length === 1 && rs.warnings === 1 && rs.invalidLap);
+  excursion(1, 3.8);
+  tl = excursion(1, 3.8);
+  ok('...the third such warning is a penalty', tl.pens.length === 1 && /three warnings/.test(tl.pens[0].reason) && rs.warnings === 3);
+  rs.warnings = 0; rs.invalidLap = false;
+  const other = c.cars.find((x) => x !== p);
+  other.rs.pos = 1; rs.pos = 2;
+  tl = excursion(1.5, 4.5, { passed: other });
+  ok('a place taken while off the track and kept is a penalty, even when it cost time', tl.pens.length === 1 && /gaining a position/.test(tl.pens[0].reason), tl.pens.map((e) => e.reason).join());
+  const q2 = new Race(track, { mode: 'qualifying', laps: 99, level: 0.7, fieldSize: 2, seed: 4 });
+  q2.start(); q2.phase = 'racing'; q2.t0 = q2.time;
+  q2.player.surf.fill(SURF.GRAVEL);
+  for (let t = 0; t < 0.5; t += 0.01) q2.updateRules(q2.player, 0.01);
+  ok('in qualifying any lap that leaves the track is still deleted', q2.player.rs.invalidLap && q2.events.some((e) => e.type === 'lapInvalid'));
+  // retiring from the race (pause menu): a DNF with no points, refused outside a race
+  const rr = new Race(track, { mode: 'race', laps: 3, level: 0.7, fieldSize: 4, seed: 4 });
+  rr.start(); rr.phase = 'racing'; rr.t0 = rr.time;
+  ok('the driver can retire from a race', rr.retireCar(rr.player) && rr.player.rs.dnf === 'Retired by the driver' && rr.events.some((e) => e.type === 'retired' && e.car === rr.player));
+  rr.finishNow();
+  const meCls = rr.classification().find((e) => e.car === rr.player);
+  ok('...and is classified last, as a DNF, with no points', meCls.pos === 4 && meCls.dnf && meCls.points === 0);
+  ok('...but not from qualifying', !q2.retireCar(q2.player));
 }
 process.exit(bad ? 1 : 0);

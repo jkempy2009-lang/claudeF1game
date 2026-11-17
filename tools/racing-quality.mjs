@@ -1,5 +1,5 @@
 // How well does the field race? Passes, contacts, recoveries and penalties for a 20-car race (the player is a bot at the field's level).
-// Usage: node tools/racing-quality.mjs [level=0.8] [laps=5] [tracks=rade,northfield,vettore] [seed=7]
+// Usage: node tools/racing-quality.mjs [level=0.8] [laps=5] [tracks=rade,northfield,vettore] [seed=7]   (WEATHER=light|heavy|changing for rain)
 // One race is noisy (the same code can give 5 or 25 recoveries on different seeds): compare several seeds, see tools/quality-seeds.sh.
 import { Track } from '../src/sim/track.js';
 import { TRACK_DEFS } from '../src/sim/trackdefs.js';
@@ -14,7 +14,7 @@ let tot = { passes: 0, cars: 0, walls: 0, recov: 0, pens: 0, fin: 0, n: 0 };
 console.log('track        passes  car-contacts  wall  recov  pens  finish  fastest');
 for (const id of ids) {
   const track = new Track(TRACK_DEFS.find((d) => d.id === id));
-  const race = new Race(track, { mode: 'race', laps, level, fieldSize: 20, playerGrid: 12, seed, tyreWear: 3, collisions: true, damage: true });
+  const race = new Race(track, { mode: 'race', laps, level, fieldSize: 20, playerGrid: 12, seed, tyreWear: 3, collisions: true, damage: true, weather: process.env.WEATHER || 'dry', compound: process.env.WEATHER === 'light' || process.env.WEATHER === 'heavy' ? 'wet' : 'medium' });
   const p = race.player;
   const bot = new AIDriver({ car: p, track, profile: race.getProfile(p.spec, 'bot'), level, seed: 5 + seed });
   race.start();

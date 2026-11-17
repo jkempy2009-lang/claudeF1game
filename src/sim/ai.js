@@ -171,6 +171,18 @@ export class AIDriver {
       // a broken wing, floor or punctured tyre costs grip as well: drive to what the car has left
       const punct = Math.max(car.puncture[0], car.puncture[1], car.puncture[2], car.puncture[3]);
       g *= wetGripFactor(comp, car.wetness || 0);
+      const wetNow = car.wetness || 0;
+      if (RC_TUNE.wetGrip) {
+        // everything else the physics takes off in the wet: the greasy rubbered line and the pressure window moving lower
+        g *= Math.min(1, car.rubberGrip || 1);
+        g *= 1 - 0.0045 * ((car.spec.pressure || 0) + 2 * wetNow) ** 2;
+      }
+      // grip that comes and goes with the water is not driven to the last percent: a margin, like a real driver keeps
+      // (between walls, with no run-off to save a slide, it is there in full from a damp track)
+      if (RC_TUNE.wetMargin) {
+        const rf = this.track.def.runoff;
+        g *= 1 - 0.06 * (rf && rf.mode === 'street' ? smoothstep(0.05, 0.5, wetNow) : smoothstep(0.1, 0.8, wetNow));
+      }
       g *= 1 - clamp(0.4 * (car.damageFront || 0) + 0.15 * (car.damageRear || 0) + 0.2 * (car.damageFloor || 0) + 0.12 * ((car.damageSideL || 0) + (car.damageSideR || 0)) + 0.35 * punct, 0, 0.6);
       let want = Math.sqrt(clamp(g / 0.96, 0.35, 1));
       // the out-lap (SPEC 3.4): new tyres below their window are driven gently until they come in

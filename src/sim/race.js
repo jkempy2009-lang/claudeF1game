@@ -308,8 +308,8 @@ export class Race {
       penalty: 0,
       penaltyLog: [],
       warnings: 0,
-      limitTimer: 0,
       offTimer: 0,
+      exc: null, // the current excursion off the track, judged once the car is back on it
       stops: 0,
       service: null,
       pitRequested: false,
@@ -538,6 +538,14 @@ export class Race {
       // the marshals push a stopped, retired car behind the barrier (the player's stays where it is, the camera is on it)
       if (rs.dnf && !car.inGarage && car !== this.player && car.speed < 1.5 && this.time - rs.dnfAt > 14) car.inGarage = true;
     }
+  }
+
+  /** The driver calls it a day: the car is out of the race (a DNF), as if a part had failed. */
+  retireCar(car, reason = 'Retired by the driver') {
+    if (!car || car.rs.dnf || car.rs.finished || this.opt.mode !== 'race' || this.isQuali) return false;
+    car.failed = reason;
+    this.updateRetirements();
+    return true;
   }
 
   /** Manual launch (launch control off): moving before the lights go out is a false start (SPEC 7.3). */
@@ -1460,29 +1468,45 @@ export class Race {
       const s = car.surf[w];
       if (s === SURF.GRASS || s === SURF.GRAVEL || s === SURF.RUNOFF) off++;
     }
+    const race = this.opt.mode === 'race';
     if (off === 4) {
       rs.offTimer += dt;
-      if (rs.offTimer > 0.15 && rs.limitTimer <= 0) {
-        rs.limitTimer = 2.5;
+      if (rs.offTimer > 0.15 && !rs.exc) {
+        // one excursion is one incident, however long the car is out there. It is judged once the car is back.
+        rs.exc = { cp: rs.cpIdx, pos: rs.pos, ahead: this.cars.filter((c) => c !== car && c.rs.pos < rs.pos && !c.rs.dnf).map((c) => ({ c, stops: c.rs.stops })), onT: 0, backCp: null, backT: null };
+        // qualifying and time trials keep the strict rule: any lap that left the track is deleted
+        if (!race && !rs.invalidLap) { rs.invalidLap = true; this.pushEvent({ type: 'lapInvalid', car }); }
+      }
+      if (rs.exc) { rs.exc.onT = 0; rs.exc.backCp = null; }
+    } else {
+      rs.offTimer = 0;
+      if (rs.exc && rs.exc.backCp == null) {
+        rs.exc.onT += dt;
+        if (rs.exc.onT > 0.5) { rs.exc.backCp = rs.cpIdx; rs.exc.backT = this.time; } // properly back on the road
+      }
+    }
+    // judged two checkpoints (about 200 m) after rejoining and at least 5 s on, so a place taken off track can be given back
+    const x = rs.exc;
+    if (x && x.backCp != null && rs.cpIdx >= x.backCp + 2 && this.time >= x.backT + 5) {
+      rs.exc = null;
+      if (!race) return;
+      // time: through the stretch from the last checkpoint before leaving to two after rejoining, against the car's own best
+      let gained = null;
+      const tr = this.track, end = x.backCp + 2;
+      const k0 = ((x.cp % tr.cpCount) + tr.cpCount) % tr.cpCount, k2 = ((end % tr.cpCount) + tr.cpCount) % tr.cpCount;
+      const t0 = rs.cpTimes[x.cp + 8], t2 = rs.cpTimes[end + 8];
+      if (rs.lapCpBest && k2 > k0 && end - x.cp === k2 - k0 && Number.isFinite(t0) && Number.isFinite(t2)) gained = rs.lapCpBest[k2] - rs.lapCpBest[k0] - (t2 - t0);
+      // places: cars that were ahead when it left the track and are behind now, not counting cars that pitted or stopped
+      const passed = x.ahead.filter(({ c, stops }) => c.rs.pos > rs.pos && !c.rs.dnf && !c.rs.inPitLane && !c.rs.service && c.rs.stops === stops).map(({ c }) => c);
+      if (passed.length) this.addPenalty(car, 5, `Leaving the track and gaining a position (${passed.map((c) => c.info.code).join(', ')})`);
+      else if (gained != null && gained > 0.4) this.addPenalty(car, 5, `Leaving the track and gaining an advantage (${gained.toFixed(2)} s)`);
+      else if (gained != null && gained > 0.1) {
         rs.invalidLap = true;
         rs.warnings++;
-        rs.cutCp = rs.cpIdx; // judged two checkpoints on: was time gained?
-        if (this.opt.mode === 'race') {
-          if (rs.warnings % 3 === 0) this.addPenalty(car, 5, 'Track limits (3 warnings)');
-          else this.pushEvent({ type: 'warning', car, n: rs.warnings % 3 });
-        } else this.pushEvent({ type: 'lapInvalid', car });
+        if (rs.warnings % 3 === 0) this.addPenalty(car, 5, 'Track limits (three warnings)');
+        else this.pushEvent({ type: 'warning', car, n: rs.warnings % 3, gained });
       }
-    } else rs.offTimer = 0;
-    if (rs.limitTimer > 0) rs.limitTimer -= dt;
-    // leaving the track and gaining an advantage (SPEC 7.3): more than 0.25 s quicker through the cut than the car's best there
-    if (rs.cutCp != null && rs.cpIdx >= rs.cutCp + 2) {
-      const tr = this.track, k0 = ((rs.cutCp % tr.cpCount) + tr.cpCount) % tr.cpCount, k2 = (((rs.cutCp + 2) % tr.cpCount) + tr.cpCount) % tr.cpCount;
-      const t0 = rs.cpTimes[rs.cutCp + 8], t2 = rs.cpTimes[rs.cutCp + 2 + 8];
-      if (rs.lapCpBest && k2 > k0 && Number.isFinite(t0) && Number.isFinite(t2)) {
-        const gained = rs.lapCpBest[k2] - rs.lapCpBest[k0] - (t2 - t0);
-        if (gained > 0.25 && this.opt.mode === 'race') this.addPenalty(car, 5, `Leaving the track and gaining an advantage (${gained.toFixed(2)} s)`);
-      }
-      rs.cutCp = null;
+      // no advantage: no warning, no penalty, the lap stands
     }
   }
 

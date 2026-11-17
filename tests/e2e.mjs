@@ -371,6 +371,24 @@ for (const [name, bad] of [
   await ctx.close();
 }
 
+// 7b. retiring from a race from the pause menu: two clicks, straight to the results as a DNF
+{
+  const page = await open(fast);
+  await page.click('[data-act=quick]');
+  await waitHud(page);
+  await page.evaluate(() => { const a = window.apex; a.debugSkip(8); });
+  await page.keyboard.down('Escape');
+  await page.waitForTimeout(2500);
+  await page.keyboard.up('Escape');
+  await page.waitForSelector('[data-act=retire]', { timeout: 20000 });
+  await page.click('[data-act=retire]');
+  step('retiring asks for a second click', await page.evaluate(() => window.apex.state === 'paused' && /again/.test(document.querySelector('[data-act=retire]').textContent)));
+  await page.click('[data-act=retire]');
+  await page.waitForSelector('table.results', { timeout: 120000 });
+  step('a retirement goes straight to the results as a DNF', await page.evaluate(() => /Retired by the driver/.test(document.querySelector('table.results').textContent) && window.apex.session.player.rs.dnf === 'Retired by the driver'));
+  await page.context().close();
+}
+
 // 8. spectator mode: every car on AI, the director follows a fight, nothing is saved as the player's
 {
   const page = await open(fast);

@@ -183,6 +183,9 @@ class Game {
       replay: (from) => this.startReplay(from),
       photo: () => this.startPhoto(),
       isPractice: () => !!(this.session && this.session.cfg.practice),
+      canRetire: () => { const s = this.session; return !!(s && s.race.opt.mode === 'race' && !s.race.isQuali && s.race.phase === 'racing' && !s.player.rs.dnf && !s.player.rs.finished); },
+      retire: () => this.retireFromRace(),
+      isCareer: () => !!(this.session && this.session.cfg.career),
       openCareer: () => this.openCareer(),
       careerStart: (o) => this.careerStart(o),
       careerRace: (q) => this.careerRace(q),
@@ -1441,7 +1444,7 @@ class Game {
           break;
         case 'warning':
           if (e.car === player) {
-            hud.message(`Track limits · warning ${e.n}/3`, 'bad', 'All four wheels beyond the white line', 3);
+            hud.message(`Track limits · warning ${e.n}/3`, 'bad', `Off the track and ${e.gained != null ? e.gained.toFixed(2) + ' s ' : ''}quicker: lap time deleted`, 3);
             this.audio.ui('bad');
           }
           break;
@@ -1488,7 +1491,8 @@ class Game {
           hud.flag('Chequered flag', '#fff', 4, 'chequered');
           break;
         case 'retired':
-          if (e.car === player) {
+          if (e.car === player && e.reason === 'Retired by the driver') hud.message('Retired', 'bad', 'You retired from the race', 3);
+          else if (e.car === player) {
             hud.message('Retired', 'bad', `${e.reason} failure · Enter for the results`, 8);
             hud.radio(`We have lost the ${e.reason.toLowerCase()}. Bring it to a stop safely, I'm sorry.`, 6);
           } else hud.radio(`${e.car.info.name} is out: ${e.reason.toLowerCase()} failure.`, 4);
@@ -1519,6 +1523,16 @@ class Game {
   }
 
   /** The player takes the chequered flag: hand the car to a slow cool-down, run a cinematic camera and show the result. */
+  /** Pause menu: retire from the race. The car is classified as a DNF and the results come up straight away. */
+  retireFromRace() {
+    const s = this.session;
+    if (!s || !s.race.retireCar(s.player)) return;
+    this.resume();
+    this.processEvents(s);
+    s.race.events.length = 0;
+    this.skipToResults(s);
+  }
+
   skipToResults(s) {
     if (s.skipToResults) return;
     s.skipToResults = true;

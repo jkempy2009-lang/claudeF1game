@@ -627,6 +627,7 @@ export class Menu {
         <button class="btn" data-act="replay">Instant replay<small>The last 60 seconds from trackside cameras, with markers for the big moments</small></button>
         <button class="btn" data-act="photo">Photo mode<small>Fly a free camera and save a screenshot</small></button>
         <button class="btn" data-act="restart">Restart session</button>
+        ${this.hooks.canRetire && this.hooks.canRetire() ? `<button class="btn" data-act="retire" data-confirm="0">Retire from the race<small>${this.save.career && this.hooks.isCareer && this.hooks.isCareer() ? 'Counts as a DNF in your career: no points, and the team notices' : 'You are classified as a DNF'}</small></button>` : ''}
         <button class="btn" data-act="pausecam">Camera: <span id="camname"></span></button>
         <button class="btn" data-act="pausesettings">Settings</button>
         <button class="btn" data-act="quit">${this.hooks.isPractice && this.hooks.isPractice() ? 'End practice<small>Back to the career hub with what the run plan earned</small>' : 'Quit to menu'}</button>
@@ -1092,6 +1093,13 @@ export class Menu {
       case 'careercontinue': return H.openCareer();
       case 'careerrules': return this.show('career_rules');
       case 'careerhub': return this.show('career_hub');
+      case 'retire':
+        if (t.dataset.confirm !== '1') {
+          t.dataset.confirm = '1';
+          t.innerHTML = 'Click again to retire<small>The race is over for you: straight to the results</small>';
+          return;
+        }
+        return H.retire();
       case 'careerwipe':
         if (t.dataset.confirm !== '1') {
           t.dataset.confirm = '1';
