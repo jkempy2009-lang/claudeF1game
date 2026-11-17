@@ -362,7 +362,8 @@ export class World {
         if (water) far = this.waterLevel - 2.5 + (n - 0.5) * 4;
         else far = zNear + hillAmp * (n * 1.5 - 0.55) + detail;
         // land close to the track stays at track level (+ gentle detail)
-        const near = zNear - 0.12 + detail * smoothstep(edge, edge + 40, out.dist) * 0.4;
+        const camber = tr.bank ? Math.abs(Math.tan(tr.at(tr.bank, out.s))) * Math.max(tr.wl[out.i], tr.wr[out.i]) : 0;
+        const near = zNear - 0.12 - camber + detail * smoothstep(edge, edge + 40, out.dist) * 0.4;
         let h = lerp(near, far, w);
         const edgeD = Math.min(x - minX, maxX - x, y - minY, maxY - y);
         h = lerp(-9, h, smoothstep(0, 500, edgeD));
@@ -442,10 +443,10 @@ export class World {
       const i = (a + n) % N;
       const l = typeof lo === 'function' ? lo(i) : lo[i];
       const h = typeof hi === 'function' ? hi(i) : hi[i];
-      const z = tr.z[i] + yOff;
       const nxv = tr.nx[i], nyv = tr.ny[i];
-      pos.set([tr.x[i] + nxv * l, z, -(tr.y[i] + nyv * l)], n * 6);
-      pos.set([tr.x[i] + nxv * h, z, -(tr.y[i] + nyv * h)], n * 6 + 3);
+      // the road's camber: each edge of the ribbon at its own height (level beyond the tarmac)
+      pos.set([tr.x[i] + nxv * l, tr.heightAtI(i, l) + yOff, -(tr.y[i] + nyv * l)], n * 6);
+      pos.set([tr.x[i] + nxv * h, tr.heightAtI(i, h) + yOff, -(tr.y[i] + nyv * h)], n * 6 + 3);
       if (n > 0) sAcc += tr.ds;
       const v = sAcc / vLen;
       uv.set([0, v, uRepeat, v], n * 4);
@@ -593,7 +594,7 @@ export class World {
       for (let n = 0; n < count; n++) {
         const i = (a + n) % N;
         const d = sgn * (tr.wallDist(i, sgn) + off);
-        const z = tr.z[i];
+        const z = tr.heightAtI(i, d);
         const x = tr.x[i] + tr.nx[i] * d, y = tr.y[i] + tr.ny[i] * d;
         pos.set([x, z - 0.1, -y, x, z + h, -y], n * 6);
         if (n > 0) s += tr.ds;
@@ -659,7 +660,7 @@ export class World {
       for (let n = 0; n < count; n++) {
         const i = (a + n) % N;
         const d = sgn * (tr.wallDist(i, sgn) + 0.2);
-        const x = tr.x[i] + tr.nx[i] * d, y = tr.y[i] + tr.ny[i] * d, z = tr.z[i];
+        const x = tr.x[i] + tr.nx[i] * d, y = tr.y[i] + tr.ny[i] * d, z = tr.heightAtI(i, d);
         pos.push(x, z + 1.2, -y, x, z + 5.0, -y);
         if (n % 6 === 0) posts.push([x, z, -y]);
         if (n < count - 1) idx.push(n * 2, n * 2 + 1, n * 2 + 2, n * 2 + 1, n * 2 + 3, n * 2 + 2);

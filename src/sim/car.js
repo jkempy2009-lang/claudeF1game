@@ -11,6 +11,20 @@ const ERS_DEPLOY = [0.1, 0.3, 0.6];
 const ERS_HARVEST = [1.6, 1, 0.7]; // J/K per corner (disc, pads and calipers)
 const TYRE_HEAT_CAP = 3500; // J/K, lumped surface+carcass
 export const TUNE = { heat: 0.1, coolBase: 0.0011, coolSpeed: 0.00007 };
+/**
+ * Switches for the v2 physics (SPEC-v2 sections 1 and 5), so each can be measured on its own. All on by default.
+ * suspension: 4-corner spring/damper with ride height, ground-effect sensitivity, bottoming and diffuser stall
+ * marbles: off-line rubber pick-up; banking: road camber; brakes2: surface/core brake temperatures and glazing
+ * fuelCg: CG shift with fuel burn and fuel slosh; reliability: component stress and failures; clutch: launch clutch
+ */
+export const PHYS = { suspension: true, marbles: true, banking: true, brakes2: true, fuelCg: true, reliability: true, clutch: true, flatHop: true };
+// suspension (per corner): spring rate N/m, damper Ns/m, static ride height m
+const K_SPRING = [180000, 180000, 160000, 160000];
+const C_DAMPER = 12000;
+const H0_F = 0.045, H0_R = 0.065;
+/** Ground-effect gain for a ride height (SPEC 1.1): lower is more downforce, up to +18 %. */
+const groundGain = (h) => 1 + 0.18 * clamp((0.045 - h) / 0.025, -0.5, 1.0);
+const TAU = Math.PI * 2;
 /** Joules of tyre slip energy per tyre per "reference lap" - calibrated so wearLaps reads as real laps at pace 1.0. */
 export const WEAR_REF_J = 0.4e6;
 
@@ -60,6 +74,20 @@ export class Car {
     this.flat = new Float64Array(4); // flat-spotted by lock-ups (0..1), cleared by a tyre change
     this.wheelFx = new Float64Array(4);
     this.wheelFy = new Float64Array(4);
+    // v2 state
+    this.suspZ = new Float64Array(4); // spring compression from the static position, m (+ = compressed)
+    this.suspV = new Float64Array(4); // its rate, m/s
+    this.wheelAngle = new Float64Array(4); // rolling angle of each wheel (flat-spot hop)
+    this.pick = new Float64Array(4); // marbles stuck to each tyre 0..1
+    this.punctureRate = new Float64Array(4); // deflation rate of a punctured tyre, 1/s
+    this.brakeCore = new Float64Array(4).fill(260); // disc core; brakeTemp is the friction face
+    this.glaze = new Float64Array(4); // glazed pads 0..1: cut the initial bite
+    this.marbleField = null; // the race's marble grid (Float32Array N*5), set by the race
+    this.engStress = 0;
+    this.boxStress = 0;
+    this.brakeStress = 0;
+    this.failed = null; // 'Power unit' / 'Gearbox' when a component gives up (the race retires the car)
+    this.brakeLineFail = -1; // wheel index of a failed brake line
 
     this.fuel = spec.fuelKg;
     this.soc = 0.6;
@@ -110,6 +138,18 @@ export class Car {
     this.pitch = 0;
     this.roll = 0;
     this.bottoming = 0;
+    if (this.suspZ) { this.suspZ.fill(0); this.suspV.fill(0); }
+    this.rideF = H0_F;
+    this.rideR = H0_R;
+    this.diffStall = false;
+    this.clutch = 0;
+    this.clutchFrom = -1; // engine rpm when the clutch was dropped (manual launch)
+    this.launchT = 0;
+    this.antiStallT = 0;
+    this.sloshY = 0;
+    this.sat = 0;
+    this.flatShake = 0;
+    this.rimSpark = 0;
     this.locate();
   }
 
@@ -126,6 +166,12 @@ export class Car {
     return this.spec.izDry + this.fuel * 0.45;
   }
 
+  /** Front weight share: an emptying tank (behind the driver) moves the CG forward a little (SPEC 5.4). */
+  get weightFront() {
+    const sp = this.spec;
+    return sp.weightFront + (PHYS.fuelCg && sp.fuelKg > 0 ? 0.012 * (1 - clamp(this.fuel / sp.fuelKg, 0, 1)) : 0);
+  }
+
   /** Re-projects the body on the track (also called after teleports/collision corrections). */
   locate() {
     const p = this.track.project(this.x, this.y, this.lastHint, tmpProj);
@@ -133,7 +179,8 @@ export class Car {
     this.i = p.i;
     this.s = p.s;
     this.d = p.d;
-    this.trackH = this.track.at(this.track.z, p.s);
+    this.trackH = this.track.heightAt ? this.track.heightAt(p.s, p.d) : this.track.at(this.track.z, p.s);
+    this.trackBank = PHYS.banking && this.track.bank ? this.track.at(this.track.bank, p.s) : 0;
     this.trackSlope = this.track.slope[p.i];
     this.trackKv = this.track.kv ? this.track.kv[p.i] : 0;
     this.trackHeading = this.track.hdgAt(p.s);
@@ -150,8 +197,23 @@ export class Car {
     const drs = this.drsPos;
     const dirty = this.dirtyAir || 0;
     const yawLoss = 1 - 0.45 * smoothstep(0.05, 0.4, Math.abs(beta));
-    const clF = sp.clAf * dmgF * (1 - 0.32 * dirty) * dmgFloor * yawLoss;
-    const clR = sp.clAr * dmgR * (1 - 0.14 * dirty) * (1 - sp.drsLiftCut * drs) * dmgFloor * yawLoss;
+    let clF = sp.clAf * dmgF * (1 - 0.32 * dirty) * dmgFloor * yawLoss;
+    let clR = sp.clAr * dmgR * (1 - 0.14 * dirty) * (1 - sp.drsLiftCut * drs) * dmgFloor * yawLoss;
+    if (PHYS.suspension && V > 8) {
+      // Ground effect and rake (SPEC 1.1, 5.2): downforce follows the ride height and the pitch. Both are measured against the
+      // steady ride height the car would have at this speed on a flat road, so the effect is the change (kerbs, crests,
+      // compressions, dive and squat, bottoming), not a different car: lap times stay calibrated.
+      const ssF = H0_F - (q * clF) / (2 * K_SPRING[0]), ssR = H0_R - (q * clR) / (2 * K_SPRING[2]);
+      const hF = this.rideF ?? ssF, hR = this.rideR ?? ssR;
+      const pitchDev = ((ssF - hF) - (ssR - hR)) / sp.wheelbase; // + = more nose-down than steady
+      const fwRake = 1 + 0.22 * clamp(pitchDev / 0.015, -0.8, 1.2);
+      clF *= (groundGain(hF) / groundGain(ssF)) * fwRake;
+      clR *= groundGain(hR) / groundGain(ssR);
+      // the diffuser stalls when the rear runs too low at speed, and only recovers once the car has risen again: porpoising
+      if (!this.diffStall && hR < 0.012 && V > 72) this.diffStall = true;
+      else if (this.diffStall && (hR > 0.018 || V < 65)) this.diffStall = false;
+      if (this.diffStall) clR *= 0.68;
+    }
     const slip = this.slipstream || 0;
     const cd = sp.cdA * (1 - sp.drsDragCut * drs) * (1 - 0.28 * slip) * (1 + 0.12 * (this.damageFront || 0) + 0.1 * (this.damageRear || 0) + 0.08 * sideAvg);
     return { q, downF: q * clF, downR: q * clR, drag: q * cd };
@@ -222,15 +284,31 @@ export class Car {
     const g = G;
     // front wing + front floor load the front axle; rear wing + diffuser the rear
     // a compression presses the car into the road, a crest unweights it (v^2 times the road's vertical curvature)
-    const gz = 1 + clamp((V * V * (this.trackKv || 0)) / g, -0.3, 0.35);
+    const bank = this.trackBank || 0;
+    const gz = (1 + clamp((V * V * (this.trackKv || 0)) / g, -0.3, 0.35)) * Math.cos(bank);
     this.gLoad = gz;
-    let fFront = m * g * gz * sp.weightFront + aero.downF;
-    let fRear = m * g * gz * (1 - sp.weightFront) + aero.downR;
+    const wf = this.weightFront;
+    if (wf !== this._wf) {
+      // the CG moves, the wheels do not
+      this._wf = wf;
+      this.a = L * (1 - wf);
+      this.b = L * wf;
+      this.wheelPos[FL][0] = this.wheelPos[FR][0] = this.a;
+      this.wheelPos[RL][0] = this.wheelPos[RR][0] = -this.b;
+    }
+    let fFront = m * g * gz * wf + aero.downF;
+    let fRear = m * g * gz * (1 - wf) + aero.downR;
     const dLong = (m * this.axF * sp.hCg) / L;
     fFront -= dLong;
     fRear += dLong;
-    const dLatF = (m * this.ayF * sp.hCg * sp.rollFrontShare) / sp.trackF;
-    const dLatR = (m * this.ayF * sp.hCg * (1 - sp.rollFrontShare)) / sp.trackR;
+    // fuel slosh: the fuel's own load transfer lags the car's (SPEC 5.4)
+    if (PHYS.fuelCg) {
+      const drive = this.fuel > 8 && Math.abs(this.ayF) > 15 ? this.ayF : this.sloshY * 0.5;
+      this.sloshY += (drive - this.sloshY) * (1 - Math.exp(-dt / 0.35));
+    }
+    const slosh = PHYS.fuelCg ? this.fuel * 0.18 * (this.sloshY - this.ayF) * sp.hCg : 0;
+    const dLatF = (m * this.ayF * sp.hCg * sp.rollFrontShare + slosh * sp.rollFrontShare) / sp.trackF;
+    const dLatR = (m * this.ayF * sp.hCg * (1 - sp.rollFrontShare) + slosh * (1 - sp.rollFrontShare)) / sp.trackR;
     const fz = this.fz;
     const split = (F, dl, i0) => {
       let left = F / 2 - dl;
@@ -286,7 +364,29 @@ export class Car {
     const rpmWheel = Math.abs(omegaRear) * Math.abs(ratio) * (30 / Math.PI);
     let rpm = rpmWheel;
     const launching = this.gear === 1 && speed < 14;
+    const manual = PHYS.clutch && !!inp.manualLaunch;
     if (launching) rpm = Math.max(rpm, sp.idleRpm + (8200 - sp.idleRpm) * Math.max(thr, 0.2));
+    // launch clutch (SPEC 1.4): held on the grid, then let in over a quarter of a second. With manual launch the driver sets
+    // the revs: too many and the rears light up, too few and the anti-stall cuts in.
+    if (PHYS.clutch) {
+      if (inp.hold) {
+        this.clutch = 1;
+        this.clutchFrom = -1;
+        if (manual) rpm = 4200 + 10800 * thr;
+      } else if (this.clutch > 0) {
+        if (this.clutchFrom < 0) {
+          this.clutchFrom = this.rpm;
+          if (manual && this.rpm > 11800) this.launchT = 0.6;
+          if (manual && this.rpm < 6500 && inp.throttle > 0.2) this.antiStallT = 0.9; // (the spec says 0.6 s: that cost under 0.1 s, too little to notice)
+        }
+        this.clutch = Math.max(0, this.clutch - dt / 0.25);
+        if (manual) rpm = lerp(rpm, this.clutchFrom, this.clutch);
+      }
+      // bogged down: the revs sag towards a stall until the anti-stall has them back
+      if (this.antiStallT > 0) rpm = Math.min(rpm, lerp(sp.idleRpm + 600, this.clutchFrom, this.antiStallT / 0.9));
+      if (this.launchT > 0) this.launchT -= dt;
+      if (this.antiStallT > 0) this.antiStallT -= dt;
+    }
     rpm = Math.max(rpm, sp.idleRpm);
     this.rpm = lerp(this.rpm, rpm, 1 - Math.exp(-dt * 40));
 
@@ -330,7 +430,9 @@ export class Car {
     if (ersAvail && thr > 0.5 && this.gear > 0 && !inp.hold) ersP = (boost ? 1 : ERS_DEPLOY[this.ersMode]) * sp.ersPower;
     this.boostOn = boost && ersP > 0;
     if (Math.abs(ratio) > 0) {
-      const tPos = engineTorque(this.rpm) * sp.powerScale * thr * FUEL_MODE_TORQUE[this.fuelMode];
+      // a stressed power unit misfires (SPEC 1.5)
+      const misfire = this.engStress > 0.75 ? 0.85 + 0.15 * Math.sin((this.engT = (this.engT || 0) + dt) * 40) : 1;
+      const tPos = engineTorque(this.rpm) * sp.powerScale * thr * FUEL_MODE_TORQUE[this.fuelMode] * misfire;
       const ersT = (ersP * sp.powerScale * thr) / Math.max((this.rpm * Math.PI) / 30, 300);
       const tBrake = (30 + 0.0075 * this.rpm) * (1 - thr);
       Te = tPos + ersT - tBrake;
@@ -338,6 +440,11 @@ export class Car {
     }
     let Tw = Te * ratio * sp.driveEff;
     if (inp.hold) Tw = 0; // clutch held on the grid: revs build, nothing is driven
+    if (PHYS.clutch && this.clutch > 0) Tw *= 1 - smoothstep(0.15, 0.85, this.clutch);
+    // a dump from high revs adds the flywheel's energy to the first metres (wheelspin); the anti-stall caps the torque
+    if (this.launchT > 0) Tw *= 1 + 0.9 * smoothstep(11800, 14500, this.clutchFrom) * (this.launchT / 0.6);
+    if (this.antiStallT > 0) Tw *= 0.35;
+    if (this.failed) Tw = Math.min(Tw, 0);
     if (this.shiftTimer > 0) Tw *= 0.05;
     // limited-slip differential: faster wheel loses torque to the slower one
     const dw = this.omega[RL] - this.omega[RR];
@@ -359,6 +466,8 @@ export class Car {
     let sumFx = 0, sumFy = 0, sumMz = 0;
     let kerbHit = 0, grassHit = 0;
     const dens = this.tyreScale || 1;
+    const mf = PHYS.marbles ? this.marbleField : null;
+    let rimSpark = 0;
     for (let w = 0; w < 4; w++) {
       const front = w < 2;
       const px = this.wheelPos[w][0], py = this.wheelPos[w][1];
@@ -376,13 +485,26 @@ export class Car {
 
       let Fz = fz[w];
       if (sf === SURF.KERB) Fz *= 1 + 0.22 * Math.sin(this.kerbPhase * 1.0 + w * 1.7) * Math.min(1, V / 25);
+      // a flat-spotted tyre is no longer round: the load pulses once a turn (SPEC 1.2)
+      // (only while it rolls: a locked wheel sits on one spot of the tread and has nothing to hop on)
+      if (PHYS.flatHop && this.flat[w] > 0.02 && V > 5) {
+        const rolling = clamp((Math.abs(this.omega[w]) * R) / Math.max(V, 1), 0, 1);
+        const hop = this.flat[w] * 1400 * clamp(V / 40, 0, 1) * rolling * Math.sin(this.wheelAngle[w]);
+        Fz = Math.max(60, Fz + hop);
+        fz[w] = Math.max(60, fz[w] + hop); // the springs feel it too
+      }
+      // progressive deflation, then the rim (SPEC 5.5)
+      const pu = this.puncture[w];
+      if (pu > 0 && pu < 1 && this.punctureRate[w] > 0) this.puncture[w] = Math.min(1, pu + this.punctureRate[w] * dt);
+      const Rw = R * (1 - 0.28 * this.puncture[w]);
+      if (this.puncture[w] > 0.75 && V > 15) rimSpark = Math.max(rimSpark, this.puncture[w]);
 
       const vxw = u - r * py;
       const vyw = v + r * px;
       const vlong = vxw * cd + vyw * sd;
       const vlat = -vxw * sd + vyw * cd;
       const absVl = Math.abs(vlong);
-      const kap = (this.omega[w] * R - vlong) / Math.max(absVl, 2.2);
+      const kap = (this.omega[w] * Rw - vlong) / Math.max(absVl, 2.2);
       const alphaRaw = Math.atan2(vlat, Math.max(absVl, 1.2));
       // lateral force relaxation (tyre carcass): rate ~ speed / relaxation length
       const relax = 1 - Math.exp((-Math.max(absVl, 1.2) * dt) / sp.relaxLength);
@@ -397,7 +519,16 @@ export class Car {
       const wearF = 1 - 0.06 * wearW - 0.2 * smoothstep(0.62, 1.0, wearW);
       let mu = Math.max(0.7, mu0 - sp.loadSens * (Fz - sp.fz0)) * comp.mu * tempF * wearF * surf.grip * (front ? sp.frontGrip : sp.rearGrip);
       if (!front && sp.launchGrip) mu *= 1 + sp.launchGrip * (1 - smoothstep(12, 48, absVl)); // extra rear traction off the line (the boosted car), fading out by about 170 km/h
-      if (this.puncture[w] > 0) mu *= 1 - 0.55 * this.puncture[w];
+      if (this.puncture[w] > 0) mu *= 1 - 0.65 * this.puncture[w];
+      // marbles (SPEC 1.3): rubber balls swept off the line; what the tyre picks up stays on it for a few corners
+      if (mf) {
+        const wl = this.track.wl[pj.i], wr = this.track.wr[pj.i];
+        const bin = clamp(Math.floor(((pj.d + wr) / (wl + wr)) * 5), 0, 4);
+        const mm = mf[pj.i * 5 + bin] || 0;
+        if (mm > 0.02 && absVl > 3) this.pick[w] = Math.min(1, this.pick[w] + mm * dt * 0.9);
+        this.pick[w] = Math.max(0, this.pick[w] - dt * (0.06 + 0.002 * absVl) * this.pick[w]);
+        mu *= (1 - clamp(mm * 0.09, 0, 0.11)) * (1 - 0.05 * this.pick[w]);
+      }
       mu *= pressureGrip * (this.rubberGrip || 1) * (1 - 0.16 * this.flat[w]) * wetGripFactor(comp, this.wetness) * (sf === SURF.KERB ? 1 - 0.14 * this.wetness : 1);
       const sx = kap / sp.kappaPeak;
       const sy = Math.tan(al) / Math.tan(sp.alphaPeak);
@@ -416,31 +547,45 @@ export class Car {
       const drv = w === RL ? driveL : w === RR ? driveR : 0;
       // semi-implicit wheel update: linearise the tyre force around the current slip so the stiff
       // slip<->wheel-speed loop stays stable at any speed (secant stiffness, never negative)
-      const slipSpeed = this.omega[w] * R - vlong;
+      const slipSpeed = this.omega[w] * Rw - vlong;
       const kFull = (mu * Fz * sp.pacejkaC * sp.pacejkaB) / (sp.kappaPeak * Math.max(absVl, 2.2));
       const kSec = Math.abs(slipSpeed) > 1e-4 ? Math.min(kFull, Math.abs(FxT / slipSpeed)) : kFull;
-      let om = this.omega[w] + (dt * (drv - FxT * R)) / (I + dt * kSec * R * R);
+      let om = this.omega[w] + (dt * (drv - FxT * Rw)) / (I + dt * kSec * Rw * Rw);
 
       // brakes (+ABS)
       let Tb = front ? brk * sp.brakeTorque * sp.brakeBias * 0.5 : brk * sp.brakeTorque * (1 - sp.brakeBias) * 0.5;
       {
         // carbon discs: weak when cold, best at 450-850 C, fading beyond ~900 C
         const bt = this.brakeTemp[w];
-        Tb *= (0.86 + 0.14 * smoothstep(120, 420, bt)) * (1 - 0.3 * smoothstep(880, 1150, bt));
+        Tb *= (0.86 + 0.14 * smoothstep(120, 420, bt)) * (1 - 0.3 * smoothstep(PHYS.brakes2 ? 960 : 880, PHYS.brakes2 ? 1230 : 1150, bt));
+        if (PHYS.brakes2) Tb *= 1 - 0.15 * this.glaze[w];
+        if (w === this.brakeLineFail) Tb *= 0.55; // a failed brake line: the car pulls under braking
       }
       if (brk > 0.02 && this.assist.abs) {
         if (absVl > 4 && Math.abs(kap) > sp.kappaPeak * 1.1 && kap < 0) this.absF[w] = Math.max(0.1, this.absF[w] - 14 * dt);
         else this.absF[w] = Math.min(1, this.absF[w] + 9 * dt);
         Tb *= this.absF[w];
       } else this.absF[w] = 1;
-      // disc heating: friction power in, convection out (cooling ducts work harder at speed)
-      this.brakeTemp[w] += ((Tb * Math.abs(om)) / BRAKE_HEAT_CAP - (this.brakeTemp[w] - AMBIENT) * (0.011 + 0.0008 * V)) * dt;
+      // disc heating: friction power in, convection out (cooling ducts work harder at speed, less well in dirty air)
+      if (PHYS.brakes2) {
+        // two nodes (SPEC 5.3): the core is the disc's mass; the friction face sits above it by the power going through it
+        const Pb = Tb * Math.abs(om);
+        const cool = (0.011 + 0.0008 * V * (1 - 0.35 * (this.dirtyAir || 0)));
+        this.brakeCore[w] += (Pb / BRAKE_HEAT_CAP - (this.brakeCore[w] - AMBIENT) * cool) * dt;
+        const face = this.brakeCore[w] + Pb / 5200;
+        this.brakeTemp[w] += (face - this.brakeTemp[w]) * Math.min(1, dt / 0.03);
+        // glazing: dragging the brakes lightly and cool; one hard stop cleans the pads
+        const bIn = this.brake;
+        if (bIn > 0.05 && bIn < 0.25 && this.brakeTemp[w] < 220 && absVl > 5) this.glaze[w] = Math.min(1, this.glaze[w] + dt * 0.04);
+        else if (bIn > 0.75 && V > 45) this.glaze[w] = Math.max(0, this.glaze[w] - dt * 1.5);
+      } else this.brakeTemp[w] += ((Tb * Math.abs(om)) / BRAKE_HEAT_CAP - (this.brakeTemp[w] - AMBIENT) * (0.011 + 0.0008 * V)) * dt;
       if (Tb > 0) {
         const dwb = (Tb / I) * dt;
         if (Math.abs(om) <= dwb) om = 0;
         else om -= Math.sign(om) * dwb;
       }
       this.omega[w] = om;
+      this.wheelAngle[w] = (this.wheelAngle[w] + om * dt) % TAU;
 
       this.kappa[w] = kap;
       this.alpha[w] = al;
@@ -451,7 +596,7 @@ export class Car {
       this.slipVis[w] = V > 4 ? clamp(over * 0.8, 0, 1.5) * clamp(absVl / 15, 0.3, 1) : 0;
 
       // thermal + wear
-      const slideLong = om * R - vlong;
+      const slideLong = om * Rw - vlong;
       const slideLat = Math.max(absVl, 2) * Math.tan(Math.abs(al));
       const P = Math.abs(FxW * slideLong) + Math.abs(FyW) * slideLat;
       const Prr = 0.02 * Fz * absVl;
@@ -482,6 +627,17 @@ export class Car {
       sumFx += Fxb;
       sumFy += Fyb;
       sumMz += px * Fyb - py * Fxb;
+      // a deflated tyre drags its corner back: the car pulls towards it (SPEC 5.5)
+      if (this.puncture[w] > 0) sumMz += (py > 0 ? 1 : -1) * 1800 * this.puncture[w] * clamp(absVl / 10, 0, 1);
+      // marbles heat the skin they stick to
+      if (mf && this.pick[w] > 0) this.tempS[w] += this.pick[w] * 4 * dt;
+    }
+    this.rimSpark = rimSpark;
+    // self-aligning torque (SPEC 1.2): the front tyres' lateral force times the pneumatic trail, which collapses past the peak
+    {
+      const aF = (Math.abs(this.alphaLag[FL]) + Math.abs(this.alphaLag[FR])) / 2;
+      this.sat = (this.wheelFy[FL] + this.wheelFy[FR]) * 0.035 * Math.exp(-12 * aF);
+      this.flatShake = PHYS.flatHop && V > 5 ? (this.flat[FL] * Math.sin(this.wheelAngle[FL]) + this.flat[FR] * Math.sin(this.wheelAngle[FR])) * 0.015 * clamp(V / 40, 0, 1) : 0;
     }
 
     // ---------------------------------------------------------------- aerodynamic body forces
@@ -492,6 +648,11 @@ export class Car {
     // slope
     const slopeAlong = this.trackSlope * Math.cos(wrapAngle(this.theta - this.trackHeading));
     sumFx -= m * g * slopeAlong * 0.8;
+    // banking (SPEC 5.1): gravity down the road's cross-slope, in the car's lateral axis (+ bank = turned into a left-hander)
+    if (bank) {
+      const rel = wrapAngle(this.theta - this.trackHeading);
+      sumFy += m * g * Math.sin(bank) * Math.cos(rel);
+    }
     // surface side-load noise on kerbs (a jolt you feel in the wheel)
     this.kerbPhase += dt * (40 + V * 0.9);
     this.kerbShake = kerbHit ? Math.min(1, V / 40) : 0;
@@ -550,8 +711,57 @@ export class Car {
     this.roll = lerp(this.roll, clamp(-this.ayF * 0.0005, -0.025, 0.025), 1 - Math.exp(-dt * 5));
     this.onGrass = grassHit >= 3;
     this.aeroDown = aero.downF + aero.downR;
-    // floor bottoming: the load on the springs (downforce plus a compression) against the ride height; 0 = clear, 1 = the plank is on the road
-    this.bottoming = clamp((this.aeroDown / (m * g) + 9 * (gz - 1) - 3.4) / 0.7, 0, 1) * (V > 55 ? 1 : 0);
+    if (PHYS.suspension) {
+      // 4-corner springs and dampers (SPEC 1.1): each corner is driven by its load change from rest and by the kerbs
+      const fs = [m * g * wf * 0.5, m * g * wf * 0.5, m * g * (1 - wf) * 0.5, m * g * (1 - wf) * 0.5];
+      const mc = m / 4;
+      for (let w = 0; w < 4; w++) {
+        const zRoad = this.surf[w] === SURF.KERB ? 0.025 * Math.sin(this.kerbPhase + w * 1.7) : 0;
+        const F = K_SPRING[w] * (this.suspZ[w] - zRoad) + C_DAMPER * this.suspV[w];
+        this.suspV[w] += ((fz[w] - fs[w] - F) / mc) * dt;
+        this.suspZ[w] += this.suspV[w] * dt;
+      }
+      let hF = H0_F - 0.5 * (this.suspZ[0] + this.suspZ[1]);
+      let hR = H0_R - 0.5 * (this.suspZ[2] + this.suspZ[3]);
+      // the plank meets the road: the floor stops the car going lower, scrapes and drags
+      let plank = 0;
+      if (hF < 0.005) {
+        plank = Math.max(plank, (0.005 - hF) / 0.005);
+        const lift = 0.005 - hF;
+        this.suspZ[0] -= lift; this.suspZ[1] -= lift;
+        if (this.suspV[0] > 0) this.suspV[0] = 0;
+        if (this.suspV[1] > 0) this.suspV[1] = 0;
+        hF = 0.005;
+      }
+      if (hR < 0.005) {
+        plank = Math.max(plank, (0.005 - hR) / 0.005);
+        const lift = 0.005 - hR;
+        this.suspZ[2] -= lift; this.suspZ[3] -= lift;
+        if (this.suspV[2] > 0) this.suspV[2] = 0;
+        if (this.suspV[3] > 0) this.suspV[3] = 0;
+        hR = 0.005;
+      }
+      this.rideF = hF;
+      this.rideR = hR;
+      const scraping = Math.min(hF, hR) <= 0.0052 && V > 20;
+      if (scraping) this.u -= (Math.sign(this.u) * 400 * dt) / m; // plank friction
+      this.bottoming = scraping ? 1 : clamp((0.009 - Math.min(hF, hR)) / 0.004, 0, 1) * (V > 40 ? 1 : 0);
+      this.plank = plank;
+    } else {
+      // floor bottoming: the load on the springs (downforce plus a compression) against the ride height; 0 = clear, 1 = the plank is on the road
+      this.bottoming = clamp((this.aeroDown / (m * g) + 9 * (gz - 1) - 3.4) / 0.7, 0, 1) * (V > 55 ? 1 : 0);
+    }
+    // reliability (SPEC 1.5): revs in a rich mix, cooked brakes and over-revved shifts wear components out
+    if (PHYS.reliability && !this.failed) {
+      this.engStress = Math.min(1, this.engStress + dt * (this.fuelMode === 2 ? 0.0022 : this.fuelMode === 1 ? 0.0004 : 0) * clamp((this.rpm - 12500) / 2500, 0, 1));
+      let bMax = 0;
+      for (let w = 0; w < 4; w++) bMax = Math.max(bMax, this.brakeTemp[w]);
+      this.brakeStress = Math.min(1, this.brakeStress + dt * 0.008 * smoothstep(980, 1180, bMax));
+      if (this.shiftTimer > 0 && this.rpm > 14600) this.boxStress = Math.min(1, this.boxStress + dt * 0.003);
+      if (this.engStress >= 1) this.failed = 'Power unit';
+      else if (this.boxStress >= 1) this.failed = 'Gearbox';
+      if (this.brakeStress >= 1 && this.brakeLineFail < 0) this.brakeLineFail = this.brakeTemp[FL] >= this.brakeTemp[FR] ? FL : FR;
+    }
     this.aeroDrag = aero.drag;
     this.latG = this.ayF / G;
     this.longG = this.axF / G;
@@ -575,7 +785,9 @@ export class Car {
     this.tempS.fill(72);
     this.grain.fill(0);
     this.puncture.fill(0);
+    this.punctureRate.fill(0);
     this.flat.fill(0);
+    this.pick.fill(0);
   }
 
   /** Apply an impact (energy in J at body point (lx, ly)) - damages wings/floor and may puncture. */
@@ -591,7 +803,11 @@ export class Car {
     } else this.damageFloor = Math.min(1, (this.damageFloor || 0) + e * 0.5);
     if (e > 0.5) {
       const w = lx > 0 ? (ly > 0 ? FL : FR) : ly > 0 ? RL : RR;
-      if (this.rand() < Math.min(0.5, e * 0.4)) this.puncture[w] = 1;
+      // a puncture deflates: slowly (a cut) or quickly (a tear), see step()
+      if (this.puncture[w] === 0 && this.rand() < Math.min(0.5, e * 0.4)) {
+        this.puncture[w] = 0.05;
+        this.punctureRate[w] = this.rand() < 0.5 ? 0.08 : 0.45;
+      }
     }
   }
 

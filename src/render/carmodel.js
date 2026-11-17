@@ -486,7 +486,9 @@ export class CarView {
     const th = car.ptheta + dth * alpha;
     const slopePitch = Math.atan(car.trackSlope * Math.cos(car.theta - car.trackHeading));
     this.group.position.set(x, car.trackH, -y);
-    this.group.rotation.set(0, th, 0);
+    // the road's camber tilts the whole car, wheels and all (heading first, then the roll about the car's own axis)
+    this.group.rotation.order = 'YXZ';
+    this.group.rotation.set(-(car.trackBank || 0), th, 0);
     // Suspension: each corner's spring travel follows its live vertical load (about 4 cm at full downforce). The body heaves,
     // pitches and rolls on the four travels while the wheels stay on the road, so the car squats, dives, leans and sits down at speed.
     const tv = this.travel || (this.travel = new Float32Array(4));
@@ -496,7 +498,8 @@ export class CarView {
     for (let w = 0; w < 4; w++) {
       const stat = w < 2 ? (m * spec.weightFront) / 2 : (m * (1 - spec.weightFront)) / 2;
       const kerb = car.surf && car.surf[w] === 1 ? Math.sin(this.spinAngle[w] * 3.0) * 0.012 : 0; // SURF.KERB: the ridges work the wheel
-      const want = live ? clamp((car.fz[w] - stat) / 150000, -0.03, 0.05) + kerb : 0;
+      // the physics' own spring travel when it has one (SPEC 1.1); otherwise estimated from the corner's load
+      const want = !live ? 0 : car.suspZ ? clamp(car.suspZ[w], -0.03, 0.05) : clamp((car.fz[w] - stat) / 150000, -0.03, 0.05) + kerb;
       tv[w] += (want - tv[w]) * kS;
     }
     const heave = -(tv[0] + tv[1] + tv[2] + tv[3]) / 4;

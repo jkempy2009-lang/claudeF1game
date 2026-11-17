@@ -111,12 +111,11 @@ export class Guideline {
       const tb = clamp((lead + k * ds) / BLEND_M, 0, 1);
       const c = carD + (tr.lineD[i] - carD) * (tb * tb * (3 - 2 * tb));
       const half = HALF + (HALF_FAR - HALF) * (k / AHEAD);
-      const z = tr.z[i] + 0.05;
       pos[k * 6] = tr.x[i] + tr.nx[i] * (c - half);
-      pos[k * 6 + 1] = z;
+      pos[k * 6 + 1] = tr.heightAtI(i, c - half) + 0.05;
       pos[k * 6 + 2] = -(tr.y[i] + tr.ny[i] * (c - half));
       pos[k * 6 + 3] = tr.x[i] + tr.nx[i] * (c + half);
-      pos[k * 6 + 4] = z;
+      pos[k * 6 + 4] = tr.heightAtI(i, c + half) + 0.05;
       pos[k * 6 + 5] = -(tr.y[i] + tr.ny[i] * (c + half));
       // light smoothing across neighbours so the colours don't flicker
       const r = (need[k] * 2 + need[Math.max(0, k - 1)] + need[Math.min(AHEAD - 1, k + 1)]) / 4;
@@ -142,7 +141,7 @@ export class Guideline {
     let m = 0;
     const quad = (i, c, halfW, halfL, R, G, B, A) => {
       if (m >= MARKS) return;
-      const x = tr.x[i] + tr.nx[i] * c, y = tr.y[i] + tr.ny[i] * c, z = tr.z[i] + 0.07;
+      const x = tr.x[i] + tr.nx[i] * c, y = tr.y[i] + tr.ny[i] * c, z = tr.heightAtI(i, c) + 0.07;
       // tangent: the track direction at this sample (normal rotated back)
       const tx = -tr.ny[i], ty = tr.nx[i];
       const o = m * 12;

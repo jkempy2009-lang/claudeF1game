@@ -37,13 +37,13 @@ export const DEFAULT_CONFIG = {
   rearWing: null,
   brakeBias: 0.58,
   pressure: 0,
-  assists: { abs: true, tc: 2, steer: true, stability: 1, autoGear: true, pitAuto: true, pitGame: true },
+  assists: { abs: true, tc: 2, steer: true, stability: 1, autoGear: true, pitAuto: true, pitGame: true, launchControl: true },
 };
 const ASSIST_PRESETS = {
-  Beginner: { abs: true, tc: 3, steer: true, stability: 3, autoGear: true, pitAuto: true, pitGame: false },
-  Intermediate: { abs: true, tc: 2, steer: true, stability: 1, autoGear: true, pitAuto: true, pitGame: true },
-  Pro: { abs: true, tc: 1, steer: false, stability: 0, autoGear: true, pitAuto: true, pitGame: true },
-  Simulator: { abs: false, tc: 0, steer: false, stability: 0, autoGear: false, pitAuto: false, pitGame: true },
+  Beginner: { abs: true, tc: 3, steer: true, stability: 3, autoGear: true, pitAuto: true, pitGame: false, launchControl: true },
+  Intermediate: { abs: true, tc: 2, steer: true, stability: 1, autoGear: true, pitAuto: true, pitGame: true, launchControl: true },
+  Pro: { abs: true, tc: 1, steer: false, stability: 0, autoGear: true, pitAuto: true, pitGame: true, launchControl: true },
+  Simulator: { abs: false, tc: 0, steer: false, stability: 0, autoGear: false, pitAuto: false, pitGame: true, launchControl: false },
 };
 const TC_NAMES = ['Off', 'Low', 'Medium', 'High'];
 
@@ -96,6 +96,7 @@ export function sanitizeConfig(raw) {
       autoGear: bool(ra.autoGear, D.assists.autoGear),
       pitAuto: bool(ra.pitAuto, D.assists.pitAuto),
       pitGame: bool(ra.pitGame, D.assists.pitGame),
+      launchControl: bool(ra.launchControl, D.assists.launchControl),
     },
   };
 }
@@ -489,6 +490,7 @@ export class Menu {
       ${this.toggle('a.steer', 'Steering assist', 'Limits steering lock so the front tyres don\'t scrub away', a.steer)}
       ${this.toggle('a.autoGear', 'Automatic gearbox', 'Manual: Q / E or paddles', a.autoGear)}
       ${this.toggle('a.pitAuto', 'Pit lane autopilot', 'The car drives itself through the pits once you commit', a.pitAuto)}
+      ${this.toggle('a.launchControl', 'Launch control', 'Off: hold the brake during the countdown, set the revs with the throttle (about 11,000 rpm), release the brake at lights out. Too many revs spin the rears, too few bog down, moving early is a 10 s false-start penalty', a.launchControl)}
       ${this.toggle('a.pitGame', 'Interactive pit stops', 'Time your button press (Space) on each wheel nut: a clean stop takes 2.5 s, a cross-threaded nut costs 0.9 s', a.pitGame)}
     </div><div class="panel"><h3>Stability</h3>
       <div class="field"><label>Traction control</label>${this.chips('tc', TC_NAMES.map((n, i) => ({ value: i, label: n })), a.tc)}</div>
@@ -605,7 +607,7 @@ export class Menu {
     const { cls, player, race, season, trackName, careerRes } = data;
     const top3 = cls.slice(0, 3);
     const order = [top3[1], top3[0], top3[2]].filter(Boolean);
-    const fmt = (e) => (e.time != null ? formatTime(e.time) : 'DNF');
+    const fmt = (e) => (e.time != null ? formatTime(e.time) : e.dnf ? 'DNF · ' + esc(e.dnf) : 'DNF');
     const bestLap = Math.min(...cls.map((e) => e.best)); // Infinity when nobody set a lap: then nobody gets the marker
     const me = cls.find((e) => e.car === player);
     const rows = cls

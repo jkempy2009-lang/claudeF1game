@@ -280,6 +280,13 @@ export class Effects {
       st.plank -= k;
       while (k-- > 0) this.spark(car.x, car.trackH + 0.05, -car.y, 5, 11, car);
     }
+    // a deflated tyre running on its rim (SPEC 5.5)
+    if (car.rimSpark > 0) {
+      st.rim = (st.rim || 0) + dt * 40 * car.rimSpark;
+      let k = Math.floor(st.rim);
+      st.rim -= k;
+      while (k-- > 0) this.spark(car.x, car.trackH + 0.1, -car.y, 4, 9, car);
+    }
   }
 
   spark(x, y, z, speedMin, speedMax, car) {

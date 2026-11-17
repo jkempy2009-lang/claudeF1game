@@ -2,6 +2,7 @@
 import { spawnSync } from 'node:child_process';
 const suites = [
   ['physics', 'tests/physics.mjs'],
+  ['physics v2 (suspension, marbles, clutch, reliability, banking)', 'tests/physics2.mjs'],
   ['AI laps + full-grid race', 'tests/run.mjs'],
   ['scoring and standings', 'tests/scoring.mjs'],
   ['qualifying + grid', 'tests/qualisim.mjs'],

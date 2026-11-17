@@ -51,18 +51,18 @@ Reference clean-lap pace of the best car at each level (medium tyres; `node tool
 
 | | Rookie | Amateur | Pro | Elite | Legend | F1 |
 |---|---|---|---|---|---|---|
-| Autodromo del Vettore | 1:18.912 | 1:14.046 | 1:10.308 | 1:07.308 | 1:05.783 | 1:05.021 |
-| Circuit de la Rade | 1:12.933 | 1:08.087 | 1:04.396 | 1:01.458 | 0:59.675 | 0:58.554 |
-| Northfield Grand Prix Circuit | 1:26.937 | 1:21.775 | 1:17.804 | 1:14.533 | 1:12.946 | 1:12.175 |
-| Circuit des Hautes-Fagnes | 1:25.025 | 1:19.917 | 1:15.854 | 1:12.612 | 1:11.137 | 1:10.362 |
-| Autódromo Costa Azul | 1:28.196 | 1:22.612 | 1:18.317 | 1:14.908 | 1:13.283 | 1:12.346 |
-| Monte Aurora Ring | 1:15.862 | 1:10.900 | 1:07.042 | 1:03.983 | 1:02.379 | 1:01.500 |
-| Mirage International Circuit | 1:30.454 | 1:24.337 | 1:19.908 | 1:16.525 | 1:14.812 | 1:13.912 |
-| Parc Lumière | 1:34.271 | 1:27.737 | 1:22.704 | 1:18.900 | 1:16.508 | 1:15.271 |
-| Porto Vecchio Harbour Circuit | 1:31.675 | 1:25.304 | 1:20.737 | 1:17.062 | 1:14.804 | 1:13.783 |
-| Sakura Ridge Circuit | 1:47.967 | 1:41.154 | 1:35.837 | 1:31.879 | 1:30.062 | 1:28.971 |
-| Circuit de la Bastide | 1:21.308 | 1:16.133 | 1:12.133 | 1:09.121 | 1:07.625 | 1:06.758 |
-| Caldera Speedway | 1:18.746 | 1:13.762 | 1:10.046 | 1:07.187 | 1:05.821 | 1:05.129 |
+| Autodromo del Vettore | 1:19.696 | 1:14.404 | 1:10.083 | 1:07.062 | 1:05.554 | 1:04.808 |
+| Circuit de la Rade | 1:13.162 | 1:08.646 | 1:04.354 | 1:01.108 | 0:59.333 | 0:58.258 |
+| Northfield Grand Prix Circuit | 1:28.133 | 1:22.062 | 1:17.521 | 1:14.262 | 1:12.833 | 1:12.004 |
+| Circuit des Hautes-Fagnes | 1:26.058 | 1:20.062 | 1:15.537 | 1:12.325 | 1:10.862 | 1:10.150 |
+| Autódromo Costa Azul | 1:28.958 | 1:22.854 | 1:17.883 | 1:14.483 | 1:12.908 | 1:11.971 |
+| Monte Aurora Ring | 1:16.267 | 1:11.021 | 1:06.617 | 1:03.571 | 1:01.996 | 1:01.187 |
+| Mirage International Circuit | 1:31.467 | 1:24.987 | 1:19.725 | 1:16.129 | 1:14.479 | 1:13.533 |
+| Parc Lumière | 1:34.900 | 1:28.221 | 1:22.529 | 1:18.442 | 1:16.162 | 1:14.887 |
+| Porto Vecchio Harbour Circuit | 1:32.346 | 1:25.871 | 1:20.500 | 1:16.671 | 1:14.454 | 1:13.404 |
+| Sakura Ridge Circuit | 1:49.129 | 1:41.412 | 1:35.383 | 1:31.433 | 1:29.650 | 1:28.679 |
+| Circuit de la Bastide | 1:21.796 | 1:16.254 | 1:11.729 | 1:08.762 | 1:07.229 | 1:06.375 |
+| Caldera Speedway | 1:19.642 | 1:14.221 | 1:09.833 | 1:06.967 | 1:05.608 | 1:05.017 |
 
 **After the flag** – a finish scene with a Victory / Podium / Points banner, then the classification with **telemetry charts** (lap time, fuel, tyre wear, top speed against the winner), a 30-second **instant replay** from trackside cameras, and **photo mode** with PNG capture.
 

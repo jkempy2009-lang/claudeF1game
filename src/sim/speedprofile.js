@@ -46,11 +46,17 @@ export function buildSpeedProfile(track, spec, opts = {}) {
   // with v^2 times the road's vertical curvature); gravity along the slope helps or hurts braking and acceleration
   const kvArr = track.kv, slopeArr = track.slope;
   let cur = 0; // sample the passes are working on (set before each lat()/circle() call)
+  // banking: a corner banked into the turn lends some gravity to the cornering force (track.bank, + = into a left-hander)
+  const bankArr = track.bank;
   const lat = (v) => {
     const kv = kvArr ? kvArr[cur] : 0;
-    if (!kv) return lat0(v);
-    const gz = Math.min(0.35, Math.max(-0.3, (v * v * kv) / 9.81));
-    return lat0(v) * (1 + gz / (1 + (v / 46) * (v / 46)));
+    const bk = bankArr ? bankArr[cur] * Math.sign(kappa[cur]) : 0;
+    let a = lat0(v);
+    if (kv) {
+      const gz = Math.min(0.35, Math.max(-0.3, (v * v * kv) / 9.81));
+      a *= 1 + gz / (1 + (v / 46) * (v / 46));
+    }
+    return bk ? a * Math.cos(bk) + 9.81 * Math.sin(bk) : a;
   };
   const gSlope = (i) => (slopeArr ? 0.8 * 9.81 * slopeArr[i] : 0);
 

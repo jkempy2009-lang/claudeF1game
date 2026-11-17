@@ -1056,7 +1056,7 @@ class Game {
       v.update(car, s.alpha, dt);
       const dx = car.x - camPos.x, dy = -car.y - camPos.z;
       const near = dx * dx + dy * dy < 160 * 160;
-      v.group.visible = near || car === player || (dx * dx + dy * dy < 1200 * 1200);
+      v.group.visible = !car.inGarage && (near || car === player || (dx * dx + dy * dy < 1200 * 1200));
       v.setLod(!near && car !== player);
       v.setShadow(near && this.save.settings.quality !== 'low');
       if (car !== player && near) effects.car(car, dt);
@@ -1094,7 +1094,7 @@ class Game {
         s.ghostView.group.visible = true;
         s.ghostView.setPose(pose.x, pose.y, pose.theta, 0, pose.steer);
         const pr = s.track.project(pose.x, pose.y, -1, this._ghostProj || (this._ghostProj = {}));
-        s.ghostView.group.position.y = s.track.at(s.track.z, pr.s);
+        s.ghostView.group.position.y = s.track.heightAt(pr.s, pr.d);
         race.ghostPos = pose;
       } else {
         s.ghostView.group.visible = false;
@@ -1300,6 +1300,22 @@ class Game {
         }
         case 'chequered':
           hud.flag('Chequered flag', '#fff', 4, 'chequered');
+          break;
+        case 'retired':
+          if (e.car === player) {
+            hud.message('Retired', 'bad', `${e.reason} failure`, 5);
+            hud.radio(`We have lost the ${e.reason.toLowerCase()}. Bring it to a stop safely, I'm sorry.`, 6);
+          } else hud.radio(`${e.car.info.name} is out: ${e.reason.toLowerCase()} failure.`, 4);
+          break;
+        case 'stressWarn':
+          if (e.car === player) {
+            if (e.what === 'brakes') hud.radio('Brake temperatures are critical. Lift and coast, give them some air.', 5);
+            else if (e.level === 1) hud.radio('Engine temperatures are high. Come off the rich mix, F to cycle.', 5);
+            else hud.radio('The engine is misfiring. Lean mix now or we lose it.', 5);
+          }
+          break;
+        case 'falseStart':
+          hud.message('False start', 'bad', '+10 s penalty', 3);
           break;
         case 'finish':
           if (e.car === player && race.opt.mode === 'race') this.startFinishScene(s, e);
@@ -1588,7 +1604,7 @@ class Game {
         const pr = s._scPr || (s._scPr = { i: 0, t: 0, s: 0, d: 0, dist: 0 });
         s.track.project(p.x, p.y, s._scHint ?? -1, pr);
         s._scHint = pr.i;
-        s.scView.setPose(p.x, p.y, p.theta, s.track.z[pr.i]);
+        s.scView.setPose(p.x, p.y, p.theta, s.track.heightAt(pr.s, pr.d));
       }
     }
     const fCar = s.replayCars[r.follow];

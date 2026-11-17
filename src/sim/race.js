@@ -84,6 +84,8 @@ export class Race {
     this.ghostStart = 0; // step at which the current lap's ghost recording began
     this.profileCache = new Map();
     this.pairContact = new Map();
+    // off-line rubber marbles (SPEC 1.3): 5 lateral bins per track sample, 0 = clean
+    this.marbles = new Float32Array(track.N * 5);
     this.fastest = { time: Infinity, car: null, lap: 0 };
     this.bestSectors = [Infinity, Infinity, Infinity];
     this.ghostRec = [];
@@ -315,6 +317,7 @@ export class Race {
   // ---- control ------------------------------------------------------------------------------------
   start() {
     if (this.phase !== 'grid') return;
+    for (const c of this.cars) c.gridAt = { x: c.x, y: c.y };
     this.phase = 'countdown';
     this.cdStart = this.time;
     const quick = this.opt.mode === 'timetrial' || this.isQuali;
@@ -363,13 +366,17 @@ export class Race {
     }
     const racing = this.phase === 'racing' || this.phase === 'finished';
     for (const car of this.cars) {
+      if (car.inGarage) continue; // retired and wheeled away
+      if (!car.marbleField && this.opt.mode !== 'timetrial') car.marbleField = this.marbles;
       const inp = this.inputFor(car, dt, pin);
       car.step(dt, inp);
     }
+    if (this.stepCount % 8 === 0 && racing && this.opt.mode !== 'timetrial') this.updateMarbles(dt * 8);
     // physical interactions
     if (racing || this.phase === 'countdown') {
       if (this.opt.collisions && this.cars.length > 1) this.collisions();
       for (const car of this.cars) {
+        if (car.inGarage) continue;
         const hit = collideWalls(car, this.track);
         if (hit && hit.speed > 0.8) {
           car.locate();
@@ -393,8 +400,72 @@ export class Race {
       this.updateFinish();
       this.adaptPace();
       this.recoverStuck(dt * 4);
+      this.updateRetirements();
+      if (this.phase === 'countdown') this.checkFalseStart();
     }
     if (this.opt.mode === 'timetrial') this.recordGhost();
+  }
+
+  /**
+   * Marbles (SPEC 1.3): the rubber a car wears off its tyres is swept off the racing line and collects beside it, most where
+   * the tyres work hardest (the corners). Cars running there pick it up; the airflow keeps the line itself clean.
+   */
+  updateMarbles(dt) {
+    const tr = this.track, N = tr.N, M = this.marbles;
+    for (const car of this.cars) {
+      if (car.inGarage || car.rs.inPitLane) { car._wearSum = undefined; continue; }
+      const w = car.wear[0] + car.wear[1] + car.wear[2] + car.wear[3];
+      const dW = car._wearSum == null ? 0 : w - car._wearSum;
+      car._wearSum = w;
+      if (!(dW > 0)) continue;
+      const amount = dW * 14; // calibrated: a full race of a 20-car field leaves the outside of the corners clearly dirty
+      for (let k = -4; k <= 4; k++) {
+        const i = (car.i + k + N) % N;
+        const wl = tr.wl[i], wr = tr.wr[i], bw = (wl + wr) / 5, line = tr.lineD[i];
+        let n = 0;
+        for (let b = 0; b < 5; b++) if (Math.abs(-wr + (b + 0.5) * bw - line) > 2.2) n++;
+        if (!n) continue;
+        for (let b = 0; b < 5; b++) if (Math.abs(-wr + (b + 0.5) * bw - line) > 2.2) M[i * 5 + b] = Math.min(1.5, M[i * 5 + b] + amount / (9 * n));
+      }
+    }
+    // the line bin is swept clean by the cars running on it
+    const keep = 1 - 0.02 * dt;
+    for (let i = 0; i < N; i++) {
+      const wl = tr.wl[i], wr = tr.wr[i];
+      const b = clamp(Math.floor(((tr.lineD[i] + wr) / (wl + wr)) * 5), 0, 4);
+      M[i * 5 + b] *= keep;
+    }
+  }
+
+  /** A car whose power unit or gearbox has failed (Car.failed) retires: it coasts to a stop and is wheeled away. */
+  updateRetirements() {
+    for (const car of this.cars) {
+      const rs = car.rs;
+      if (car.failed && !rs.dnf && !rs.finished) {
+        rs.dnf = car.failed;
+        rs.dnfAt = this.time;
+        this.pushEvent({ type: 'retired', car, reason: car.failed });
+      }
+      // the engineer warns before a stressed power unit or overheated brakes give up
+      if (car === this.player && !rs.dnf) {
+        const lvl = car.engStress > 0.75 ? 2 : car.engStress > 0.5 ? 1 : 0;
+        if (lvl > (rs.stressWarned || 0)) { rs.stressWarned = lvl; this.pushEvent({ type: 'stressWarn', car, what: 'engine', level: lvl }); }
+        if (car.brakeStress > 0.6 && !rs.brakeWarned) { rs.brakeWarned = true; this.pushEvent({ type: 'stressWarn', car, what: 'brakes', level: 1 }); }
+      }
+      // the marshals push a stopped, retired car behind the barrier (the player's stays where it is, the camera is on it)
+      if (rs.dnf && !car.inGarage && car !== this.player && car.speed < 1.5 && this.time - rs.dnfAt > 6) car.inGarage = true;
+    }
+  }
+
+  /** Manual launch (launch control off): moving before the lights go out is a false start (SPEC 7.3). */
+  checkFalseStart() {
+    const p = this.player;
+    if (!p || p.rs.falseStart || this.opt.assists.launchControl !== false || !p.gridAt) return;
+    if (Math.hypot(p.x - p.gridAt.x, p.y - p.gridAt.y) > 0.6) {
+      p.rs.falseStart = true;
+      this.addPenalty(p, 10, 'False start');
+      this.pushEvent({ type: 'falseStart', car: p });
+    }
   }
 
   inputFor(car, dt, pin) {
@@ -424,9 +495,17 @@ export class Race {
         inp.boost = false;
         inp.aiDriven = true;
       }
-      // on the grid the car is held (clutch + brakes) until the lights go out: a false start is impossible
-      inp.hold = !racing;
-      if (inp.hold) inp.brake = 1;
+      // on the grid the car is held (clutch + brakes) until the lights go out: a false start is impossible. With launch control
+      // off (SPEC 1.4, 7.3) the driver holds it on the brake during the countdown and sets the revs; moving early is a false start.
+      const manual = this.opt.assists.launchControl === false && this.opt.mode === 'race' && !this.isQuali;
+      inp.manualLaunch = manual;
+      if (manual && this.phase === 'countdown') {
+        inp.hold = inp.brake > 0.3;
+      } else {
+        inp.hold = !racing;
+        if (inp.hold) inp.brake = 1;
+      }
+      if (rs.dnf) { inp.throttle = 0; inp.boost = false; }
       if (rs.service) {
         inp.throttle = 0;
         inp.brake = 1;
@@ -468,6 +547,12 @@ export class Race {
     const drv = car.driver;
     if (!drv) return (this._idle || (this._idle = { throttle: 0, brake: 1, steer: 0, drs: false, boost: false }));
     inp = drv.update(dt, this);
+    inp.hold = !racing; // the clutch is in until the lights go out, then let in like everyone else's
+    if (rs.dnf) {
+      inp.throttle = 0;
+      inp.brake = Math.max(inp.brake, 0.3);
+      inp.boost = false;
+    }
     if (rs.service) {
       inp.throttle = 0;
       inp.brake = 1;
@@ -488,7 +573,7 @@ export class Race {
     for (let i = 0; i < cars.length; i++) {
       for (let j = i + 1; j < cars.length; j++) {
         const a = cars[i], b = cars[j];
-        if (a.rs.service || b.rs.service) continue;
+        if (a.rs.service || b.rs.service || a.inGarage || b.inGarage) continue;
         const r = collideCars(a, b);
         if (r) {
           a.locate();
@@ -1257,15 +1342,17 @@ export class Race {
       stops: c.rs.stops,
       dist: c.rs.maxDist,
       gridPos: c.info.gridPos,
+      dnf: c.rs.dnf || null,
     }));
     list.sort((a, b) => {
+      if (!!a.dnf !== !!b.dnf) return a.dnf ? 1 : -1; // retired cars are classified behind every running car
       if ((a.time != null) !== (b.time != null)) return a.time != null ? -1 : 1;
       if (a.time != null && b.time != null) return a.laps === b.laps ? a.time - b.time : b.laps - a.laps;
       return b.dist - a.dist;
     });
     list.forEach((e, i) => (e.pos = i + 1));
     const POINTS = [25, 18, 15, 12, 10, 8, 6, 4, 2, 1];
-    list.forEach((e) => (e.points = (POINTS[e.pos - 1] || 0) + (this.fastest.car === e.car && e.pos <= 10 ? 1 : 0)));
+    list.forEach((e) => (e.points = e.dnf ? 0 : (POINTS[e.pos - 1] || 0) + (this.fastest.car === e.car && e.pos <= 10 ? 1 : 0)));
     return list;
   }
 
@@ -1286,6 +1373,7 @@ export class Race {
   recoverStuck(dt) {
     for (const car of this.cars) {
       const drv = car.driver;
+      if (car.rs.dnf) continue;
       if (drv && drv.stuckT > 5) {
         drv.stuckT = 0;
         this.resetToTrack(car);

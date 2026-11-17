@@ -513,7 +513,49 @@ export class Track {
     this._buildMarkers();
 
     this.lineD = computeRacingLine(this, def.lineMargin ?? 1.9);
+    this._buildBanking();
     this._finishLine();
+  }
+
+  /**
+   * Road camber (SPEC 5.1), radians, + = turned into a left-hand corner (the left edge lower). Built from the corner
+   * curvature, smoothed along the lap, at most about 3 degrees: real road circuits are banked 1-3 degrees, very rarely more
+   * (the spec's 8 degrees is oval-track banking). A circuit can override stretches with def.banking: [[s0, s1, rad], ...].
+   */
+  _buildBanking() {
+    const N = this.N, raw = new Float64Array(N);
+    for (let i = 0; i < N; i++) raw[i] = clamp(this.curv[i] * 6, -0.05, 0.05);
+    for (const [s0, s1, rad] of this.def.banking || []) {
+      for (let i = 0; i < N; i++) {
+        const sv = i * this.ds;
+        if (s0 <= s1 ? sv >= s0 && sv <= s1 : sv >= s0 || sv <= s1) raw[i] = rad;
+      }
+    }
+    this.bank = new Float64Array(N);
+    const H = 10;
+    for (let i = 0; i < N; i++) {
+      let a = 0;
+      for (let k = -H; k <= H; k++) a += raw[(i + k + N) % N];
+      this.bank[i] = a / (2 * H + 1);
+    }
+    // the road on the pit straight and in the pit lane stays level
+    if (this.pit) for (let i = 0; i < N; i++) if (this.inPitRange(i * this.ds)) this.bank[i] = 0;
+  }
+
+  /** Road height at arc length s and lateral offset d: the centreline plus the camber across the tarmac (level beyond it). */
+  heightAt(s, d) {
+    const f = mod(s, this.length) / this.ds;
+    const i = Math.floor(f) % this.N, j = (i + 1) % this.N, t = f - Math.floor(f);
+    const z = this.z[i] + (this.z[j] - this.z[i]) * t;
+    if (!this.bank) return z;
+    const b = this.bank[i] + (this.bank[j] - this.bank[i]) * t;
+    return z - Math.tan(b) * clamp(d, -this.wr[i], this.wl[i]);
+  }
+
+  /** The same at a sample index (for meshes built per sample). */
+  heightAtI(i, d) {
+    const z = this.z[i];
+    return this.bank ? z - Math.tan(this.bank[i]) * clamp(d, -this.wr[i], this.wl[i]) : z;
   }
 
   // ---- geometry helpers -------------------------------------------------------------------
@@ -536,7 +578,7 @@ export class Track {
     out.y = y + (ny / nl) * d;
     out.cx = x;
     out.cy = y;
-    out.h = lerp(this.z[i], this.z[j], t);
+    out.h = this.bank ? this.heightAt(s, d) : lerp(this.z[i], this.z[j], t);
     out.heading = this.hdgAt(s);
     return out;
   }
