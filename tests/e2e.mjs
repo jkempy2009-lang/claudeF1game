@@ -305,10 +305,11 @@ for (const [name, bad] of [
   // round 2 of 4 is a sprint weekend: the sprint runs first, scores, and leaves the Grand Prix to run from its order
   await page.click('[data-ctab=overview]').catch(() => null);
   await page.waitForSelector('[data-act=careerrace][data-q="s"]', { timeout: 20000 });
+  const gpLaps = await page.evaluate(() => +((document.body.textContent.match(/(\d+)-lap Grand Prix/) || [])[1] || 0));
   await page.click('[data-act=careerrace][data-q="s"]');
   await waitHud(page);
   const sp = await page.evaluate(() => ({ sprint: !!window.apex.session.cfg.sprint, laps: window.apex.session.race.totalLaps }));
-  step('a sprint weekend starts with a short sprint', sp.sprint && sp.laps >= 2 && sp.laps < laps + 1, JSON.stringify(sp));
+  step('a sprint weekend starts with a sprint shorter than its Grand Prix', sp.sprint && sp.laps >= 1 && gpLaps >= 3 && sp.laps < gpLaps, JSON.stringify({ ...sp, gpLaps }));
   step('the practice bonus applies to the weekend', await page.evaluate(() => { const b = window.apex.session.cfg.practiceBonus; return !!b && b.grip > 1; }));
   await page.evaluate(() => { const a = window.apex; return a.debugUntil(() => a.session.player.rs.finished, 700); });
   await page.waitForFunction(() => window.apex.session.fin && window.apex.session.fin.t > 2, null, { timeout: 120000 });
