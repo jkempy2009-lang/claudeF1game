@@ -107,6 +107,10 @@ class Game {
         this.menu.rerender();
         return;
       }
+      if (this.state === 'podium') {
+        if (e.code === 'Enter' || e.code === 'Space' || e.code === 'Escape') { e.preventDefault(); this.endPodium(); }
+        return;
+      }
       if (this.state === 'replay') {
         const r = this.session && this.session.replay;
         if (e.code === 'Space') { e.preventDefault(); this.replayAction('play'); }
@@ -151,7 +155,11 @@ class Game {
     window.addEventListener('error', (ev) => report(ev.message));
     window.addEventListener('unhandledrejection', (ev) => report(String(ev.reason)));
     this.setupTouch();
-    this.hud.onRadio = () => this.audio.ui('radio');
+    this.hud.onRadio = (text, ttl) => {
+      this.audio.ui('radio');
+      this.audio.radioOpen(Math.min(ttl || 4, 6));
+      if (this.save.settings.voice) this.audio.say(text); // the engineer speaks (section 9)
+    };
     document.getElementById('hud').addEventListener('click', (e) => {
       if (e.target.closest('#finish') && this.session && this.session.fin) this.session.finConfirm = true;
     });
@@ -164,7 +172,7 @@ class Game {
       sfx: (k) => this.audio.ui(k),
       startRace: (cfg) => this.startRace(cfg),
       startLesson: (id) => this.startLesson(id),
-      raceFromQuali: (qr) => this.startRace({ ...qr.cfg, mode: 'race', qualiTimes: qr.times, playerGrid: qr.grid }),
+      raceFromQuali: (qr) => this.startRace({ ...qr.cfg, mode: 'race', qualiTimes: qr.times, playerGrid: qr.grid, ...this.sprintFor(qr.cfg) }),
       toMain: (fromRace) => this.toMain(fromRace),
       resume: () => this.resume(),
       restart: () => this.restart(),
@@ -244,6 +252,8 @@ class Game {
     this.post.gradeOn = this.save.settings.quality !== 'low' && !this.perfNoFx; // colour grade and vignette
     document.body.classList.toggle('calm', !!this.save.settings.calm);
     document.body.classList.toggle('bighud', !!this.save.settings.bigHud);
+    document.body.classList.toggle('cb', !!this.save.settings.colorblind);
+    this.hud.setColorblind(!!this.save.settings.colorblind);
   }
 
   async boot() {
@@ -406,6 +416,16 @@ class Game {
     this.toMain();
   }
 
+  /** On a career sprint weekend whose sprint is still to run, the race after qualifying is the sprint. */
+  sprintFor(cfg) {
+    const c = this.save.career;
+    if (!cfg.career || !c) return {};
+    const rules = Career.sanitizeRules(c.rules);
+    if (!Career.isSprintRound(c.season, rules) || Career.sprintDone(c.season)) return {};
+    return { sprint: true, laps: Career.sprintLaps(Career.careerLaps(c, this.tracks[cfg.trackId].length)) };
+  }
+
+  /** qualify: true (qualifying first), false (straight to the race) or 'sprint' (the sprint, from the qualifying grid rules). */
   careerRace(qualify) {
     const c = this.save.career;
     if (!c) return;
@@ -437,10 +457,13 @@ class Game {
       qualiTimes: null,
       seed: undefined,
       upgrades: { ...c.upgrades },
+      sprint: false,
       teamForm: c.teamForm ? c.teamForm.slice() : null,
       lineup: Career.lineupFor(c),
       career: true,
     };
+    if (qualify === 'sprint') Object.assign(cfg, this.sprintFor(cfg));
+    else if (!qualify && Career.sprintDone(s)) cfg.qualiTimes = { ...s.sprint.grid }; // Sunday: the sprint result is the grid
     this.startRace(cfg);
   }
 
@@ -541,7 +564,8 @@ class Game {
       adaptive: cfg.adaptive,
       fieldSize: cfg.fieldSize,
       playerTeam: cfg.team,
-      driver: { code: this.save.settings.driverCode, number: this.save.settings.driverNumber },
+      driver: cfg.spectator ? { code: 'RES', number: 40, name: 'Reserve driver' } : { code: this.save.settings.driverCode, number: this.save.settings.driverNumber },
+      spectator: !!cfg.spectator,
       playerGrid: Math.min(cfg.playerGrid, cfg.fieldSize),
       collisions: cfg.collisions,
       damage: cfg.damage,
@@ -549,13 +573,14 @@ class Game {
       mandatoryStop: cfg.mandatoryStop,
       pitCalls: cfg.pitCalls,
       compound: cfg.compound,
-      setup: { frontWing: cfg.frontWing, rearWing: cfg.rearWing, brakeBias: cfg.brakeBias, pressure: cfg.pressure },
+      setup: cfg.spectator ? { frontWing: null, rearWing: null, brakeBias: 0.58, pressure: 0 } : { frontWing: cfg.frontWing, rearWing: cfg.rearWing, brakeBias: cfg.brakeBias, pressure: cfg.pressure },
       assists: { ...cfg.assists, stability: cfg.assists.stability, tc: cfg.assists.tc, steer: cfg.assists.steer },
       seed: cfg.seed ?? ((Math.random() * 1e6) | 0),
       qualiTimes: cfg.mode === 'race' ? cfg.qualiTimes || null : null,
       upgrades: cfg.upgrades || null,
       teamForm: cfg.teamForm || null,
       lineup: cfg.lineup || null,
+      sprint: !!cfg.sprint,
       weather: cfg.weather || 'dry',
       equalCars: cfg.career ? false : cfg.equalCars !== false,
       carPower: cfg.carPower,
@@ -637,9 +662,14 @@ class Game {
       player: race.player, pin: null, sunDir: world.sunDir, stopTimer: 0, lastEventCar: null, seasonRound: this.save.season ? this.save.season.round : null,
       useSeason: cfg.__season,
       prevBest: this.save.records[track.id] ? this.save.records[track.id].best : Infinity,
-      rec: new ReplayBuffer(race.cars.length, 30, 30), replayCars: makeReplayCars(race.cars),
+      rec: new ReplayBuffer(race.cars.length, 60, 30), marks: [], lastPos: null, replayCars: makeReplayCars(race.cars),
       school: cfg.lesson && lessonById(cfg.lesson) ? new SchoolTracker(lessonById(cfg.lesson)) : null,
     };
+    if (cfg.spectator) {
+      this.session.spectator = true;
+      this.toggleAutopilot();
+    }
+    document.body.classList.toggle('spectating', !!cfg.spectator);
     this.hud.setTrack(track);
     if (!this.session.school) this.hud.setLesson(null);
     this.hud.setUnits(this.save.settings.units);
@@ -681,22 +711,60 @@ class Game {
     if (s.rec) s.rec.data = null;
     if (this._replayUI) this._replayUI.classList.add('hidden');
     if (this._photoUI) this._photoUI.classList.add('hidden');
+    { const pd = document.getElementById('podium'); if (pd) pd.className = 'hidden'; }
     this.renderer.renderLists.dispose();
     this.session = null;
+    document.body.classList.remove('spectating');
     this.audio.update({ rpm: 0, throttle: 0, speed: 0, slipVis: [0, 0, 0, 0], kerbShake: 0, gear: 1 }, [], { pos: new THREE.Vector3(), right: new THREE.Vector3(1, 0, 0), vel: new THREE.Vector3() }, 0.016, true);
+  }
+
+  /**
+   * Spectator mode's TV director (SPEC 9): every few seconds it cuts to the closest fight on track, with a banner
+   * naming it, and changes the camera between the broadcast angles.
+   */
+  director(s, dt) {
+    const { race } = s;
+    const d = s.dir || (s.dir = { t: 0, car: race.sorted[0] || s.player, cam: 0 });
+    d.t -= dt;
+    const gone = !d.car || d.car.rs.dnf || d.car.rs.finished || d.car.rs.inPit;
+    if ((d.t <= 0 || gone) && race.phase !== 'grid' && race.phase !== 'countdown') {
+      let best = null, bestGap = Infinity;
+      const order = race.sorted;
+      for (let i = 1; i < order.length; i++) {
+        const c = order[i], a = order[i - 1];
+        if (c.rs.dnf || c.rs.inPit || a.rs.dnf || a.rs.inPit || c.rs.finished) continue;
+        const gap = (c.gapAhead ?? 99) + i * 0.04; // a fight nearer the front is worth a little more airtime
+        if (gap < bestGap) { bestGap = gap; best = i; }
+      }
+      const pick = best != null && bestGap < 2.5 ? order[best] : order.find((c) => !c.rs.dnf && !c.rs.finished) || s.player;
+      if (pick !== d.car || gone) {
+        d.car = pick;
+        const cams = ['tv', 'heli', 'chase', 'tv', 'tcam'];
+        d.cam = (d.cam + 1) % cams.length;
+        s.camRig.setMode(cams[d.cam]);
+        s.camRig.init = false;
+        if (best != null && pick === order[best]) {
+          const a = order[best - 1];
+          this.hud.message(`Battle for P${best}`, 'purple', `${a.info.code} ahead of ${pick.info.code} · ${(pick.gapAhead ?? 0).toFixed(1)} s`, 3);
+        }
+      }
+      d.t = 9;
+    }
+    return d.car;
   }
 
   toggleAutopilot() {
     const s = this.session;
     if (!s) return;
+    if (s.spectator && s.auto) return; // nobody to hand the car back to
     if (!s.pilot) {
       const prof = s.race.getProfile(s.player.spec, 'pilot');
-      s.pilot = new AIDriver({ car: s.player, track: s.track, profile: prof, level: Math.max(0.6, s.cfg.level), seed: 4242 });
+      s.pilot = new AIDriver({ car: s.player, track: s.track, profile: prof, level: s.spectator ? s.cfg.level : Math.max(0.6, s.cfg.level), seed: 4242 });
       s.pilot.goTime = 0;
     }
     s.auto = !s.auto;
     s.pilot.offset = 0;
-    this.toast(s.auto ? 'Autopilot on (G to take over)' : 'You have control');
+    if (!s.spectator) this.toast(s.auto ? 'Autopilot on (G to take over)' : 'You have control');
   }
 
   /** Test helper: fast-forward until pred() is true (or maxSec simulated seconds pass). */
@@ -895,6 +963,10 @@ class Game {
       this.runPhoto(s, dt);
       return;
     }
+    if (this.state === 'podium') {
+      this.runPodium(s, dt);
+      return;
+    }
     if (this.state === 'race') this.runSession(s, dt);
     else if (this.state === 'results') this.audio.update(s.player, [], this.listener(), dt, true); // the engine and wind die away behind the results
     this.post.render(s.scene, this.camera, this.speedBlur(s), this.bloomFor(s));
@@ -1006,6 +1078,7 @@ class Game {
       this.toast(this.audio.enabled ? 'Sound on' : 'Sound off');
     }
     if (pin.map) this.hud.el.minimap.classList.toggle('hidden');
+    if (pin.mfd) this.hud.cycleMfd();
     if (pin.tele) this.toast('Live telemetry ' + (this.hud.toggleTele() ? 'on' : 'off'));
     if (pin.line) {
       this.save.settings.line = !(this.save.settings.line !== false);
@@ -1019,7 +1092,8 @@ class Game {
       s.fin.t += dt;
       // Enter / click / the button: straight to the results. The cars still running are given the finish they were on
       // course for (Race.finishNow) instead of being raced home, which used to take a minute or more.
-      if (((pin.confirm || s.finConfirm) && s.fin.t > 0.6) || s.fin.t > 14) this.skipToResults(s);
+      if ((pin.confirm || s.finConfirm) && s.fin.t > 0.6) this.skipToResults(s);
+      else if (s.fin.t > 14) { s.podiumOk = true; this.skipToResults(s); } // left to run out on its own: the podium plays before the results
     } else if (player.rs.dnf && race.phase === 'racing' && pin.confirm) this.skipToResults(s); // retired: no point watching the rest
     if (pin.autoToggle) this.toggleAutopilot();
     const autoDrive = () => s.auto && (race.phase === 'racing' || (s.fin && race.phase === 'finished'));
@@ -1156,7 +1230,8 @@ class Game {
       this.camera.fov = 48;
       this.camera.updateProjectionMatrix();
     } else {
-      camRig.update(dt, views.get(player), player, s.track);
+      const focus = s.spectator ? this.director(s, dt) : player;
+      camRig.update(dt, views.get(focus), focus, s.track);
       if (!camRig.shakeOn) camRig.impact = 0;
       // the steering-wheel display, ten times a second, only when you can see it
       if ((camRig.mode === 'cockpit' || camRig.mode === 'tcam') && (s.dashT = (s.dashT || 0) - dt) <= 0) {
@@ -1219,15 +1294,28 @@ class Game {
     // results
     if (race.phase === 'finished' && !s.finishedShown && (!s.fin || s.skipToResults)) {
       s.finishedShown = true;
-      setTimeout(() => { if (this.session === s) this.showResults(); }, race.opt.mode === 'timetrial' || s.skipToResults ? 0 : 600); // not if the session was left in the meantime
+      const podium = race.opt.mode === 'race' && !race.isQuali && !s.cfg.lesson && (s.podiumOk || !s.skipToResults);
+      setTimeout(() => { if (this.session === s) (podium ? this.startPodium(s) : this.showResults()); }, race.opt.mode === 'timetrial' || s.skipToResults ? 0 : 600); // not if the session was left in the meantime
     }
   }
 
   processEvents(s) {
     const { race, player, effects, camRig } = s;
     const hud = this.hud;
+    // replay markers (SPEC 8.3): the player's own position changes, plus the race's big moments below
+    if (race.phase === 'racing' && race.opt.mode === 'race' && !player.rs.finished) {
+      const pos = player.rs.pos;
+      if (s.lastPos != null && pos !== s.lastPos && race.time > 6) this.addMark(s, pos < s.lastPos ? 'pass' : 'lost', pos < s.lastPos ? `Up to P${pos}` : `Down to P${pos}`, player);
+      s.lastPos = pos;
+    }
     for (const e of race.events) {
       if (s.school && s.school.onEvent(e, player)) this.lessonPassed(s);
+      if (e.type === 'impact' && e.speed > 6 && (e.car === player || e.other === player || e.speed > 12)) this.addMark(s, 'contact', e.wall ? `${e.car.info.code} hits the barrier` : `Contact: ${e.car.info.code}${e.other ? ' / ' + e.other.info.code : ''}`, e.car);
+      else if (e.type === 'pitStopStart' && e.car === player) this.addMark(s, 'pit', 'Your pit stop', player);
+      else if (e.type === 'fastest' && race.opt.mode === 'race') this.addMark(s, 'fastest', `Fastest lap: ${e.car.info.code}`, e.car);
+      else if (e.type === 'retired') this.addMark(s, 'out', `${e.car.info.code} retires`, e.car);
+      else if (e.type === 'scDeploy' || e.type === 'vscDeploy') this.addMark(s, 'sc', e.type === 'scDeploy' ? 'Safety car' : 'Virtual safety car', null);
+      else if (e.type === 'penalty' && e.car === player) this.addMark(s, 'penalty', `Penalty: +${e.secs}s`, player);
       switch (e.type) {
         case 'light':
           hud.setLights(e.n);
@@ -1425,6 +1513,74 @@ class Game {
   }
 
   /** Qualifying is over for the player: cool-down lap on autopilot, then the grid. */
+  // ---- podium / parc fermé (SPEC 9) ------------------------------------------------------------------------------
+  /** The top three, parked side by side past the line, with a slow camera arc and their names: about eight seconds, any key skips. */
+  startPodium(s) {
+    const { race, track, views } = s;
+    const top = race.classification().filter((e) => e.time != null).slice(0, 3).map((e) => e.car);
+    if (!top.length || this.state !== 'race') return this.showResults();
+    this.state = 'podium';
+    this.hud.show(false);
+    s.guide.setVisible(false);
+    const s0 = 30;
+    const slots = [[s0 + 3, 0], [s0, -4.6], [s0, 4.6]];
+    top.forEach((c, i) => {
+      const [ss, d] = slots[i];
+      const p = track.pointAt(ss, d);
+      c.x = c.px = p.x; c.y = c.py = p.y; c.theta = c.ptheta = p.heading;
+      c.trackH = track.heightAt(ss, d); c.trackBank = 0;
+      c.u = 0; c.v = 0; c.r = 0; c.speed = 0; c.brake = 0; c.throttle = 0; c.steer = 0;
+      if (c.omega) c.omega.fill(0);
+    });
+    for (const car of race.cars) views.get(car).group.visible = top.includes(car);
+    const c0 = track.pointAt(s0 + 1.5, 0);
+    s.podium = { t: 0, top, cx: c0.x, cz: -c0.y, cy: track.heightAt(s0 + 1.5, 0), h: c0.heading };
+    let el = document.getElementById('podium');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'podium';
+      document.body.appendChild(el);
+      el.addEventListener('click', () => this.endPodium());
+    }
+    const esc = (t) => String(t).replace(/[&<>"']/g, '');
+    const order = [1, 0, 2].filter((i) => top[i]); // P2 · P1 · P3, the way the steps stand
+    el.innerHTML = `<div class="ptitle">${esc(track.name)} · Parc fermé</div><div class="psteps">${order.map((i) => `<div class="pstep p${i + 1}" style="--c:${top[i].info.team.color}"><b>P${i + 1}</b><span>${esc(top[i].info.name)}</span><small>${esc(top[i].info.team.name)}</small></div>`).join('')}</div><div class="phint">Enter or click to continue</div>`;
+    el.className = '';
+    if (top.includes(s.player) && s.player.rs.pos <= 3) this.audio.cheer(1);
+  }
+
+  runPodium(s, dt) {
+    const pd = s.podium;
+    if (!pd) return this.showResults();
+    pd.t += dt;
+    if (pd.t > 8.5) return this.endPodium();
+    for (const car of pd.top) s.views.get(car).update(car, 1, 0);
+    // a slow arc in front of the cars, rising a little
+    const a = pd.h + Math.PI * 0.62 - pd.t * 0.07;
+    const R = 13 - pd.t * 0.25;
+    const cam = this.camera;
+    cam.position.set(pd.cx + Math.cos(a) * R, pd.cy + 2.2 + pd.t * 0.12, pd.cz - Math.sin(a) * R);
+    cam.lookAt(pd.cx, pd.cy + 0.7, pd.cz);
+    if (Math.abs(cam.fov - 40) > 0.01) { cam.fov = 40; cam.updateProjectionMatrix(); }
+    s.world.focusShadow(new THREE.Vector3(pd.cx, pd.cy, pd.cz));
+    s.world.update(dt, performance.now() / 1000);
+    this.audio.update(s.player, [], this.listener(), dt, true);
+    this.post.render(s.scene, cam, 0, this.bloomFor(s));
+  }
+
+  endPodium() {
+    const s = this.session;
+    const el = document.getElementById('podium');
+    if (el) el.className = 'hidden';
+    if (!s || this.state !== 'podium') return;
+    s.podium = null;
+    for (const car of s.race.cars) s.views.get(car).group.visible = !car.inGarage;
+    this.camera.fov = s.camRig.fov;
+    this.camera.updateProjectionMatrix();
+    this.state = 'race'; // showResults moves on from a live session
+    this.showResults();
+  }
+
   // ---- photo mode ------------------------------------------------------------------------------------------------
   startPhoto() {
     const s = this.session;
@@ -1434,7 +1590,7 @@ class Game {
     this.hud.show(false);
     const cam = this.camera;
     const e = new THREE.Euler().setFromQuaternion(cam.quaternion, 'YXZ');
-    s.photo = { yaw: e.y, pitch: e.x, pos: cam.position.clone(), speed: 6, fov: cam.fov, shot: false, flash: 0 };
+    s.photo = { yaw: e.y, pitch: e.x, roll: 0, pos: cam.position.clone(), speed: 6, fov: cam.fov, shot: false, flash: 0, exposure: this.renderer.toneMappingExposure, exp0: this.renderer.toneMappingExposure, shutter: false };
     s.guide.setVisible(false);
     const ui = this.photoUI();
     ui.classList.remove('hidden');
@@ -1463,12 +1619,16 @@ class Game {
     const el = document.createElement('div');
     el.id = 'photo';
     el.className = 'hidden';
-    el.innerHTML = '<div class="pbar"><b>PHOTO MODE</b><span>WASD move · Q / E down / up · drag to look · wheel zoom · Shift fast</span><button data-p="shot">Capture (Space)</button><button data-p="exit" class="exit">Done (Esc)</button></div><div class="pflash"></div>';
+    el.innerHTML = '<div class="pbar"><b>PHOTO MODE</b><span>WASD move · Q / E down / up · drag to look · wheel zoom · Z / X roll · − / + exposure · Shift fast</span><span id="p-info"></span><button data-p="shutter">Slow shutter (B)</button><button data-p="level">Level</button><button data-p="shot">Capture (Space)</button><button data-p="exit" class="exit">Done (Esc)</button></div><div class="pflash"></div>';
     document.body.appendChild(el);
     el.addEventListener('click', (e) => {
       const b = e.target.closest('[data-p]');
       if (!b) return;
-      if (b.dataset.p === 'shot') this.session.photo.shot = true;
+      const ph = this.session && this.session.photo;
+      if (!ph) return;
+      if (b.dataset.p === 'shot') ph.shot = true;
+      else if (b.dataset.p === 'shutter') ph.shutter = !ph.shutter;
+      else if (b.dataset.p === 'level') { ph.roll = 0; ph.exposure = ph.exp0; }
       else this.endPhoto();
     });
     this._photoUI = el;
@@ -1483,6 +1643,8 @@ class Game {
     s.guide.setVisible(this.save.settings.line !== false);
     this.camera.fov = s.camRig.fov;
     this.camera.updateProjectionMatrix();
+    if (s.photoExp0 != null) this.renderer.toneMappingExposure = s.photoExp0;
+    s.photoExp0 = null;
     this.state = 'paused';
     this.menu.show('pause');
     const el = document.getElementById('camname');
@@ -1505,10 +1667,20 @@ class Game {
       return this.endPhoto();
     }
     if (inp.pressed.has('Space')) ph.shot = true;
+    if (inp.pressed.has('KeyB')) ph.shutter = !ph.shutter;
+    // SPEC 8.4: roll (Dutch angle), exposure and a slow-shutter look
+    ph.roll = Math.max(-0.8, Math.min(0.8, ph.roll + (d('KeyX') - d('KeyZ')) * 0.9 * dt));
+    if (inp.pressed.has('Equal') || inp.pressed.has('NumpadAdd')) ph.exposure = Math.min(3, ph.exposure * 1.15);
+    if (inp.pressed.has('Minus') || inp.pressed.has('NumpadSubtract')) ph.exposure = Math.max(0.25, ph.exposure / 1.15);
     inp.pressed.clear();
+    if (s.photoExp0 == null) s.photoExp0 = ph.exp0;
+    this.renderer.toneMappingExposure = ph.exposure;
+    const info = this._photoUI.querySelector('#p-info');
+    const infoTxt = `${ph.exposure >= ph.exp0 ? '+' : ''}${(Math.log2(ph.exposure / ph.exp0)).toFixed(1)} EV · roll ${Math.round((ph.roll * 180) / Math.PI)}° · ${Math.round(ph.fov)}° FOV${ph.shutter ? ' · slow shutter' : ''}`;
+    if (info.textContent !== infoTxt) info.textContent = infoTxt;
     const cam = this.camera;
     cam.position.copy(ph.pos);
-    cam.rotation.set(ph.pitch, ph.yaw, 0, 'YXZ');
+    cam.rotation.set(ph.pitch, ph.yaw, ph.roll, 'YXZ');
     if (Math.abs(cam.fov - ph.fov) > 0.01) {
       cam.fov = ph.fov;
       cam.updateProjectionMatrix();
@@ -1516,7 +1688,7 @@ class Game {
     s.world.focusShadow(s.views.get(s.player).group.position);
     s.world.update(dt, performance.now() / 1000);
     this.audio.update(s.player, [], this.listener(), dt, true);
-    this.post.render(s.scene, cam, 0, this.bloomFor(s));
+    this.post.render(s.scene, cam, ph.shutter ? 0.75 : 0, this.bloomFor(s)); // the speed blur shader doubles as a long exposure
     const fl = this._photoUI.querySelector('.pflash');
     if (ph.shot) {
       ph.shot = false;
@@ -1540,6 +1712,26 @@ class Game {
   }
 
   // ---- replay ---------------------------------------------------------------------------------------------------
+  /** Remembers a moment for the replay scrub bar; anything older than the buffer is dropped. */
+  addMark(s, kind, label, car) {
+    const t = s.race.time;
+    const last = s.marks[s.marks.length - 1];
+    if (last && last.kind === kind && t - last.t < 1.5) return; // one marker per moment, not one per physics tick of a crash
+    s.marks.push({ t, kind, label, car: car ? s.race.cars.indexOf(car) : -1 });
+    while (s.marks.length && s.marks[0].t < t - 62) s.marks.shift();
+  }
+
+  /** Draws the markers that fall inside the recorded window over the replay scrub bar. */
+  renderReplayMarks() {
+    const s = this.session, ui = this._replayUI;
+    if (!s || !ui) return;
+    const box = ui.querySelector('#r-marks');
+    const rec = s.rec, dur = rec.duration;
+    if (!dur) { box.innerHTML = ''; return; }
+    const t0 = rec.times[rec.idx(0)];
+    box.innerHTML = s.marks.filter((m) => m.t >= t0 && m.t <= t0 + dur).map((m) => `<button class="rmark ${m.kind}" style="left:${(((m.t - t0) / dur) * 100).toFixed(2)}%" data-mt="${(m.t - t0).toFixed(2)}" data-mc="${m.car}" title="${m.label.replace(/[&<>"']/g, '')}"></button>`).join('');
+  }
+
   startReplay(from) {
     const s = this.session;
     if (!s || !s.rec || s.rec.count < 20) return this.toast('Nothing to replay yet');
@@ -1554,6 +1746,7 @@ class Game {
     s.guide.setVisible(false);
     const ui = this.replayUI();
     ui.classList.remove('hidden');
+    this.renderReplayMarks();
     this.updateReplayUI();
   }
 
@@ -1563,7 +1756,7 @@ class Game {
     el.id = 'replay';
     el.className = 'hidden';
     el.innerHTML = `<div class="rbar"><b>REPLAY</b><span id="r-time">0:00</span>
-      <input id="r-scrub" type="range" min="0" max="1000" value="0">
+      <div class="rscrub"><input id="r-scrub" type="range" min="0" max="1000" value="0"><div id="r-marks"></div></div>
       <button data-r="play" title="Play / pause (Space)">⏯</button>
       <button data-r="slow" title="Slow motion (S)">¼×</button><button data-r="normal" title="Normal speed (F)">1×</button>
       <button data-r="cam" title="Camera (C)">Camera: <span id="r-cam"></span></button>
@@ -1571,6 +1764,15 @@ class Game {
       <button data-r="exit" class="exit" title="Back (Esc)">Done</button></div>`;
     document.body.appendChild(el);
     el.addEventListener('click', (e) => {
+      const m = e.target.closest('.rmark');
+      if (m && this.session && this.session.replay) {
+        const r = this.session.replay;
+        r.t = Math.max(0, +m.dataset.mt - 2.5); // run up to the moment
+        if (+m.dataset.mc >= 0) { r.follow = +m.dataset.mc; r.rig.init = false; }
+        r.playing = true;
+        this.updateReplayUI();
+        return;
+      }
       const b = e.target.closest('[data-r]');
       if (b) this.replayAction(b.dataset.r);
     });
@@ -1864,13 +2066,13 @@ class Game {
     const cfg0 = s.cfg;
     // records + season
     const me = cls.find((e) => e.car === player);
-    if (me && me.best < Infinity && !cfg0.lesson) {
+    if (me && me.best < Infinity && !cfg0.lesson && !cfg0.spectator) {
       const rec = this.save.records[track.id];
       if (!rec || me.best < rec.best) this.save.records[track.id] = { best: me.best };
     }
     let season = null;
     const cfg = s.cfg;
-    if (this.save.season && this.save.season.calendar && !cfg.career && !cfg.lesson && (s.seasonRecorded || (s.useSeason && this.save.season.calendar[this.save.season.round] === track.id))) {
+    if (this.save.season && this.save.season.calendar && !cfg.career && !cfg.lesson && !cfg.spectator && (s.seasonRecorded || (s.useSeason && this.save.season.calendar[this.save.season.round] === track.id))) {
       season = this.save.season;
       if (!s.seasonRecorded) {
         s.seasonRecorded = true;
@@ -1878,7 +2080,11 @@ class Game {
       }
     }
     let careerRes = null;
-    if (cfg.career && this.save.career && !s.careerRecorded) {
+    if (cfg.career && cfg.sprint && this.save.career && !s.careerRecorded) {
+      s.careerRecorded = true;
+      const c = this.save.career;
+      careerRes = { sprint: Career.recordSprint(c.season, cls), budget: c.budget };
+    } else if (cfg.career && this.save.career && !s.careerRecorded) {
       s.careerRecorded = true;
       const c = this.save.career;
       const row = Career.recordRound(c.season, cls);
@@ -1889,7 +2095,7 @@ class Game {
         this.recordStats({ kind: 'career', pos: rc.driverPos });
       }
     }
-    if (!s.statsRecorded && !cfg.lesson) {
+    if (!s.statsRecorded && !cfg.lesson && !cfg.spectator) {
       s.statsRecorded = true;
       const rsP = player.rs;
       this.recordStats({

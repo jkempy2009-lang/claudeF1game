@@ -124,6 +124,35 @@ function sharedMaterials() {
   return shared;
 }
 
+/**
+ * The tread's worn look (SPEC 9): a texture of lateral grain ridges and rubber pick-up, laid over the tread as a thin
+ * band whose opacity follows the live wear and graining. One texture for every car.
+ */
+function treadWearTexture() {
+  if (shared.treadTex) return shared.treadTex;
+  const W = 256, H = 32;
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const g = cv.getContext('2d');
+  g.fillStyle = 'rgba(120,118,112,0.55)'; // scuffed, dusty rubber: lighter than a fresh black tyre
+  g.fillRect(0, 0, W, H);
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  for (let i = 0; i < 420; i++) {
+    // grain ridges run across the tread (short strokes along the width), marbles cling to the shoulders
+    const x = rnd() * W, y = rnd() * H, shoulder = y < 5 || y > H - 5;
+    g.fillStyle = shoulder ? `rgba(20,18,16,${0.6 + 0.4 * rnd()})` : `rgba(200,196,188,${0.35 + 0.5 * rnd()})`;
+    if (shoulder) g.fillRect(x, y, 1.5 + 2 * rnd(), 1.5 + 2 * rnd());
+    else g.fillRect(x, y, 1, 3 + 8 * rnd());
+  }
+  const t = new THREE.CanvasTexture(cv);
+  t.wrapS = THREE.RepeatWrapping;
+  t.repeat.set(3, 1);
+  t.colorSpace = THREE.SRGBColorSpace;
+  shared.treadTex = t;
+  return t;
+}
+
 /** Tyres and wheel covers share one mesh: the rubber (the darkest vertex colour) is matt, the cover and its lip are satin metal. */
 function sharedWheelMaterial() {
   if (shared.wheel) return shared.wheel;
@@ -438,6 +467,18 @@ export class CarView {
       const assembly = new THREE.Group();
       const spin = new THREE.Group();
       spin.add(new THREE.Mesh(mergeClean(parts), wheelMat));
+      let wearMat = null;
+      if (fine) {
+        // the worn / grained tread, over the crown of the tyre (just proud of it, so it never z-fights)
+        wearMat = new THREE.MeshStandardMaterial({ map: treadWearTexture(), transparent: true, opacity: 0, roughness: 0.95, depthWrite: false });
+        const band = new THREE.CylinderGeometry(WHEEL_R + 0.003, WHEEL_R + 0.003, 2 * (hw - 0.07), tyreSeg, 1, true);
+        band.rotateX(Math.PI / 2);
+        const bm = new THREE.Mesh(band, wearMat);
+        bm.visible = false;
+        bm.renderOrder = 1;
+        spin.add(bm);
+        wearMat.userData.mesh = bm;
+      }
       const glow = new THREE.Mesh(mergeClean(glowGeo), glowMat);
       glow.visible = false;
       spin.add(glow);
@@ -445,7 +486,7 @@ export class CarView {
       spin.add(new THREE.Mesh(rg, compoundMat));
       assembly.add(spin);
       this.model.add(assembly);
-      return { assembly, spin, front, left, glow, glowMat };
+      return { assembly, spin, front, left, glow, glowMat, wearMat };
     };
     this.wheelDefs = [mkWheel(true, true), mkWheel(true, false), mkWheel(false, true), mkWheel(false, false)];
     this.wheelFront = [this.wheelDefs[0], this.wheelDefs[1]];
@@ -555,6 +596,13 @@ export class CarView {
       const bt = car.brakeTemp ? car.brakeTemp[w] : 0;
       const k = clamp((bt - 450) / 550, 0, 1);
       if (wd.glow.visible !== k > 0.02) wd.glow.visible = k > 0.02;
+      if (wd.wearMat && car.wear) {
+        // fresh tyres are glossy black; wear dulls the tread grey and graining streaks it
+        const o = clamp(car.wear[w] * 0.55 + (car.grain ? car.grain[w] : 0) * 0.8, 0, 0.85);
+        const vis = o > 0.03;
+        if (wd.wearMat.userData.mesh.visible !== vis) wd.wearMat.userData.mesh.visible = vis;
+        if (vis) wd.wearMat.opacity = o;
+      }
       if (k > 0.02) {
         wd.glowMat.opacity = Math.min(1, k * 1.25);
         wd.glowMat.color.setRGB(3.2, (0.32 + 0.5 * k) * 3.2, (0.06 + 0.55 * k * k) * 3.2);

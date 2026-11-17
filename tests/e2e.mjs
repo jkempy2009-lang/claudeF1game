@@ -93,6 +93,13 @@ for (const [name, bad] of [
     }
   }
   step('setup tabs', true);
+  await page.click('[data-tab=car]');
+  await page.waitForSelector('#setup-stats', { timeout: 5000 });
+  const topBefore = await page.evaluate(() => document.querySelector('#setup-stats .sstat b').textContent);
+  await page.evaluate(() => { const r = document.querySelector('[data-slider=rearWing]'); r.value = '0'; r.dispatchEvent(new Event('input', { bubbles: true })); });
+  const topAfter = await page.evaluate(() => document.querySelector('#setup-stats .sstat b').textContent);
+  step('live setup stats follow the wing sliders', parseInt(topAfter) > parseInt(topBefore), `${topBefore} -> ${topAfter}`);
+  await page.click('[data-act=resetsetup]');
   await page.click('[data-tab=circuit]');
   for (const id of ['vettore', 'northfield', 'ardennes', 'rade']) await page.click(`[data-track=${id}]`);
   step('circuit selection', (await page.evaluate(() => window.apex.menu.config.trackId)) === 'rade');
@@ -118,8 +125,14 @@ for (const [name, bad] of [
   await page.waitForSelector('[data-act=resume]');
   await page.click('[data-act=resume]');
   step('pause / settings / resume', await page.evaluate(() => window.apex.state === 'race'));
+  step('damage diagram and delta bar are on the HUD', await page.evaluate(() => document.querySelectorAll('#dmgcar [data-z]').length === 5 && !!document.getElementById('t-dbar')));
+  await page.evaluate(() => window.apex.hud.cycleMfd());
+  await page.waitForFunction(() => document.getElementById('mfd-b').innerHTML.length > 50, null, { timeout: 30000 }).catch(() => null);
+  step('MFD shows its first page', await page.evaluate(() => !document.getElementById('mfd').classList.contains('hidden') && /core/.test(document.getElementById('mfd-b').textContent)));
+  await page.evaluate(() => { const h = window.apex.hud; h.cycleMfd(); h.cycleMfd(); h.cycleMfd(); });
+  step('MFD hides after its last page', await page.evaluate(() => document.getElementById('mfd').classList.contains('hidden')));
   // instant replay from the pause menu
-  await page.evaluate(() => { const a = window.apex, s = a.session; a.debugSkip(6); for (let k = 0; k < 60; k++) { a.debugSkip(0.4); s.rec.record(s.race.cars, s.race, s.track); } });
+  await page.evaluate(() => { const a = window.apex, s = a.session; a.debugSkip(6); for (let k = 0; k < 60; k++) { a.debugSkip(0.4); s.rec.record(s.race.cars, s.race, s.track); if (k === 30) a.addMark(s, 'contact', 'test contact', s.race.cars[1]); } });
   await page.keyboard.down('Escape');
   await page.waitForTimeout(2500);
   await page.keyboard.up('Escape');
@@ -127,11 +140,28 @@ for (const [name, bad] of [
   await page.click('[data-act=replay]');
   await page.waitForSelector('#replay:not(.hidden)', { timeout: 20000 });
   step('instant replay opens', await page.evaluate(() => window.apex.state === 'replay'));
+  step('replay shows event markers', (await page.locator('#replay .rmark').count()) >= 1);
+  await page.click('#replay .rmark.contact');
+  step('a marker jumps to its moment and car', await page.evaluate(() => { const r = window.apex.session.replay; return r.follow === 1 && r.t > 5; }));
   await page.waitForTimeout(2500);
   await page.click('#replay [data-r=cam]');
   await page.click('#replay [data-r=exit]');
   await page.waitForSelector('[data-act=resume]', { timeout: 20000 });
   step('replay returns to the pause menu', await page.evaluate(() => window.apex.state === 'paused'));
+  await page.click('[data-act=photo]');
+  await page.waitForSelector('#photo:not(.hidden)', { timeout: 20000 });
+  await page.keyboard.down('KeyX');
+  await page.waitForTimeout(2500);
+  await page.keyboard.up('KeyX');
+  await page.keyboard.down('Equal');
+  await page.waitForTimeout(2500);
+  await page.keyboard.up('Equal');
+  await page.click('#photo [data-p=shutter]');
+  const ph = await page.evaluate(() => { const p = window.apex.session.photo; return { roll: p.roll, ev: p.exposure / p.exp0, shutter: p.shutter }; });
+  step('photo mode rolls, exposes and slows the shutter', ph.roll > 0.01 && ph.ev > 1.1 && ph.shutter, JSON.stringify(ph));
+  await page.click('#photo [data-p=exit]');
+  await page.waitForSelector('[data-act=resume]', { timeout: 20000 });
+  step('photo mode restores the exposure', await page.evaluate(() => window.apex.state === 'paused' && window.apex.session.photoExp0 == null));
   await page.click('[data-act=resume]');
   step('HUD is visible again after the replay', await page.evaluate(() => !document.getElementById('hud').classList.contains('hidden')));
   const done = await page.evaluate(() => { const a = window.apex; return a.debugUntil(() => a.session.player.rs.finished, 400); });
@@ -256,6 +286,23 @@ for (const [name, bad] of [
   const up = await page.evaluate(() => window.apex.save.career.upgrades.power);
   step('upgrade purchased', up === 1);
   step('standings recorded', await page.evaluate(() => window.apex.save.career.season.round === 1 && Object.keys(window.apex.save.career.season.points).length > 3));
+  // round 2 of 4 is a sprint weekend: the sprint runs first, scores, and leaves the Grand Prix to run from its order
+  await page.click('[data-ctab=overview]').catch(() => null);
+  await page.waitForSelector('[data-act=careerrace][data-q="s"]', { timeout: 20000 });
+  await page.click('[data-act=careerrace][data-q="s"]');
+  await waitHud(page);
+  const sp = await page.evaluate(() => ({ sprint: !!window.apex.session.cfg.sprint, laps: window.apex.session.race.totalLaps }));
+  step('a sprint weekend starts with a short sprint', sp.sprint && sp.laps >= 2 && sp.laps < laps + 1, JSON.stringify(sp));
+  await page.evaluate(() => { const a = window.apex; return a.debugUntil(() => a.session.player.rs.finished, 700); });
+  await page.waitForFunction(() => window.apex.session.fin && window.apex.session.fin.t > 2, null, { timeout: 120000 });
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('[data-act=careercontinue]', { timeout: 240000 });
+  step('the sprint is recorded without moving the season on', await page.evaluate(() => { const s = window.apex.save.career.season; return s.round === 1 && s.sprint && s.sprint.round === 1 && s.sprint.grid.YOU >= 1; }));
+  await page.click('[data-act=careercontinue]');
+  await page.waitForSelector('[data-act=careerrace][data-q="0"]', { timeout: 20000 });
+  await page.click('[data-act=careerrace][data-q="0"]');
+  await waitHud(page);
+  step('the Grand Prix starts from the sprint order', await page.evaluate(() => { const a = window.apex, s = a.save.career.season; return !a.session.cfg.sprint && a.session.player.info.gridPos === s.sprint.grid.YOU; }));
   await page.context().close();
 }
 
@@ -304,6 +351,32 @@ for (const [name, bad] of [
   await page.waitForTimeout(1500);
   step('action buttons are wired', await page.evaluate(() => window.apex.state === 'race'));
   await ctx.close();
+}
+
+// 8. spectator mode: every car on AI, the director follows a fight, nothing is saved as the player's
+{
+  const page = await open(fast);
+  const before = await page.evaluate(() => JSON.stringify(window.apex.save.stats || {}));
+  await page.click('[data-act=watch]');
+  await waitHud(page);
+  step('spectator mode starts', await page.evaluate(() => { const s = window.apex.session; return s.spectator && s.auto && document.body.classList.contains('spectating') && s.player.info.code === 'RES'; }));
+  await page.evaluate(() => window.apex.toggleAutopilot());
+  step('spectator mode keeps the AI driving', await page.evaluate(() => window.apex.session.auto));
+  await page.evaluate(() => { const a = window.apex; a.debugSkip(25); });
+  await page.waitForFunction(() => window.apex.session.dir && window.apex.session.dir.car, null, { timeout: 60000 }).catch(() => null);
+  step('the TV director picks a car', await page.evaluate(() => { const d = window.apex.session.dir; return !!(d && d.car && d.car.info); }));
+  await page.evaluate(() => { const a = window.apex; return a.debugUntil(() => a.session.player.rs.finished, 400); });
+  await page.evaluate(() => { const a = window.apex; a.session.podiumOk = true; a.skipToResults(a.session); }); // as if the finish card had run out
+  await page.waitForFunction(() => window.apex.state === 'podium', null, { timeout: 60000 }).catch(() => null);
+  step('the podium plays after a race left to run out', await page.evaluate(() => window.apex.state === 'podium' && document.querySelectorAll('#podium .pstep').length >= 1));
+  await page.keyboard.down('Enter');
+  await page.waitForTimeout(300);
+  await page.keyboard.up('Enter');
+  await page.waitForSelector('table.results', { timeout: 60000 }).catch(() => null);
+  step('the podium can be skipped to the results', await page.evaluate(() => window.apex.state === 'results' && document.getElementById('podium').classList.contains('hidden')));
+  const after = await page.evaluate(() => JSON.stringify(window.apex.save.stats || {}));
+  step('watching a race leaves the player stats alone', before === after);
+  await page.context().close();
 }
 
 console.log(errors.length ? 'ERRORS:\n' + errors.join('\n') : 'no console errors');

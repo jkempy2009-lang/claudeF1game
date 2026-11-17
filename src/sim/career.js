@@ -42,6 +42,7 @@ export const DEFAULT_RULES = {
   pitCalls: 'radio',
   prize: 1, // multiplier on prize money and the season bonus
   creep: true, // the AI gets a little faster every season
+  sprints: true, // sprint weekends: a short Saturday race that sets the Sunday grid
 };
 export const RULE_WEATHERS = ['forecast', ...['dry', 'light', 'heavy', 'changing']];
 
@@ -65,6 +66,7 @@ export function sanitizeRules(raw) {
     pitCalls: ['off', 'radio', 'auto'].includes(r.pitCalls) ? r.pitCalls : D.pitCalls,
     prize: prizes.includes(+r.prize) ? +r.prize : D.prize,
     creep: bool(r.creep, D.creep),
+    sprints: bool(r.sprints, D.sprints),
   };
 }
 
@@ -113,6 +115,41 @@ export function recordRound(season, cls) {
   season.results.push(row);
   season.round++;
   return row;
+}
+
+/** Sprint points, P1 to P8 (SPEC 9: career weekend formats). */
+export const SPRINT_POINTS = [8, 7, 6, 5, 4, 3, 2, 1];
+
+/** Sprint weekends: the second round and every third after it, in a season of four rounds or more. */
+export function isSprintRound(season, rules, round = season.round) {
+  return !!(rules && rules.sprints) && season.calendar.length >= 4 && round % 3 === 1 && round < season.calendar.length;
+}
+
+/** A sprint is about a third of the Grand Prix distance. */
+export const sprintLaps = (laps) => Math.max(2, Math.round(laps / 3));
+
+/** The sprint of this round has been run (its result sets the Grand Prix grid). */
+export const sprintDone = (season) => !!(season.sprint && season.sprint.round === season.round);
+
+/**
+ * Records a sprint: points to the top eight (finishers only), into both championships, without moving the season on.
+ * Its finishing order becomes the Grand Prix grid (as positions, in the shape of qualifying times).
+ */
+export function recordSprint(season, cls) {
+  const order = [];
+  const grid = {};
+  cls.forEach((e, i) => {
+    const name = e.info.name, team = e.info.team.short;
+    const pts = e.time != null && !e.dnf ? SPRINT_POINTS[i] || 0 : 0;
+    season.points[name] = (season.points[name] || 0) + pts;
+    season.teamPoints[team] = (season.teamPoints[team] || 0) + pts;
+    season.teamOf[name] = team;
+    order.push({ name, team, pos: i + 1, pts, grid: e.gridPos });
+    grid[e.info.isPlayer ? 'YOU' : e.info.code] = i + 1;
+  });
+  season.sprint = { round: season.round, order, grid };
+  const me = order.find((o) => o.name === 'You');
+  return { pos: me ? me.pos : null, pts: me ? me.pts : 0, order };
 }
 
 export function driverStandings(season) {
@@ -694,6 +731,9 @@ export function sanitizeCareer(raw) {
     season.teamPoints = cleanNumMap(season.teamPoints);
     season.teamOf = cleanStrMap(season.teamOf);
     season.results = cleanResults(season.results);
+    if (season.sprint && typeof season.sprint === 'object' && Number.isFinite(+season.sprint.round)) {
+      season.sprint = { round: Math.round(+season.sprint.round), order: cleanResults([{ round: 0, trackId: season.calendar[0], order: season.sprint.order }])[0]?.order || [], grid: cleanNumMap(season.sprint.grid) };
+    } else delete season.sprint;
     if (!Array.isArray(season.weather) || season.weather.length < season.calendar.length) season.weather = rollWeather(season.calendar.length);
     season.weather = season.weather.map((w) => (WEATHER_IDS.includes(w) ? w : 'dry'));
     const up = raw.upgrades || {};

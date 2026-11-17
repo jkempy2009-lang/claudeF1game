@@ -5,14 +5,15 @@ import { rivalLap, matchLevel } from '../sim/pacetable.js';
 import { COMPOUNDS, COMPOUND_IDS } from '../sim/carspec.js';
 import { formatTime } from '../util/math.js';
 import { drawLineChart } from './charts.js';
+import { setupStats } from '../sim/setupstats.js';
 import { ACHIEVEMENTS, DEFAULT_STATS } from '../sim/achievements.js';
 import { LESSONS, sanitizeSchool } from '../sim/school.js';
 import { KEY_ACTIONS, keyLabel, mergeKeys, sanitizeKeys } from './input.js';
-import { CHAMP_CAL, DEFAULT_RULES, MAX_ROUNDS, careerLaps, sanitizeRules, sanitizeCareer, UPGRADE_KEYS, UPGRADE_INFO, UPGRADE_MAX, upgradeCost, objectiveFor, DISTANCES, driverStandings, constructorStandings, lapsFor, weatherFor, WEATHER_NAMES, WEATHER_IDS, cleanNumMap, cleanStrMap, cleanResults, teamMate, sponsorOffers, SPONSOR_GOALS, repLabel, repNeeded, retainerFor, teamStrength, teamRank, raceObjective, careerMate, contractRetainer, contractTerms } from '../sim/career.js';
+import { CHAMP_CAL, DEFAULT_RULES, MAX_ROUNDS, careerLaps, sanitizeRules, sanitizeCareer, UPGRADE_KEYS, UPGRADE_INFO, UPGRADE_MAX, upgradeCost, objectiveFor, DISTANCES, driverStandings, constructorStandings, lapsFor, weatherFor, WEATHER_NAMES, WEATHER_IDS, cleanNumMap, cleanStrMap, cleanResults, teamMate, isSprintRound, sprintDone, sprintLaps, SPRINT_POINTS, sponsorOffers, SPONSOR_GOALS, repLabel, repNeeded, retainerFor, teamStrength, teamRank, raceObjective, careerMate, contractRetainer, contractTerms } from '../sim/career.js';
 
 export const SAVE_KEY = 'apex-grand-prix.v1';
 
-export const DEFAULT_SETTINGS = { quality: 'high', volume: 0.55, units: 'kmh', line: true, minimap: true, shake: true, camera: 'chase', tower: true, blur: true, steerSpeed: 1, padDead: 0.07, rumble: true, autoQuality: true, cbSafe: false, calm: false, bigHud: false, bloom: true, keys: {}, driverCode: 'YOU', driverNumber: 7 };
+export const DEFAULT_SETTINGS = { colorblind: false, voice: true, quality: 'high', volume: 0.55, units: 'kmh', line: true, minimap: true, shake: true, camera: 'chase', tower: true, blur: true, steerSpeed: 1, padDead: 0.07, rumble: true, autoQuality: true, cbSafe: false, calm: false, bigHud: false, bloom: true, keys: {}, driverCode: 'YOU', driverNumber: 7 };
 export const DEFAULT_CONFIG = {
   mode: 'race',
   trackId: 'northfield',
@@ -122,6 +123,8 @@ export function sanitizeSettings(raw) {
     keys: sanitizeKeys(r.keys),
     bloom: bool(r.bloom, D.bloom),
     calm: bool(r.calm, D.calm),
+    colorblind: bool(r.colorblind, D.colorblind),
+    voice: bool(r.voice, D.voice),
     bigHud: bool(r.bigHud, D.bigHud),
     driverCode: cleanCode(r.driverCode, D.driverCode),
     driverNumber: Math.round(num(r.driverNumber, 1, 99, D.driverNumber)),
@@ -367,6 +370,7 @@ export class Menu {
         <button class="btn" data-act="setup" data-mode="race" data-qualify="0">Custom race<small>Circuit, laps, difficulty, team, setup, assists</small></button>
         <button class="btn" data-act="setup" data-mode="race" data-qualify="1">Qualify &amp; race<small>3-minute qualifying with all 20 cars sets your grid slot</small></button>
         <button class="btn" data-act="setup" data-mode="timetrial">Time trial<small>Chase your ghost, alone on the circuit</small></button>
+        <button class="btn" data-act="watch">Watch a race<small>Every car on AI, a TV director cuts to the closest battles · your last circuit and weather</small></button>
         <button class="btn" data-act="career">Career<small>${this.save.career ? `Season ${this.save.career.seasonNo} · ${TEAMS[this.save.career.team].short} · round ${Math.min(this.save.career.season.round + 1, this.save.career.season.calendar.length)} of ${this.save.career.season.calendar.length}` : 'Pick a team, develop the car, climb the grid across seasons'}</small></button>
         <button class="btn" data-act="season">Championship<small>${s ? `Round ${Math.min(s.round + 1, s.calendar.length)} of ${s.calendar.length} in progress` : '4 rounds, points, a title to win'}</small></button>
         <div class="row"><button class="btn sm grow" data-act="controls">Controls</button><button class="btn sm grow" data-act="school">School</button><button class="btn sm grow" data-act="profile">Profile</button><button class="btn sm grow" data-act="settings">Settings</button></div>
@@ -471,6 +475,7 @@ export class Menu {
         ${this.slider('rearWing', 'Rear wing', rw, 0, 10, 1, `${rw}  (recommended ${rec.rear})`)}
         <div class="hint">More wing = more downforce and cornering grip, but more drag and a lower top speed. Low wing suits long straights; high wing suits tight, twisty circuits. Setups affect handling balance: more rear wing for stability, more front wing for turn-in.</div>
         <button class="btn sm" data-act="resetsetup" style="margin-top:.6rem">Use recommended</button></div>
+      <div class="panel"><h3>What this setup does</h3><div class="ssw">${this.setupStatsPanel(fw, rw, rec)}</div></div>
       <div class="panel"><h3>Engine &amp; grip</h3>
         ${this.chips('carPower', [{ value: 'standard', label: 'Standard' }, { value: 'quick', label: 'Quick' }, { value: 'rocket', label: 'Rocket' }], c.carPower)}
         <div class="hint">Your car only. Standard is the same car as every rival (0-100 km/h in about 2.6 s). Quick: +8 % power, a little more grip and a firmer launch. Rocket: +30 % power and a violent launch, for catching the field from the back of the grid. Not used in Career, which has its own upgrades.</div></div>
@@ -480,6 +485,26 @@ export class Menu {
       <div class="panel"><h3>Tyre pressure</h3>
         ${this.slider('pressure', 'Pressure offset', c.pressure, -3, 3, 1, c.pressure === 0 ? 'Standard' : (c.pressure > 0 ? '+' : '') + c.pressure)}
         <div class="hint">Higher pressure heats the tyres faster and wears them more slowly but costs grip once it is too high; lower pressure grips better in the wet and gives more feel at the price of faster wear. Standard is the dry-weather sweet spot.</div></div></div>`;
+  }
+
+  /** Live estimates for the chosen wings against the recommended setup (SPEC 8.1). */
+  setupStatsPanel(fw, rw, rec) {
+    const c = this.config;
+    const now = setupStats({ frontWing: fw, rearWing: rw, brakeBias: c.brakeBias, pressure: c.pressure }, c.carPower);
+    const ref = setupStats({ frontWing: rec.front, rearWing: rec.rear }, c.carPower);
+    const row = (label, val, d, unit, better) => {
+      const shown = Math.abs(d) < (unit === 's' ? 0.005 : unit === 'g' ? 0.005 : 0.5) ? '' : `<em class="${(d > 0) === better ? 'up' : 'down'}">${d > 0 ? '+' : '−'}${Math.abs(d).toFixed(unit === 'km/h' ? 0 : 2)}</em>`;
+      return `<div class="sstat"><small>${label}</small><b>${val}</b>${shown}</div>`;
+    };
+    const bal = now.aeroFront - ref.aeroFront;
+    const feel = bal > 0.02 ? 'Pointier on turn-in, looser rear in fast corners' : bal < -0.02 ? 'Stable rear, more understeer in fast corners' : 'Balance close to the recommended setup';
+    return `<div class="sstats" id="setup-stats">
+      ${row('Top speed', Math.round(now.topKph) + ' km/h', now.topKph - ref.topKph, 'km/h', true)}
+      ${row('0-100 km/h', now.zeroTo100.toFixed(2) + ' s', now.zeroTo100 - ref.zeroTo100, 's', false)}
+      ${row('Cornering at 120 km/h', now.slowG.toFixed(2) + ' g', now.slowG - ref.slowG, 'g', true)}
+      ${row('Cornering at 250 km/h', now.fastG.toFixed(2) + ' g', now.fastG - ref.fastG, 'g', true)}
+      <div class="sstat wide"><small>Aero balance</small><b>${Math.round(now.aeroFront * 100)}% front</b><span class="hint">${feel}</span></div>
+    </div><div class="hint">Estimates from the car model, compared with the recommended setup for this circuit (coloured numbers). Tyre temperature, slip and ERS make the real car differ a little.</div>`;
   }
 
   tab_assists() {
@@ -566,6 +591,8 @@ export class Menu {
         ${this.toggle('s.bloom', 'Bloom', 'Lights, windows and hot brake discs glow at dusk and at night (High and Medium quality)', s.bloom !== false)}
         ${this.toggle('s.cbSafe', 'Colour-blind-safe guide', 'Racing line in blue / yellow / magenta instead of green / yellow / red', s.cbSafe)}
         ${this.toggle('s.calm', 'Reduce motion', 'No motion blur, camera shake or flashing lights', s.calm)}
+        ${this.toggle('s.colorblind', 'Colour-blind HUD', 'Blue / orange instead of green / red for sectors, tyre temperatures, damage and the delta bar', s.colorblind)}
+        ${this.toggle('s.voice', 'Race engineer voice', 'Team radio messages are spoken (your browser\'s voice) as well as shown', s.voice)}
         ${this.toggle('s.bigHud', 'Larger HUD', 'Scales the race HUD up by a fifth', s.bigHud)}
         ${this.toggle('s.minimap', 'Show minimap', '', s.minimap)}
         ${this.toggle('s.tower', 'Show timing tower', '', s.tower)}
@@ -594,7 +621,7 @@ export class Menu {
     return `<section class="screen full" style="align-items:center;justify-content:center">
       <div class="menu-col" style="align-items:stretch"><div class="logo" style="font-size:2.6rem">Paused</div>
         <button class="btn primary" data-act="resume">Resume</button>
-        <button class="btn" data-act="replay">Instant replay<small>The last 30 seconds from trackside cameras</small></button>
+        <button class="btn" data-act="replay">Instant replay<small>The last 60 seconds from trackside cameras, with markers for the big moments</small></button>
         <button class="btn" data-act="photo">Photo mode<small>Fly a free camera and save a screenshot</small></button>
         <button class="btn" data-act="restart">Restart session</button>
         <button class="btn" data-act="pausecam">Camera: <span id="camname"></span></button>
@@ -657,7 +684,25 @@ export class Menu {
   }
 
   /** What a career race did for the driver: money (prize, retainer, sponsor), the target, the team-mate, reputation. */
+  /** The race buttons of the hub: a normal weekend, or a sprint weekend before and after its sprint. */
+  weekendButtons(c, laps) {
+    const s = c.season;
+    if (sprintDone(s)) {
+      const me = s.sprint.order.find((o) => o.name === 'You');
+      return `<div class="hint" style="margin-top:.9rem">Sprint weekend · you were <b style="color:#fff">P${me ? me.pos : '?'}</b> in the sprint${me && me.pts ? ` (+${me.pts} points)` : ''}; the Grand Prix starts in the sprint's finishing order.</div>
+        <div class="row" style="margin-top:.5rem"><button class="btn primary grow" data-act="careerrace" data-q="0">Grand Prix · ${laps} laps</button></div>`;
+    }
+    if (isSprintRound(s, c.rules)) {
+      return `<div class="hint" style="margin-top:.9rem"><b style="color:#ffd24a">Sprint weekend.</b> A ${sprintLaps(laps)}-lap sprint (points for the top eight: ${SPRINT_POINTS.join('-')}) sets the grid for the ${laps}-lap Grand Prix.</div>
+        <div class="row" style="margin-top:.5rem"><button class="btn primary grow" data-act="careerrace" data-q="1">Qualify &amp; sprint</button><button class="btn grow" data-act="careerrace" data-q="s">Sprint now</button></div>`;
+    }
+    return `<div class="row" style="margin-top:.9rem"><button class="btn primary grow" data-act="careerrace" data-q="1">Qualify &amp; race</button><button class="btn grow" data-act="careerrace" data-q="0">Race now</button></div>`;
+  }
+
   careerResultPanel(r) {
+    if (r.sprint) {
+      return `<div class="panel"><h3>Sprint</h3><div class="hint">You finished <b style="color:#fff">P${r.sprint.pos ?? '?'}</b>${r.sprint.pts ? ` · <b style="color:#ffd24a">+${r.sprint.pts}</b> championship points` : ' · no points'}. The Grand Prix starts in this order: back to the hub for Sunday.</div></div>`;
+    }
     const good = '#31d17a', bad = '#ff6b6b', gold = '#ffd24a';
     const money = [`prize <b style="color:${gold}">+${r.prize}</b>${r.fastest ? ' (with the fastest lap bonus)' : ''}`, `retainer <b style="color:${gold}">+${r.retainer || 0}</b>`];
     if (r.sponsor) money.push(`sponsor "${esc(r.sponsor.name)}" ${r.sponsor.met ? `<b style="color:${gold}">+${r.sponsor.pay}</b>` : `<b style="color:${bad}">missed</b>`}`);
@@ -688,6 +733,7 @@ export class Menu {
         ${this.toggle('cr.collisions', 'Car-to-car collisions', 'Off: cars pass through each other', R.collisions)}
         ${this.toggle('cr.mandatoryStop', 'Mandatory pit stop', 'Everyone must stop once (a penalty if not)', R.mandatoryStop)}
         ${this.toggle('cr.adaptive', 'Adaptive AI pace', 'Cars far ahead ease off, cars far behind push', R.adaptive)}
+        ${this.toggle('cr.sprints', 'Sprint weekends', 'Every third round from the second: a short sprint with points for the top eight sets the Grand Prix grid', R.sprints)}
       </div>
       <div class="panel"><h3>Season rules</h3>
         ${this.slider('cr.rounds', isNew ? 'Rounds per season' : 'Rounds per season (from next season)', T.rounds, 1, MAX_ROUNDS, 1, `${T.rounds} ${T.rounds === 1 ? 'round' : 'rounds'}`)}
@@ -742,7 +788,7 @@ export class Menu {
           <div class="hint" style="margin-top:.3rem">Team target: finish <b style="color:#fff">P${obj.finish}</b> or better (+8 prize). Retainer: <b style="color:#fff">+${Math.round(contractRetainer(c) * (c.rules.prize || 1))}</b> every race.</div></div></div>
           <h3 style="margin-top:1rem">Sponsor challenge <small class="hint">optional · pick one</small></h3>
           <div class="sponsors">${sp || '<div class="hint">No sponsor is interested in this race.</div>'}</div>
-          <div class="row" style="margin-top:.9rem"><button class="btn primary grow" data-act="careerrace" data-q="1">Qualify &amp; race</button><button class="btn grow" data-act="careerrace" data-q="0">Race now</button></div>
+          ${this.weekendButtons(c, laps)}
         </div>
         <div class="panel"><h3>You against ${esc(mate.name)}</h3>
           <div class="hint">The first driver you have to beat is the one in the same car.</div>
@@ -1001,6 +1047,8 @@ export class Menu {
     if (!act) return;
     const c = this.config;
     switch (act) {
+      case 'watch':
+        return H.startRace({ ...c, mode: 'race', qualify: false, __season: false, spectator: true, carPower: 'standard', upgrades: null });
       case 'quick':
         c.mode = 'race';
         this.persist();
@@ -1015,7 +1063,7 @@ export class Menu {
         return H.openSeason();
       case 'career': return H.openCareer();
       case 'careerstart': return H.careerStart({ ...this.cnew });
-      case 'careerrace': return H.careerRace(t.dataset.q === '1');
+      case 'careerrace': return H.careerRace(t.dataset.q === 's' ? 'sprint' : t.dataset.q === '1');
       case 'careercontinue': return H.openCareer();
       case 'careerrules': return this.show('career_rules');
       case 'careerhub': return this.show('career_hub');
@@ -1212,6 +1260,8 @@ export class Menu {
       else if (k === 'frontWing' || k === 'rearWing') {
         const rec = (TRACK_DEFS.find((d) => d.id === c.trackId) || {}).setup || { front: 5, rear: 5 };
         lab.textContent = `${v}  (recommended ${k === 'frontWing' ? rec.front : rec.rear})`;
+        const box = this.root.querySelector('#setup-stats');
+        if (box) box.parentElement.innerHTML = this.setupStatsPanel(c.frontWing ?? rec.front, c.rearWing ?? rec.rear, rec);
       } else if (k === 'pressure') lab.textContent = v === 0 ? 'Standard' : (v > 0 ? '+' : '') + v;
       else if (k === 's.volume' || k === 's.padDead') lab.textContent = v + '%';
       else lab.textContent = v;

@@ -222,7 +222,7 @@ export class Race {
       const pt = track.pointAt(slot.s, slot.d);
       car.reset(pt.x, pt.y, pt.heading, 0);
       car.info = {
-        name: player ? 'You' : seat.driver.name,
+        name: player ? (opt.driver && opt.driver.name) || 'You' : seat.driver.name,
         code: player ? driverCode : seat.driver.code,
         // the player's chosen number is theirs alone: an AI driver who already wears it takes the standard 7 instead
         number: player ? driverNumber : seat.driver.number === driverNumber ? 7 : seat.driver.number,
@@ -1504,7 +1504,9 @@ export class Race {
     });
     list.forEach((e, i) => (e.pos = i + 1));
     const POINTS = [25, 18, 15, 12, 10, 8, 6, 4, 2, 1];
-    list.forEach((e) => (e.points = e.dnf ? 0 : (POINTS[e.pos - 1] || 0) + (this.fastest.car === e.car && e.pos <= 10 ? 1 : 0)));
+    // a sprint pays the top eight 8-7-6-5-4-3-2-1 and nothing for the fastest lap
+    const P = this.opt.sprint ? [8, 7, 6, 5, 4, 3, 2, 1] : POINTS;
+    list.forEach((e) => (e.points = e.dnf ? 0 : (P[e.pos - 1] || 0) + (!this.opt.sprint && this.fastest.car === e.car && e.pos <= 10 ? 1 : 0)));
     return list;
   }
 

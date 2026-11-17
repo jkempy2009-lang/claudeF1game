@@ -177,4 +177,26 @@ ok('a new season: fresh head-to-head, developed teams, record kept', career.h2h.
   const saved = C.sanitizeCareer(JSON.parse(JSON.stringify(k)));
   ok('the market survives a save and load', !!saved && saved.lineup.join() === k.lineup.join() && saved.drivers.length === k.drivers.length && saved.contract.years === k.contract.years);
 }
+// sprint weekends (SPEC 9): which rounds, points to the top eight, the order becomes Sunday's grid, saves keep it
+{
+  const k = C.newCareer({ team: 4, rounds: 7 });
+  const R = C.sanitizeRules(k.rules);
+  const rounds = k.season.calendar.map((_, r) => C.isSprintRound(k.season, R, r));
+  ok('sprints: rounds 2 and 5 of 7 are sprint weekends', rounds.join() === [false, true, false, false, true, false, false].join(), rounds.join());
+  ok('sprints: off in the rules, none', !C.isSprintRound(k.season, { ...R, sprints: false }, 1));
+  ok('sprints: none in a season of three rounds', !C.isSprintRound(C.newCareer({ team: 4, rounds: 3 }).season, R, 1));
+  ok('sprints: a third of the distance, at least 2 laps', C.sprintLaps(15) === 5 && C.sprintLaps(3) === 2);
+  k.season.round = 1;
+  const mk = (name, code, team, isPlayer, time) => ({ info: { name, code, team: { short: team }, isPlayer }, time, dnf: time == null ? 'Engine' : null, gridPos: 1 });
+  const cls = [mk('A Driver', 'AAA', 'T1', false, 100), mk('You', 'YOU', 'T2', true, 101), ...Array.from({ length: 8 }, (_, i) => mk('D' + i, 'D' + i, 'T3', false, 102 + i)), mk('Out', 'OUT', 'T4', false, null)];
+  const before = { ...k.season.points };
+  const r = C.recordSprint(k.season, cls);
+  ok('sprints: 8 points for the winner, 7 for second, nothing below eighth', k.season.points['A Driver'] - (before['A Driver'] || 0) === 8 && r.pts === 7 && r.pos === 2 && (k.season.points.D7 || 0) - (before.D7 || 0) === 0);
+  ok('sprints: the season does not move on, and the sprint is done', k.season.round === 1 && C.sprintDone(k.season));
+  ok("sprints: the finishing order is Sunday's grid (the player as YOU)", k.season.sprint.grid.AAA === 1 && k.season.sprint.grid.YOU === 2);
+  const back = C.sanitizeCareer(JSON.parse(JSON.stringify(k)));
+  ok('sprints: a save keeps the sprint result', back && back.season.sprint && back.season.sprint.grid.YOU === 2 && back.season.sprint.order.length === cls.length);
+  k.season.round = 2;
+  ok('sprints: the next round has no sprint result', !C.sprintDone(k.season));
+}
 process.exit(bad ? 1 : 0);

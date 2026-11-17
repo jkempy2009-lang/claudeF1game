@@ -134,6 +134,10 @@ table.results .tc { display: inline-block; width: 4px; height: 1em; vertical-ali
 #topbar .lap { font-size: 1.6em; font-weight: 900; font-style: italic; text-transform: uppercase; }
 #topbar .lap small { font-size: 0.55em; color: var(--dim); font-weight: 600; margin-right: 0.3em; }
 #topbar .wx { font-size: 0.95em; color: #7cc4ff; font-weight: 700; }
+#topbar .radar { display: flex; gap: 2px; align-items: center; }
+#topbar .radar small { color: var(--dim); font-size: 0.7em; text-transform: uppercase; letter-spacing: 0.08em; margin-right: 0.3em; }
+#topbar .radar i { width: 0.75em; height: 0.75em; border-radius: 2px; background: rgba(255,255,255,0.14); }
+#topbar .radar i.r1 { background: #5ab4ff; } #topbar .radar i.r2 { background: #2a6cff; } #topbar .radar i.r3 { background: #7a3cff; }
 #topbar .clock { font-size: 1.05em; color: var(--dim); font-variant-numeric: tabular-nums; }
 
 #timing { right: calc(var(--u) * 1.4); top: calc(var(--u) * 1.4); width: calc(var(--u) * 19); padding: 0.6em 0.9em; font-variant-numeric: tabular-nums; }
@@ -186,6 +190,22 @@ table.results .tc { display: inline-block; width: 4px; height: 1em; vertical-ali
 #tyres .info { font-size: 0.9em; line-height: 1.3; }
 #tyres .badge { display: inline-flex; width: 1.7em; height: 1.7em; border-radius: 50%; align-items: center; justify-content: center; font-weight: 900; color: #111; font-size: 1.1em; margin-right: 0.4em; box-shadow: 0 0 0 2px #000 inset; }
 #tyres .dmg { color: var(--accent); font-weight: 700; }
+#tyres .dmgcar { height: 4.4em; width: auto; flex: none; }
+#tyres .dmgcar path { fill: #31d17a; stroke: rgba(0,0,0,0.6); stroke-width: 0.8; transition: fill 0.4s; }
+#tyres .dmgcar path.nose { fill: rgba(255,255,255,0.25); }
+.dbar { position: relative; width: 160px; max-width: 100%; height: 6px; margin-top: 0.3em; background: rgba(255,255,255,0.12); border-radius: 3px; overflow: hidden; }
+.dbar i { position: absolute; top: 0; bottom: 0; left: 50%; width: 0; transition: width 0.12s linear, left 0.12s linear; }
+.dbar b { position: absolute; top: -1px; bottom: -1px; left: calc(50% - 1px); width: 2px; background: rgba(255,255,255,0.8); }
+#mfd { right: calc(var(--u) * 1.4); bottom: calc(var(--u) * 9.2); width: calc(var(--u) * 15); min-width: 15em; padding: 0.5em 0.7em; font-size: 0.85em; }
+#mfd .mfd-h { display: flex; justify-content: space-between; font-weight: 900; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent2); margin-bottom: 0.35em; }
+#mfd .mfd-h i { color: var(--dim); font-style: normal; }
+#mfd .mgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.35em; }
+#mfd .mc { display: flex; flex-direction: column; background: rgba(255,255,255,0.06); padding: 0.3em 0.45em; border-radius: 0.3em; line-height: 1.25; }
+#mfd .mc b { font-size: 1.25em; }
+#mfd .mc span { color: var(--dim); font-size: 0.85em; }
+#mfd .mrow { display: flex; justify-content: space-between; gap: 1em; padding: 0.12em 0; border-bottom: 1px solid rgba(255,255,255,0.06); }
+#mfd .mhint { margin-top: 0.35em; color: var(--dim); font-size: 0.85em; }
+#mfd .ok { color: #31d17a; } #mfd .warn { color: #ffb400; } #mfd .hot { color: #ff3b3b; } #mfd .cold { color: #5ab4ff; }
 
 #gmeter { right: calc(var(--u) * 1.4); bottom: calc(var(--u) * 1.2); width: calc(var(--u) * 7); height: calc(var(--u) * 7); border-radius: 50%; }
 #gmeter canvas { width: 100%; height: 100%; display: block; border-radius: 50%; }
@@ -297,7 +317,12 @@ body.in-menu #toast { top: auto; bottom: 3vh; }
 #replay .rbar { pointer-events: auto; display: flex; gap: 0.6rem; align-items: center; background: rgba(8,10,14,0.82); border: 1px solid var(--line); padding: 0.55rem 0.9rem; backdrop-filter: blur(8px); max-width: 96vw; flex-wrap: wrap; justify-content: center; }
 #replay b { color: var(--accent); letter-spacing: 0.12em; font-style: italic; }
 #replay span { font-variant-numeric: tabular-nums; color: var(--dim); font-size: 0.85rem; }
-#replay input[type=range] { width: min(26rem, 40vw); }
+#replay input[type=range] { width: min(26rem, 40vw); display: block; }
+#replay .rscrub { position: relative; padding-top: 0.7rem; }
+#r-marks { position: absolute; left: 0; right: 0; top: 0; height: 0.7rem; pointer-events: none; }
+#replay .rmark { position: absolute; top: 0; width: 0.62rem; height: 0.62rem; padding: 0; margin-left: -0.31rem; border-radius: 50%; border: 1px solid rgba(0,0,0,0.6); background: #fff; pointer-events: auto; cursor: pointer; }
+#replay .rmark.pass { background: #31d17a; } #replay .rmark.lost { background: #ff8a3b; } #replay .rmark.contact { background: #ff2a2a; }
+#replay .rmark.pit { background: #5ab4ff; } #replay .rmark.fastest { background: #b65cff; } #replay .rmark.sc, #replay .rmark.penalty { background: #ffd400; } #replay .rmark.out { background: #888; }
 #replay button { background: rgba(255,255,255,0.08); border: 1px solid var(--line); color: #fff; padding: 0.35rem 0.7rem; font-weight: 700; font-size: 0.85rem; }
 #replay button:hover { background: rgba(255,255,255,0.18); }
 #replay button.exit { background: var(--accent); border-color: transparent; }
@@ -385,3 +410,42 @@ body.calm *, body.calm *::before, body.calm *::after { animation-duration: 0.01m
 .goal i { font-style: normal; font-weight: 800; color: #ffd24a; }
 .goal.met i { color: #31d17a; }
 .goal.miss i { color: #ff6b6b; }
+
+.sstats { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-bottom: 0.5rem; }
+.sstat { background: rgba(255,255,255,0.05); border-radius: 0.4rem; padding: 0.45rem 0.6rem; display: flex; flex-direction: column; gap: 0.1rem; }
+.sstat.wide { grid-column: 1 / -1; }
+.sstat small { color: var(--dim); text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.72rem; }
+.sstat b { font-size: 1.15rem; }
+.sstat em { font-style: normal; font-weight: 700; font-size: 0.85rem; }
+.sstat em.up { color: #31d17a; } .sstat em.down { color: #ff6b5b; }
+
+/* colour-blind HUD (SPEC 9): green / red pairs become blue / orange */
+body.cb { --good: #3b9bff; }
+body.cb .pedal[style*="31d17a"] { --c: #3b9bff !important; }
+body.cb .pedal[style*="ff3b3b"] { --c: #ff7a00 !important; }
+body.cb #mfd .ok { color: #3b9bff; } body.cb #mfd .hot { color: #ff7a00; } body.cb #mfd .warn { color: #ffe14a; }
+body.cb #timing .delta.pos { color: #ff7a00; }
+body.cb #replay .rmark.pass { background: #3b9bff; } body.cb #replay .rmark.contact { background: #ff7a00; }
+body.cb .sstat em.up { color: #3b9bff; } body.cb .sstat em.down { color: #ff7a00; }
+
+/* spectator mode: the player-only instruments go; the tower, timing banner and map stay */
+body.spectating #dash, body.spectating #tyres, body.spectating #timing, body.spectating #gmeter, body.spectating #keyhint, body.spectating #pit, body.spectating #mfd { display: none !important; }
+
+/* broadcast graphics (SPEC 9) */
+#tower .r .age { font-style: normal; font-size: 0.62em; color: var(--dim); margin-left: 0.2em; min-width: 1.4em; display: inline-block; text-align: left; }
+#bcast { top: calc(var(--u) * 5.2); left: 50%; transform: translateX(-50%); display: flex; gap: 0.6em; align-items: center; padding: 0.25em 0.8em; font-variant-numeric: tabular-nums; }
+#bcast b { color: var(--accent2); font-style: italic; letter-spacing: 0.06em; }
+#bcast span { border-left: 4px solid var(--c); padding-left: 0.4em; font-weight: 900; }
+#bcast i { font-style: normal; font-weight: 700; min-width: 3em; }
+
+/* podium / parc fermé (SPEC 9) */
+#podium { position: fixed; left: 0; right: 0; bottom: 0; z-index: 25; display: flex; flex-direction: column; align-items: center; gap: 0.6rem; padding: 0 16px max(18px, env(safe-area-inset-bottom)); pointer-events: auto; cursor: pointer; background: linear-gradient(transparent, rgba(0,0,0,0.55)); }
+#podium.hidden { display: none; }
+#podium .ptitle { font-weight: 900; font-style: italic; text-transform: uppercase; letter-spacing: 0.12em; color: var(--accent2); }
+#podium .psteps { display: flex; gap: 0.6rem; align-items: flex-end; flex-wrap: wrap; justify-content: center; }
+#podium .pstep { min-width: 9.5rem; background: rgba(8,10,14,0.85); border-top: 4px solid var(--c); padding: 0.5rem 0.9rem; display: flex; flex-direction: column; animation: msgin 0.4s ease both; }
+#podium .pstep.p1 { padding-block: 1rem; animation-delay: 0.5s; } #podium .pstep.p2 { animation-delay: 0.25s; }
+#podium .pstep b { font-size: 1.6rem; font-style: italic; }
+#podium .pstep.p1 b { color: #ffd24a; font-size: 2rem; }
+#podium .pstep small { color: var(--dim); }
+#podium .phint { color: var(--dim); font-size: 0.8rem; }

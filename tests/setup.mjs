@@ -5,6 +5,7 @@ import { Car } from '../src/sim/car.js';
 import { makeSpec } from '../src/sim/carspec.js';
 import { buildSpeedProfile } from '../src/sim/speedprofile.js';
 import { AIDriver } from '../src/sim/ai.js';
+import { setupStats } from '../src/sim/setupstats.js';
 let bad = 0;
 const ok = (n, c, x = '') => { console.log(`${c ? 'PASS' : 'FAIL'}  ${n} ${x}`); if (!c) bad++; };
 const DT = 1 / 240;
@@ -36,4 +37,11 @@ ok('higher pressure runs the tyres hotter', hi.temp > mid.temp && mid.temp > lo.
 ok('standard pressure is within 0.3 s of the best dry lap', mid.lapTime <= Math.min(lo.lapTime, hi.lapTime) + 0.3, `${lo.lapTime.toFixed(2)} / ${mid.lapTime.toFixed(2)} / ${hi.lapTime.toFixed(2)} s`);
 const spec = makeSpec({ pressure: 9 });
 ok('pressure is clamped to the allowed range', spec.pressure === 3 && makeSpec({}).pressure === 0);
+// the setup screen's live estimates (SPEC 8.1) must move the right way and sit near the real car
+const base = setupStats({ frontWing: 5, rearWing: 5 }), low = setupStats({ frontWing: 1, rearWing: 1 }), high = setupStats({ frontWing: 9, rearWing: 9 });
+ok('setup stats: less wing, more top speed', low.topKph > base.topKph + 5 && base.topKph > high.topKph + 5, `${low.topKph.toFixed(0)} / ${base.topKph.toFixed(0)} / ${high.topKph.toFixed(0)} km/h`);
+ok('setup stats: more wing, more fast-corner grip', high.fastG > base.fastG && base.fastG > low.fastG, `${low.fastG.toFixed(2)} / ${base.fastG.toFixed(2)} / ${high.fastG.toFixed(2)} g`);
+ok('setup stats: 0-100 near the real car (2.6 s)', base.zeroTo100 > 2.2 && base.zeroTo100 < 3.0, base.zeroTo100.toFixed(2) + ' s');
+ok('setup stats: front wing moves the aero balance forward', setupStats({ frontWing: 9, rearWing: 5 }).aeroFront > base.aeroFront + 0.02);
+ok('setup stats: plausible F1 numbers', base.topKph > 300 && base.topKph < 380 && base.slowG > 1.8 && base.fastG > 3 && base.fastG < 6);
 process.exit(bad ? 1 : 0);

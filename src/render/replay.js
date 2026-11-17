@@ -5,7 +5,7 @@ const F = 17;
 
 /**
  * Ring buffer of the last `seconds` of the race for every car (30 Hz), plus the pace car. Cheap enough to run all race
- * (about 1 MB for 20 cars and 30 s) and lets the game replay the closing moments from trackside cameras.
+ * (about 1.3 MB per 30 s for 20 cars) and lets the game replay the closing moments from trackside cameras.
  */
 export class ReplayBuffer {
   constructor(carCount, seconds = 30, hz = 30) {

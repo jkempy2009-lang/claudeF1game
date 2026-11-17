@@ -29,6 +29,17 @@ const sty = (el, prop, v) => {
   }
 };
 
+/** HUD state colours; the colour-blind palette swaps green / red for blue / orange (SPEC 9). */
+const PAL = { good: '#31d17a', warn: '#ffb400', bad: '#ff2a2a', cold: 205, ok: 128, hot: 2 };
+const PAL_CB = { good: '#3b9bff', warn: '#ffe14a', bad: '#ff7a00', cold: 230, ok: 195, hot: 30 };
+
+/** Mix two #rrggbb colours (k = 0..1). */
+const mixHex = (a, b, k) => {
+  const pa = parseInt(a.slice(1), 16), pb = parseInt(b.slice(1), 16);
+  const ch = (sh) => Math.round(((pa >> sh) & 255) * (1 - k) + ((pb >> sh) & 255) * k);
+  return '#' + ((ch(16) << 16) | (ch(8) << 8) | ch(0)).toString(16).padStart(6, '0');
+};
+
 const mmss = (t) => {
   t = Math.max(0, Math.ceil(t));
   return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0');
@@ -46,9 +57,10 @@ export class HUD {
     this.teleBuf = { t: new Float32Array(240), b: new Float32Array(240), s: new Float32Array(240), v: new Float32Array(240), n: 0, last: 0, draw: 0 };
     root.innerHTML = `
       <div id="tower" class="hud-box"><div class="hd"><span>Race</span><span id="tw-lap"></span></div><div id="tw-rows"></div></div>
-      <div id="topbar" class="hud-box"><div class="lap" id="tb-lap"></div><div class="clock" id="tb-clock"></div><div class="wx" id="tb-wx"></div></div>
+      <div id="topbar" class="hud-box"><div class="lap" id="tb-lap"></div><div class="clock" id="tb-clock"></div><div class="wx" id="tb-wx"></div><div class="radar" id="tb-radar" title="Weather radar: rain over the next laps"></div></div>
       <div id="timing" class="hud-box">
         <div><span class="cur" id="t-cur">0:00.000</span><span class="delta" id="t-delta"></span></div>
+        <div class="dbar" id="t-dbar"><i></i><b></b></div>
         <div class="lines"><span>Last</span><span id="t-last">--:--.---</span><span>Best</span><span id="t-best">--:--.---</span><span>Fastest</span><span id="t-fast">--:--.---</span></div>
         <div class="sectors" id="t-sec"><i></i><i></i><i></i></div>
       </div>
@@ -59,6 +71,7 @@ export class HUD {
       <canvas id="livetele" class="hud-box hidden" width="440" height="150"></canvas>
       <div id="brain" class="hud-box hidden"></div>
       <div id="lesson" class="hud-box hidden"></div>
+      <div id="bcast" class="hud-box hidden"></div>
       <div id="radio" class="hud-box hidden"><b>Radio</b><span id="radio-t"></span></div>
       <div id="pit" class="hud-box hidden"></div>
       <div id="dash" class="hud-box">
@@ -75,9 +88,18 @@ export class HUD {
         </div>
       </div>
       <div id="tyres" class="hud-box">
+        <svg class="dmgcar" id="dmgcar" viewBox="0 0 44 88" width="44" height="88" aria-label="Car damage">
+          <path data-z="fw" d="M3 6 H41 V12 H3 Z"/>
+          <path data-z="floor" d="M15 14 H29 L31 34 L33 62 L29 74 H15 L11 62 L13 34 Z"/>
+          <path data-z="sideL" d="M5 34 Q4 48 9 62 L13 60 L14 34 Z"/>
+          <path data-z="sideR" d="M39 34 Q40 48 35 62 L31 60 L30 34 Z"/>
+          <path data-z="rw" d="M6 78 H38 V84 H6 Z"/>
+          <path class="nose" d="M20 12 H24 L25 24 H19 Z"/>
+        </svg>
         <div class="grid"><div class="tyre"><i></i></div><div class="tyre"><i></i></div><div class="tyre"><i></i></div><div class="tyre"><i></i></div></div>
         <div class="info"><div><span class="badge" id="ty-b">M</span><b id="ty-n">Medium</b></div><div id="ty-w">Wear 0%</div><div id="ty-t"></div><div id="ty-f">Fuel</div><div id="ty-d" class="dmg"></div></div>
       </div>
+      <div id="mfd" class="hud-box hidden"><div class="mfd-h"><span id="mfd-t">Tyres & brakes</span><i id="mfd-p">1/3</i></div><div id="mfd-b"></div></div>
       <div id="gmeter" class="hud-box"><canvas width="200" height="200"></canvas></div>
       <div id="flag"></div>
       <div id="keyhint" class="hud-box"></div>
@@ -91,6 +113,7 @@ export class HUD {
       mini: $('#minimap canvas'), lights: $('#lights'), msgs: $('#msgs'), radio: $('#radio'), lesson: $('#lesson'), tele: $('#livetele'), brain: $('#brain'), radioT: $('#radio-t'), pit: $('#pit'),
       revs: $('#revs'), soc: $('#d-soc'), socb: $('#d-socb'), drs: $('#d-drs'), boost: $('#d-boost'), gap: $('#d-gap'),
       gear: $('#d-gear'), spd: $('#d-spd'), unit: $('#d-unit'), thr: $('#p-thr'), brk: $('#p-brk'), rpm: $('#d-rpm'),
+      bcast: $('#bcast'), radar: $('#tb-radar'), dbar: $('#t-dbar'), dmgZones: Object.fromEntries([...root.querySelectorAll('#dmgcar [data-z]')].map((p) => [p.dataset.z, p])), mfd: $('#mfd'), mfdT: $('#mfd-t'), mfdP: $('#mfd-p'), mfdB: $('#mfd-b'),
       tyreBoxes: [...root.querySelectorAll('#tyres .tyre')], tyB: $('#ty-b'), tyN: $('#ty-n'), tyW: $('#ty-w'), tyT: $('#ty-t'), tyF: $('#ty-f'), tyD: $('#ty-d'),
       g: $('#gmeter canvas'), flag: $('#flag'), keyhint: $('#keyhint'), finish: $('#finish'), confetti: $('#confetti'), tower: $('#tower'), minimap: $('#minimap'), touch: $('#touch'),
     };
@@ -298,8 +321,60 @@ export class HUD {
     if (html !== this._lessonHtml) { this._lessonHtml = html; el.innerHTML = html; }
   }
 
+  setColorblind(on) {
+    this.pal = on ? PAL_CB : PAL;
+  }
+
+  /** The multi-function display (SPEC 8.2): M shows it and cycles its three pages, a fourth press hides it. */
+  cycleMfd() {
+    if (!this.mfdOn) { this.mfdOn = true; this.mfdPage = 0; }
+    else if (this.mfdPage < 2) this.mfdPage++;
+    else this.mfdOn = false;
+    this.el.mfd.classList.toggle('hidden', !this.mfdOn);
+    this._mfdT = 0;
+  }
+
+  updateMfd(race, p) {
+    const now = performance.now();
+    if (now - (this._mfdT || 0) < 250) return; // four times a second is plenty for a display you glance at
+    this._mfdT = now;
+    const el = this.el, rs = p.rs, comp = p.compound;
+    const pages = ['Tyres & brakes', 'Strategy & fuel', 'Sectors & damage'];
+    txt(el.mfdT, pages[this.mfdPage]);
+    txt(el.mfdP, `${this.mfdPage + 1}/3`);
+    let h = '';
+    if (this.mfdPage === 0) {
+      const cell = (w) => {
+        const c = p.temp[w], sf = p.tempS ? p.tempS[w] : c, b = p.brakeTemp[w];
+        const tone = (t) => (t < comp.tOpt - comp.tRange * 0.5 ? 'cold' : t > comp.tOpt + comp.tRange * 0.5 ? 'hot' : 'ok');
+        return `<div class="mc"><b class="${tone(sf)}">${Math.round(sf)}°</b><span class="${tone(c)}">core ${Math.round(c)}°</span><span>brake ${Math.round(b / 10) * 10}°</span><span>wear ${Math.round(p.wear[w] * 100)}%</span></div>`;
+      };
+      h = `<div class="mgrid">${cell(0)}${cell(1)}${cell(2)}${cell(3)}</div><div class="mhint">${escHtml(comp.name || comp.id)} · window ${Math.round(comp.tOpt - comp.tRange)}-${Math.round(comp.tOpt + comp.tRange)}°</div>`;
+    } else if (this.mfdPage === 1) {
+      const left = race.totalLaps - rs.laps;
+      if (!this._f0 || this._f0.race !== race) this._f0 = { race, fuel: p.fuel, laps: rs.laps };
+      const per = rs.laps > this._f0.laps ? (this._f0.fuel - p.fuel) / (rs.laps - this._f0.laps) : null;
+      const spare = per ? p.fuel / per - left : null;
+      const adv = rs.advice;
+      h = `<div class="mrow"><span>Fuel</span><b>${p.fuel.toFixed(1)} kg</b></div>
+        <div class="mrow"><span>Target</span><b class="${spare == null ? '' : spare < 0 ? 'hot' : 'ok'}">${spare == null ? '—' : (spare >= 0 ? '+' : '') + spare.toFixed(1) + ' laps'}</b></div>
+        <div class="mrow"><span>Mix / ERS</span><b>${['LEAN', 'STD', 'RICH'][p.fuelMode]} · ${['HARV', 'BAL', 'ATK'][p.ersMode]}</b></div>
+        <div class="mrow"><span>Stops</span><b>${rs.stops} · ${(rs.compounds || []).map((c) => c[0].toUpperCase()).join('›')}</b></div>
+        <div class="mrow"><span>Pit wall</span><b>${adv && adv.lap != null ? `box lap ${adv.lap}${adv.compound ? ' · ' + esc(adv.compound) : ''}` : 'no stop needed'}</b></div>
+        <div class="mrow"><span>Power unit</span><b class="${p.engStress > 0.75 ? 'hot' : p.engStress > 0.5 ? 'warn' : 'ok'}">${Math.round((1 - (p.engStress || 0)) * 100)}% health</b></div>`;
+    } else {
+      const sec = (k) => (rs.sectors[k] != null ? rs.sectors[k].toFixed(3) : '—');
+      const best = (k) => (rs.bestSectors && Number.isFinite(rs.bestSectors[k]) ? rs.bestSectors[k].toFixed(3) : '—');
+      const dm = p.damageSummary();
+      h = `<div class="mrow"><span>Sector</span><b>last · best</b></div>${[0, 1, 2].map((k) => `<div class="mrow"><span>S${k + 1}</span><b>${sec(k)} · ${best(k)}</b></div>`).join('')}
+        <div class="mrow"><span>Damage</span><b class="${dm.worst > 0.4 ? 'hot' : dm.worst > 0.1 ? 'warn' : 'ok'}">${dm.worst > 0.02 ? `F ${Math.round(dm.fw * 100)} R ${Math.round(dm.rw * 100)} Fl ${Math.round(dm.floor * 100)} P ${Math.round(Math.max(dm.sideL, dm.sideR) * 100)}%` : 'none'}</b></div>
+        <div class="mrow"><span>Downforce</span><b>−${Math.round(dm.aeroLoss * 100)}%</b></div>`;
+    }
+    if (h !== this._mfdH) { this._mfdH = h; el.mfdB.innerHTML = h; }
+  }
+
   radio(text, ttl = 5) {
-    if (this.onRadio && this.el.radioT.textContent !== text) this.onRadio();
+    if (this.onRadio && this.el.radioT.textContent !== text) this.onRadio(text, ttl);
     this.el.radio.classList.remove('hidden');
     this.el.radioT.textContent = text;
     clearTimeout(this._radioT);
@@ -432,6 +507,33 @@ export class HUD {
       txt(el.delta, (rs.delta >= 0 ? '+' : '-') + Math.abs(rs.delta).toFixed(2));
       cls(el.delta, 'delta ' + (rs.delta < 0 ? 'neg' : 'pos'));
     } else txt(el.delta, '');
+    // the delta bar (SPEC 4.2): centre zero, +-1 s; green to the left when ahead, red to the right when behind
+    {
+      const dv = race.sc && race.sc.state === 'vsc' && rs.vscDelta != null ? -rs.vscDelta : rs.delta != null && rs.lapCpBest ? rs.delta : null;
+      const bar = el.dbar.firstElementChild;
+      if (dv == null) sty(bar, 'width', '0%');
+      else {
+        const k = clamp(dv, -1, 1);
+        sty(bar, 'width', Math.abs(k) * 50 + '%');
+        sty(bar, 'left', (k < 0 ? 50 - Math.abs(k) * 50 : 50) + '%');
+        sty(bar, 'background', k < 0 ? (this.pal || PAL).good : (this.pal || PAL).bad);
+      }
+    }
+    if (this.mfdOn) this.updateMfd(race, p);
+    // broadcast pit-stop clock (SPEC 9): a rival stationary in its box, timed live
+    {
+      let bc = '';
+      if (race.opt.mode === 'race' && !race.isQuali) {
+        let best = null;
+        for (const c of race.cars) if (c !== p && c.rs.service && (!best || c.rs.pos < best.rs.pos)) best = c;
+        if (best) bc = `<b>PIT STOP</b><span style="--c:${best.info.team.color}">${escHtml(best.info.code)}</span><i>${best.rs.service.t.toFixed(1)}s</i>`;
+      }
+      if (this._bc !== bc) {
+        this._bc = bc;
+        el.bcast.innerHTML = bc;
+        el.bcast.classList.toggle('hidden', !bc);
+      }
+    }
     const secEls = el.sec.children;
     for (let k = 0; k < 3; k++) {
       const flagOn = rs.sectorFlag && rs.sectorFlag.idx === k ? rs.sectorFlag.kind : '';
@@ -443,7 +545,7 @@ export class HUD {
     // top bar
     const total = race.totalLaps;
     const lap = Math.min(total, Math.max(1, rs.laps + 1));
-    const lapHtml = race.isQuali ? `<small>${race.chequered ? 'Final lap' : 'Time left'}</small>${race.chequered ? '' : mmss(race.qualiLeft())}` : race.opt.mode === 'timetrial' ? `<small>Lap</small>${Math.max(1, rs.laps + 1)}` : `<small>Lap</small>${rs.finished ? total : lap}/${total}`;
+    const lapHtml = race.isQuali ? `<small>${race.chequered ? 'Final lap' : 'Time left'}</small>${race.chequered ? '' : mmss(race.qualiLeft())}` : race.opt.mode === 'timetrial' ? `<small>Lap</small>${Math.max(1, rs.laps + 1)}` : `<small>${race.opt.sprint ? 'Sprint · lap' : 'Lap'}</small>${rs.finished ? total : lap}/${total}`;
     if (this._lapHtml !== lapHtml) {
       this._lapHtml = lapHtml;
       el.tbLap.innerHTML = lapHtml;
@@ -462,6 +564,29 @@ export class HUD {
     } else {
       const f = race.forecast && race.forecast();
       if (f && f.rainIn < 150) wx = `Rain in ${mmss(f.rainIn)}`;
+    }
+    // weather radar (SPEC 9): one cell per lap for the next eight laps, from the race's own rain timeline
+    const nowMs = performance.now();
+    if (nowMs - (this._radarT || 0) > 1000) {
+      this._radarT = nowMs;
+      let radar = '';
+      if (race.wx && race.wx.length && race.opt.mode === 'race' && !race.isQuali) {
+        const t = race.t0 == null ? 0 : race.time - race.t0;
+        const L = Number.isFinite(rs.best) ? rs.best : race.track.length / 52;
+        const left = Math.max(1, race.totalLaps - rs.laps);
+        const cells = [];
+        for (let k = 0; k < Math.min(8, left); k++) {
+          let lv = 0;
+          for (const seg of race.wx) if (seg.t1 > t + k * L && seg.t0 < t + (k + 1) * L) lv = Math.max(lv, seg.level);
+          cells.push(`<i class="${lv > 0.75 ? 'r3' : lv > 0.4 ? 'r2' : lv > 0.05 ? 'r1' : ''}" title="Lap ${rs.laps + 1 + k}: ${lv > 0.75 ? 'heavy rain' : lv > 0.4 ? 'rain' : lv > 0.05 ? 'light rain' : 'dry'}"></i>`);
+        }
+        radar = `<small>Radar</small>${cells.join('')}`;
+      }
+      if (this._radar !== radar) {
+        this._radar = radar;
+        el.radar.innerHTML = radar;
+        el.radar.style.display = radar ? '' : 'none';
+      }
     }
     if (this._wx !== wx) {
       this._wx = wx;
@@ -492,13 +617,21 @@ export class HUD {
     const dmg = dm.worst;
     const flat = Math.max(p.flat[0], p.flat[1], p.flat[2], p.flat[3]);
     txt(el.tyD, dmg > 0.05 ? `FW ${Math.round(dm.fw * 100)}% · SP ${Math.round(Math.max(dm.sideL, dm.sideR) * 100)}% · RW ${Math.round(dm.rw * 100)}% · downforce −${Math.round(dm.aeroLoss * 100)}%` : flat > 0.2 ? 'Flat spots' : p.grain && Math.max(p.grain[0], p.grain[1], p.grain[2], p.grain[3]) > 0.3 ? 'Graining: tyres too cold to push' : '');
+    // the damage diagram (SPEC 4.2): each zone green (intact) -> amber -> red
+    for (const z of ['fw', 'rw', 'floor', 'sideL', 'sideR']) {
+      const v = clamp(dm[z] || 0, 0, 1);
+      const pal = this.pal || PAL;
+      const col = v < 0.5 ? mixHex(pal.good, pal.warn, v / 0.5) : mixHex(pal.warn, pal.bad, (v - 0.5) / 0.5);
+      if (el.dmgZones[z] && el.dmgZones[z]._c !== col) { el.dmgZones[z]._c = col; el.dmgZones[z].style.fill = col; }
+    }
     for (let w = 0; w < 4; w++) {
       const tb = el.tyreBoxes[w];
       const temp = p.tempS ? p.tempS[w] : p.temp[w]; // the skin: reacts at once to a slide or a lock-up
       const opt = comp.tOpt;
       const dt = temp - opt;
       // blue = cold, green = in window, red = overheated
-      sty(tb, 'background', `hsl(${dt < -comp.tRange * 0.5 ? 205 : dt > comp.tRange * 0.5 ? 2 : 128}, 70%, 42%)`);
+      const tp = this.pal || PAL;
+      sty(tb, 'background', `hsl(${dt < -comp.tRange * 0.5 ? tp.cold : dt > comp.tRange * 0.5 ? tp.hot : tp.ok}, 70%, 42%)`);
       sty(tb.firstElementChild, 'height', Math.round(clamp(p.wear[w], 0, 1) * 1000) / 10 + '%');
     }
 
@@ -588,7 +721,9 @@ export class HUD {
       else if (rs.lapsDown > 0) g = `+${rs.lapsDown}L`;
       else g = `+${(c.gapAhead ?? 0).toFixed(1)}`;
       if (rs.inPitLane || rs.service) g = '<span class="pit">PIT</span>';
-      const rh = `${g}<span class="t" style="background:${c.compound.color}">${c.compound.letter}</span>`;
+      // tyre age chip (SPEC 9 broadcast graphics): laps on this set
+      const age = race.isQuali ? '' : `<em class="age">${Math.max(0, rs.laps - (rs.stopLaps && rs.stopLaps.length ? rs.stopLaps[rs.stopLaps.length - 1] : 0))}</em>`;
+      const rh = `${g}<span class="t" style="background:${c.compound.color}">${c.compound.letter}</span>${age}`;
       if (row._h !== rh) { // rewritten only when the gap or tyre changes
         row._h = rh;
         row.children[4].innerHTML = rh;

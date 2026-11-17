@@ -20,6 +20,7 @@ export const DEFAULT_KEYS = {
   auto: ['KeyG'],
   line: ['KeyL'],
   tele: ['KeyY'],
+  mfd: ['KeyI'],
   ersMode: ['KeyX'],
   fuelMode: ['KeyZ'],
   bbUp: ['BracketRight', 'Equal'],
@@ -31,7 +32,7 @@ export const DEFAULT_KEYS = {
 export const KEY_ACTIONS = [
   ['throttle', 'Throttle'], ['brake', 'Brake / reverse'], ['left', 'Steer left'], ['right', 'Steer right'], ['drs', 'DRS / wheel nut'], ['boost', 'ERS boost (hold)'],
   ['gearUp', 'Gear up (manual)'], ['gearDown', 'Gear down (manual)'], ['pit', 'Pit request'], ['tyre', 'Change pit tyre'], ['camera', 'Camera'], ['lookBack', 'Look back'],
-  ['reset', 'Reset to track'], ['pause', 'Pause'], ['line', 'Racing line guide'], ['tele', 'Live telemetry'], ['map', 'Minimap size'], ['mute', 'Mute'],
+  ['reset', 'Reset to track'], ['pause', 'Pause'], ['line', 'Racing line guide'], ['tele', 'Live telemetry'], ['mfd', 'Info display (MFD)'], ['map', 'Minimap size'], ['mute', 'Mute'],
   ['auto', 'Autopilot toggle'], ['ersMode', 'ERS mode'], ['fuelMode', 'Fuel mix'], ['bbUp', 'Brake bias forward'], ['bbDown', 'Brake bias rearward'],
 ];
 const KEY_CODE = /^[A-Za-z][A-Za-z0-9]{1,23}$/;
@@ -207,6 +208,7 @@ export class Input {
     out.autoToggle = this.wasPressed('auto');
     out.line = this.wasPressed('line');
     out.tele = this.wasPressed('tele');
+    out.mfd = this.wasPressed('mfd');
     out.confirm = this.wasPressed('confirm');
     out.ersCycle = this.wasPressed('ersMode');
     out.fuelCycle = this.wasPressed('fuelMode');

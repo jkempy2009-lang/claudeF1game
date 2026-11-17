@@ -93,7 +93,29 @@ export class AudioEngine {
     }
     shaper.connect(this.engFilter);
     this.engFilter.connect(bp);
-    bp.connect(eng);
+    // firing pulses (SPEC 8.1): a V6 fires three times a revolution; an audio-rate modulator on the engine's level at that rate
+    // adds the side bands that make it sound like a combustion engine and not an organ (lumpier at low revs)
+    this.pulse = ctx.createGain();
+    this.pulse.gain.value = 1;
+    this.fire = ctx.createOscillator();
+    this.fire.type = 'sine';
+    this.fireDepth = ctx.createGain();
+    this.fireDepth.gain.value = 0.3;
+    this.fire.connect(this.fireDepth);
+    this.fireDepth.connect(this.pulse.gain);
+    this.fire.start();
+    bp.connect(this.pulse);
+    this.pulse.connect(eng);
+    // overrun (SPEC 8.1): off the throttle the exhaust resonates in a low band that sweeps with the revs
+    this.overF = ctx.createBiquadFilter();
+    this.overF.type = 'lowpass';
+    this.overF.Q.value = 9;
+    this.overF.frequency.value = 220;
+    this.overGain = ctx.createGain();
+    this.overGain.gain.value = 0;
+    shaper.connect(this.overF);
+    this.overF.connect(this.overGain);
+    this.overGain.connect(eng);
     // intake / turbo whistle noise
     const nz = noise();
     const nzf = ctx.createBiquadFilter();
@@ -149,6 +171,96 @@ export class AudioEngine {
     scf.connect(this.scrapeGain);
     this.scrapeGain.connect(this.master);
     scn.start();
+
+    // a second, ring-modulated band for the plank: a metallic ring instead of plain hiss (SPEC 4.1)
+    const scn2 = noise();
+    const scf2 = ctx.createBiquadFilter();
+    scf2.type = 'bandpass';
+    scf2.frequency.value = 2400;
+    scf2.Q.value = 3;
+    const ring = ctx.createGain();
+    ring.gain.value = 0;
+    const ringOsc = ctx.createOscillator();
+    ringOsc.frequency.value = 4800;
+    ringOsc.connect(ring.gain);
+    ringOsc.start();
+    scn2.connect(scf2);
+    scf2.connect(ring);
+    ring.connect(this.scrapeGain);
+    scn2.start();
+
+    // ---- carbon brake squeal at walking pace on cold brakes (SPEC 4.1)
+    this.squealGain = ctx.createGain();
+    this.squealGain.gain.value = 0;
+    for (const [f, type] of [[3150, 'sine'], [4720, 'triangle']]) {
+      const o = ctx.createOscillator();
+      o.type = type;
+      o.frequency.value = f;
+      o.connect(this.squealGain);
+      o.start();
+    }
+    this.squealGain.connect(this.master);
+
+    // ---- buffeting in and out of the tow (SPEC 4.1): low noise, loudest crossing the edge of the wake
+    const bn = noise();
+    const bf = ctx.createBiquadFilter();
+    bf.type = 'bandpass';
+    bf.frequency.value = 95;
+    bf.Q.value = 1.8;
+    this.buffetGain = ctx.createGain();
+    this.buffetGain.gain.value = 0;
+    bn.connect(bf);
+    bf.connect(this.buffetGain);
+    this.buffetGain.connect(this.master);
+    bn.start();
+
+    // ---- surfaces (SPEC 8.1): the kerb's ridges as a periodic thump, gravel as crackle, grass as a soft brush
+    const ko = ctx.createOscillator();
+    ko.type = 'sawtooth';
+    const kof = ctx.createBiquadFilter();
+    kof.type = 'lowpass';
+    kof.frequency.value = 160;
+    this.kerbOsc = ko;
+    this.kerbGain = ctx.createGain();
+    this.kerbGain.gain.value = 0;
+    ko.connect(kof);
+    kof.connect(this.kerbGain);
+    this.kerbGain.connect(this.master);
+    ko.start();
+    const gn = noise();
+    const gnf = ctx.createBiquadFilter();
+    gnf.type = 'highpass';
+    gnf.frequency.value = 1800;
+    this.gravelGain = ctx.createGain();
+    this.gravelGain.gain.value = 0;
+    gn.connect(gnf);
+    gnf.connect(this.gravelGain);
+    this.gravelGain.connect(this.master);
+    gn.start();
+    const grn = noise();
+    const grf = ctx.createBiquadFilter();
+    grf.type = 'lowpass';
+    grf.frequency.value = 400;
+    this.grassGain = ctx.createGain();
+    this.grassGain.gain.value = 0;
+    grn.connect(grf);
+    grf.connect(this.grassGain);
+    this.grassGain.connect(this.master);
+    grn.start();
+
+    // ---- radio static under the engineer's messages (SPEC 8.1)
+    const rsn = noise();
+    const rsb = ctx.createBiquadFilter();
+    rsb.type = 'bandpass';
+    rsb.frequency.value = 1100;
+    rsb.Q.value = 0.45; // about 400-2800 Hz: the telephone band
+    this.staticGain = ctx.createGain();
+    this.staticGain.gain.value = 0;
+    rsn.connect(rsb);
+    rsb.connect(this.staticGain);
+    this.staticGain.connect(this.master);
+    rsn.start();
+    this.staticUntil = 0;
 
     // ---- wind
     const wn = noise();
@@ -281,6 +393,7 @@ export class AudioEngine {
       set(this.whineGain.gain, 0, 0.1);
       set(this.turboGain.gain, 0, 0.1);
       set(this.scrapeGain.gain, 0, 0.1);
+      for (const g of [this.squealGain, this.buffetGain, this.kerbGain, this.gravelGain, this.grassGain, this.overGain, this.staticGain]) set(g.gain, 0, 0.1);
       for (const v of this.voices) { set(v.g.gain, 0, 0.1); v.car = null; }
       this.lastGear = player.gear;
       this.prevThr = player.throttle;
@@ -294,6 +407,11 @@ export class AudioEngine {
     set(this.engFilter.frequency, 240 + rpm * 0.13 + thr * 320, 0.08);
     set(this.eng.gain, (0.12 + 0.2 * load) * (0.65 + rpm / 40000), 0.08);
     set(this.nzGain.gain, 0.015 + thr * 0.03 * (rpm / 15000), 0.08);
+    set(this.fire.frequency, fc * 3, 0.02);
+    set(this.fireDepth.gain, 0.42 - 0.3 * clamp((rpm - 4000) / 10000, 0, 1), 0.1);
+    const over = thr < 0.12 && rpm > 6000 ? clamp((rpm - 6000) / 7000, 0, 1) : 0;
+    set(this.overGain.gain, over * 0.22, 0.06);
+    set(this.overF.frequency, 180 + 140 * clamp((rpm - 6000) / 8000, 0, 1), 0.05);
     set(this.nzf.frequency, 900 + rpm * 0.08, 0.1);
     const V = player.speed;
     set(this.windGain.gain, clamp((V / 95) ** 2 * 0.22, 0, 0.25), 0.15);
@@ -302,7 +420,7 @@ export class AudioEngine {
     for (let w = 0; w < 4; w++) slip = Math.max(slip, player.slipVis[w]);
     set(this.tyreGain.gain, clamp(slip * 0.16, 0, 0.14), 0.08);
     set(this.tyreFilter.frequency, 800 + 300 * clamp(V / 60, 0, 1) + slip * 200, 0.1);
-    const rumble = player.kerbShake * 0.22 + (player.onGrass ? clamp(V / 60, 0, 1) * 0.2 : 0);
+    const rumble = player.kerbShake * 0.13 + (player.onGrass ? clamp(V / 60, 0, 1) * 0.12 : 0); // (the surface layers below carry the rest)
     set(this.rumbleGain.gain, rumble, 0.04);
     set(this.rumbleFilter.frequency, 90 + V * 2.5, 0.1);
     // weather: rain on the bodywork, spray from the wheels (louder the faster you go)
@@ -325,7 +443,21 @@ export class AudioEngine {
     set(this.turbo.frequency, 2600 + 6200 * this.spool, 0.05);
     set(this.turboGain.gain, 0.011 * this.spool * this.spool, 0.05);
     if (this.prevThr > 0.7 && thr < 0.25 && wasSpool > 0.55 && V > 20) this.flutter(wasSpool);
-    set(this.scrapeGain.gain, clamp((player.bottoming || 0) * 0.09, 0, 0.09), 0.03);
+    set(this.scrapeGain.gain, clamp((player.bottoming || 0) * 0.09 * clamp(V / 70, 0, 1), 0, 0.09), 0.03);
+    // brake squeal: light braking at walking pace on cold carbon
+    const bt = player.brakeTemp ? (player.brakeTemp[0] + player.brakeTemp[1] + player.brakeTemp[2] + player.brakeTemp[3]) / 4 : 500;
+    const sq = player.brake > 0.15 && V > 2 && V < 28 && bt < 380 ? 0.025 * player.brake * (1 - V / 28) : 0;
+    set(this.squealGain.gain, sq, 0.05);
+    // the edge of the tow
+    set(this.buffetGain.gain, 0.12 * Math.sin(clamp(player.slipstream || 0, 0, 1) * Math.PI) * clamp(V / 50, 0, 1), 0.08);
+    // surfaces under the tyres
+    let nK = 0, nG = 0, nGr = 0;
+    if (player.surf) for (let w = 0; w < 4; w++) { const sf = player.surf[w]; if (sf === 1) nK++; else if (sf === 3) nG++; else if (sf === 2) nGr++; }
+    set(this.kerbOsc.frequency, 35 + 40 * clamp(V / 70, 0, 1), 0.05);
+    set(this.kerbGain.gain, nK ? 0.05 * (nK / 2) * clamp(V / 25, 0, 1) : 0, 0.03);
+    set(this.gravelGain.gain, nG ? 0.05 * (nG / 4) * clamp(V / 30, 0.2, 1) : 0, 0.05);
+    set(this.grassGain.gain, nGr ? 0.09 * (nGr / 4) * clamp(V / 30, 0.2, 1) : 0, 0.05);
+    set(this.staticGain.gain, t < this.staticUntil ? 0.012 : 0, 0.05);
     this.prevThr = thr;
     // gear change thump
     if (player.gear !== this.lastGear) {
@@ -509,9 +641,38 @@ export class AudioEngine {
   }
 
   /** Team-radio squelch: a short burst of band-passed noise, then a two-tone chirp. */
+  /**
+   * The race engineer speaks the message (section 9 of SPEC-v2): the browser's own speech synthesis, a calm male-ish voice
+   * if one exists, a little quicker than default; a new message cuts the old one off, as on a real radio.
+   */
+  say(text) {
+    const ss = typeof window !== 'undefined' && window.speechSynthesis;
+    if (!ss || !this.enabled || !text) return;
+    try {
+      ss.cancel();
+      const u = new SpeechSynthesisUtterance(String(text).replace(/[·•]/g, ',').slice(0, 220));
+      const voices = ss.getVoices ? ss.getVoices() : [];
+      const v = voices.find((x) => /en[-_]GB/i.test(x.lang) && /male|daniel|george|arthur/i.test(x.name)) || voices.find((x) => /^en/i.test(x.lang));
+      if (v) u.voice = v;
+      u.rate = 1.08;
+      u.pitch = 0.92;
+      u.volume = Math.min(1, 0.4 + this.volume);
+      ss.speak(u);
+    } catch (e) {
+      /* no speech in this browser: the text is on screen anyway */
+    }
+  }
+
+  /** The engineer's channel is open for `secs`: a low static floor under the message. */
+  radioOpen(secs = 3) {
+    if (!this.started) return;
+    this.staticUntil = Math.max(this.staticUntil, this.ctx.currentTime + secs);
+  }
+
   radioClick() {
     if (!this.started) return;
     const ctx = this.ctx, t = ctx.currentTime;
+    this.radioOpen(2.5);
     const src = this.makeNoise(false);
     const bp = ctx.createBiquadFilter();
     bp.type = 'bandpass';
