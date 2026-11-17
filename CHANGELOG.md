@@ -4,6 +4,22 @@
 
 Everything below was added or fixed in this release, grouped by area.
 
+### Latest: the career, rebuilt around the driver
+The career was a list of races with a budget attached: finish well, buy one of three upgrades, and at the end of the season the standings alone decided whether a better team called. It now has a driver in it.
+
+- **Reputation** (0 to 100, from Rookie to Legend). Each race moves it: by how far you beat or missed the team's target, by whether you finished ahead of your team-mate, with a bonus for a podium or a win and for the fastest lap, and a cost for a penalty or a retirement. A short season moves it as much as a long one. The season's verdict adds more (a title, a top three, the constructors' target met or missed).
+- **Contracts.** Every team wants a certain reputation before it offers a seat (85 for the best car, nothing for the slowest). The best three offers you have earned are on the table at the end of the season; a standout championship position still earns one on its own, as before. A seat can now also be lost: finish a season 18 or more below what your team expects without meeting the constructors' target and the contract is not renewed, with only lesser teams to choose from.
+- **A retainer.** The team pays you after every race whatever the result: 2 a race at the slowest team, 8 at the best. Moving up is now worth money as well as speed.
+- **Sponsor challenges.** Before each race three are offered and you may accept one: finish without a penalty, beat your team-mate, gain three places, beat the target by two, set the fastest lap, finish on the podium, win. Harder ones pay more; nothing is lost by failing. Goals the car is expected to deliver anyway are not offered. The three are fixed for the round, so reopening the hub does not reroll them.
+- **Your team-mate.** The other car of the team is a named driver; the hub keeps the head-to-head in races and in qualifying, and every result says where they finished.
+- **Six areas of development instead of three.** Power unit, aerodynamics and chassis as before, plus a hybrid system (+5 % battery capacity a level), tyre management (-4 % tyre wear a level) and a pit crew (-0.2 s a stop per level). All three reach the car in the race (`tests/career.mjs` checks the battery and the wear rate on the player's car and on no other).
+- **Rival teams develop.** Every winter each team's car gains or loses a little (at most 0.18 on a rating that runs from 0.15 to 1.0, half of last year's form carried over, the field as a whole neither gaining nor losing). The development tab shows every car's strength this season with an arrow for the teams that moved.
+- **The team's target follows the size of the grid.** P14 was the target for a midfield car even in an eight-car race, where it could not be missed; it now scales with the number of cars.
+- **A new hub** with five tabs: *Race weekend* (the circuit, forecast, target, retainer, the sponsor's offers, the head-to-head and the paddock's headlines about your last races), *Calendar* (every round with its forecast, your result, your points and the winner), *Development*, *Standings* (complete tables), *Driver* (reputation with the mark your team expects, the reputation every team asks for, career record: races, wins, podiums, poles, fastest laps, points, best finish, titles; and past seasons). The result screen of a career race shows the headline, the target, the team-mate, each source of money and the change in reputation.
+- **Old careers keep working.** A career saved before this loads with the reputation its team implies, the three new development areas at zero, an empty record and every team at its base strength; junk in any of the new fields is cleaned on load.
+
+What was not done: a career race weekend is still qualifying and a race (no practice sessions), the sponsor challenges are one race long (no season-long sponsors), and nobody has balanced the economy over a long career by playing one. The numbers above are first settings, checked for sense on a simulated four-race season, not tuned.
+
 ### Latest: a new look (cars, trees, sky, pit building)
 The game looked like it was built from boxes because much of it was. This round replaces the worst of that.
 

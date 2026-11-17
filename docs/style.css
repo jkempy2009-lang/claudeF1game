@@ -356,3 +356,28 @@ body.calm *, body.calm *::before, body.calm *::after { animation-duration: 0.01m
 #brain .br.on { opacity: 1; font-weight: 700; }
 #brain .br i { display: block; height: 0.5em; background: rgba(255,255,255,0.35); border-radius: 2px; } #brain .br.on i { background: #3ddc84; }
 #brain .br u { text-decoration: none; text-align: right; opacity: 0.7; }
+
+/* career hub */
+.sponsors { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: 0.5rem; }
+.sponsor { display: grid; grid-template-columns: 1fr auto; gap: 0.15rem 0.6rem; text-align: left; padding: 0.6rem 0.7rem; background: rgba(255, 255, 255, 0.04); border: 1px solid var(--line); color: inherit; cursor: pointer; font: inherit; }
+.sponsor b { grid-column: 1; }
+.sponsor span { grid-column: 1; font-size: 0.82rem; opacity: 0.72; }
+.sponsor i { grid-column: 2; grid-row: 1 / span 2; align-self: center; font-style: normal; font-weight: 800; font-size: 1.15rem; color: #ffd24a; }
+.sponsor:hover { border-color: rgba(255, 255, 255, 0.35); }
+.sponsor.on { border-color: #31d17a; background: rgba(49, 209, 122, 0.12); }
+.h2hrow { display: grid; grid-template-columns: 5.5rem 1fr; align-items: center; gap: 0.6rem; margin-top: 0.6rem; }
+.h2hrow small { opacity: 0.7; text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.72rem; }
+.h2h { display: grid; grid-template-columns: 1.6rem 1fr 1.6rem; align-items: center; gap: 0.5rem; text-align: center; }
+.h2hbar { height: 0.55rem; background: #555c66; border-radius: 0.3rem; overflow: hidden; }
+.h2hbar span { display: block; height: 100%; background: #31d17a; }
+.news { padding: 0.45rem 0 0.45rem 0.7rem; border-left: 2px solid var(--line); margin-top: 0.4rem; font-size: 0.9rem; opacity: 0.75; }
+.news.top { border-left-color: #ffd24a; opacity: 1; }
+.carbar { display: grid; grid-template-columns: auto 5.2rem 1fr auto; align-items: center; gap: 0.5rem; padding: 0.22rem 0.3rem; }
+.carbar.me { background: rgba(255, 255, 255, 0.07); }
+.carbar .bar { height: 0.5rem; background: rgba(255, 255, 255, 0.08); border-radius: 0.3rem; overflow: hidden; }
+.carbar .bar span { display: block; height: 100%; }
+.carbar small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.repbar { position: relative; height: 0.9rem; background: rgba(255, 255, 255, 0.08); border-radius: 0.45rem; }
+.repbar span { display: block; height: 100%; border-radius: 0.45rem; background: linear-gradient(90deg, #2f7dd1, #31d17a 60%, #ffd24a); }
+.repbar i { position: absolute; top: -0.25rem; width: 2px; height: 1.4rem; background: #fff; }
+.gold { color: #ffd24a; }

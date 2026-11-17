@@ -8,7 +8,7 @@ import { drawLineChart } from './charts.js';
 import { ACHIEVEMENTS, DEFAULT_STATS } from '../sim/achievements.js';
 import { LESSONS, sanitizeSchool } from '../sim/school.js';
 import { KEY_ACTIONS, keyLabel, mergeKeys, sanitizeKeys } from './input.js';
-import { CHAMP_CAL, DEFAULT_RULES, MAX_ROUNDS, careerLaps, sanitizeRules, sanitizeCareer, UPGRADE_KEYS, UPGRADE_INFO, UPGRADE_MAX, upgradeCost, objectiveFor, DISTANCES, driverStandings, constructorStandings, lapsFor, weatherFor, WEATHER_NAMES, WEATHER_IDS, cleanNumMap, cleanStrMap, cleanResults } from '../sim/career.js';
+import { CHAMP_CAL, DEFAULT_RULES, MAX_ROUNDS, careerLaps, sanitizeRules, sanitizeCareer, UPGRADE_KEYS, UPGRADE_INFO, UPGRADE_MAX, upgradeCost, objectiveFor, DISTANCES, driverStandings, constructorStandings, lapsFor, weatherFor, WEATHER_NAMES, WEATHER_IDS, cleanNumMap, cleanStrMap, cleanResults, teamMate, sponsorOffers, SPONSOR_GOALS, repLabel, repNeeded, retainerFor, teamStrength, teamRank, raceObjective } from '../sim/career.js';
 
 export const SAVE_KEY = 'apex-grand-prix.v1';
 
@@ -128,6 +128,12 @@ export function sanitizeSettings(raw) {
 }
 
 /** The preset closest to a level (for the chip highlight and the summary text). */
+/** A team's colour for a bar on the dark menu: its accent when its own colour is too dark to see there. */
+function barColor(t) {
+  const h = t.color.replace('#', ''), lum = 0.299 * parseInt(h.slice(0, 2), 16) + 0.587 * parseInt(h.slice(2, 4), 16) + 0.114 * parseInt(h.slice(4, 6), 16);
+  return lum < 60 ? t.accent : t.color;
+}
+
 function nearestDifficulty(level) {
   return DIFFICULTIES.reduce((a, b) => (Math.abs(b.level - level) < Math.abs(a.level - level) ? b : a));
 }
@@ -623,7 +629,7 @@ export class Menu {
       <h2>${esc(trackName)} <span>results</span></h2>
       <div class="podium">${order.map((e) => `<div class="pod p${e.pos}" style="--c:${e.info.team.color}"><div class="hint">P${e.pos}</div><b>${esc(e.info.code)}</b><div>${esc(e.info.team.short)}</div><div class="hint">${fmt(e)}</div></div>`).join('')}</div>
       ${me ? `<div class="hint" style="text-align:center">You finished <b>P${me.pos}</b>${me.penalty ? ` (includes ${me.penalty}s of penalties)` : ''} · best lap ${me.best < Infinity ? formatTime(me.best) : '—'}</div>` : ''}
-      ${careerRes ? `<div class="panel"><h3>Career</h3><div class="hint">Finished <b style="color:#fff">P${careerRes.pos}</b> · objective P${careerRes.objective} ${careerRes.met ? '<b style="color:#31d17a">achieved</b>' : '<b style="color:#ff6b6b">missed</b>'} · prize money <b style="color:#ffd24a">+${careerRes.prize}</b>${careerRes.fastest ? ' (fastest lap bonus)' : ''} · budget now <b style="color:#ffd24a">${careerRes.budget}</b></div></div>` : ''}
+      ${careerRes ? this.careerResultPanel(careerRes) : ''}
       <div class="grid2" style="grid-template-columns:${season ? '2fr 1fr' : '1fr'}"><div class="panel" style="overflow:auto"><table class="results"><tr><th>Pos</th><th>Driver</th><th>Team</th><th>Time</th><th>Gap</th><th>Pen</th><th>Best lap</th><th>Stops</th><th>Grid</th><th>Pts</th></tr>${rows}</table></div>${seasonHtml}</div>
       <div class="panel telemetry"><h3>Race telemetry</h3><div class="charts"><canvas data-chart="laps"></canvas><canvas data-chart="fuel"></canvas><canvas data-chart="wear"></canvas><canvas data-chart="top"></canvas></div></div>
       <div class="footer"><button class="btn sm" data-act="quit">Main menu</button><div class="row">
@@ -641,11 +647,24 @@ export class Menu {
       <div class="row"><h2>New <span>career</span></h2><div class="grow"></div></div>
       <div class="panel"><h3>Choose your team</h3><div class="teams">${TEAMS.map((t, i) => {
         const o = objectiveFor(i);
-        return `<button class="team ${n.team === i ? 'on' : ''}" data-cteam="${i}" style="--c:${t.color};--c2:${t.accent}"><i></i><div><b>${esc(t.name)}</b><div class="hint">Car ${Math.round(55 + t.rating * 45)}% · target P${o.finish}</div><div class="bar"><span style="width:${Math.round(55 + t.rating * 45)}%"></span></div></div></button>`;
+        return `<button class="team ${n.team === i ? 'on' : ''}" data-cteam="${i}" style="--c:${t.color};--c2:${t.accent}"><i></i><div><b>${esc(t.name)}</b><div class="hint">Car ${Math.round(55 + t.rating * 45)}% · target P${o.finish} · pays ${retainerFor(i)} a race</div><div class="bar"><span style="width:${Math.round(55 + t.rating * 45)}%"></span></div></div></button>`;
       }).join('')}</div>
-      <div class="hint" style="margin-top:.5rem">A weaker car is a tougher start: prize money buys upgrades, and strong seasons earn offers from better teams.</div></div>
+      <div class="hint" style="margin-top:.5rem">A weaker car is a tougher start, and a smaller team pays less. Results against the team's target and against your team-mate build your reputation; reputation earns offers from better teams, and a driver far below what a team expects loses the seat.</div></div>
       ${this.careerRulesPanels(n, true)}
       <div class="footer"><button class="btn sm" data-act="main">◀ Back</button><div class="hint">${esc(TEAMS[n.team].name)} · ${n.rounds} rounds · ${n.rules.laps ? n.rules.laps + (n.rules.laps === 1 ? ' lap' : ' laps') + ' a race' : 'races by distance'} · ${esc(diff.name)}</div><button class="btn primary" data-act="careerstart">Start career</button></div></section>`;
+  }
+
+  /** What a career race did for the driver: money (prize, retainer, sponsor), the target, the team-mate, reputation. */
+  careerResultPanel(r) {
+    const good = '#31d17a', bad = '#ff6b6b', gold = '#ffd24a';
+    const money = [`prize <b style="color:${gold}">+${r.prize}</b>${r.fastest ? ' (with the fastest lap bonus)' : ''}`, `retainer <b style="color:${gold}">+${r.retainer || 0}</b>`];
+    if (r.sponsor) money.push(`sponsor "${esc(r.sponsor.name)}" ${r.sponsor.met ? `<b style="color:${gold}">+${r.sponsor.pay}</b>` : `<b style="color:${bad}">missed</b>`}`);
+    const d = r.repDelta || 0;
+    return `<div class="panel"><h3>Career</h3>
+      ${r.news ? `<div class="news top">${esc(r.news)}</div>` : ''}
+      <div class="hint">Finished <b style="color:#fff">P${r.pos}</b> · team target P${r.objective} <b style="color:${r.met ? good : bad}">${r.met ? 'achieved' : 'missed'}</b>${r.mate ? ` · ${r.mate.ahead ? 'ahead of' : 'behind'} team-mate ${esc(r.mate.name)} (P${r.mate.pos})` : ''}</div>
+      <div class="hint" style="margin-top:.3rem">${money.join(' · ')} · budget now <b style="color:${gold}">${r.budget}</b></div>
+      <div class="hint" style="margin-top:.3rem">Reputation <b style="color:#fff">${(r.rep ?? 0).toFixed(0)}</b> (${esc(r.repLabel || '')}) <b style="color:${d > 0 ? good : d < 0 ? bad : '#9aa3ad'}">${d > 0 ? '▲ +' + d.toFixed(1) : d < 0 ? '▼ ' + d.toFixed(1) : 'unchanged'}</b></div></div>`;
   }
 
   /** The editable rules of a career (a new one, or the running one from the hub): race rules and season rules. */
@@ -688,14 +707,66 @@ export class Menu {
   screen_career_hub() {
     const c = this.save.career;
     const s = c.season;
+    const team = TEAMS[c.team];
+    const TABS = [['overview', 'Race weekend'], ['calendar', 'Calendar'], ['development', 'Development'], ['standings', 'Standings'], ['driver', 'Driver']];
+    const tab = TABS.some(([k]) => k === this.ctab) ? this.ctab : 'overview';
+    return `<section class="screen panel-screen full">
+      <div class="row"><h2>Career <span>season ${c.seasonNo}</span></h2><div class="grow"></div>
+        <div class="hint"><b style="color:#fff">${esc(team.name)}</b> · ${esc(repLabel(c.rep))} · budget <b style="color:#ffd24a;font-size:1.3rem">${c.budget}</b></div></div>
+      <div class="tabs">${TABS.map(([k, n]) => `<button class="tab ${tab === k ? 'active' : ''}" data-ctab="${k}">${n}</button>`).join('')}</div>
+      ${this['career_' + tab](c, s, team)}
+      <div class="footer"><button class="btn sm" data-act="main">Main menu</button><div class="hint">Round ${Math.min(s.round + 1, s.calendar.length)} of ${s.calendar.length}</div><div class="row"><button class="btn sm" data-act="careerrules">Career rules</button><button class="btn sm" data-act="careerwipe" data-confirm="0">Abandon career</button></div></div></section>`;
+  }
+
+  /** The coming race: circuit, forecast, the team's target, a sponsor's challenge to accept, and the other car of the team. */
+  career_overview(c, s, team) {
     const id = s.calendar[s.round];
     const def = TRACK_DEFS.find((d) => d.id === id);
     const tr = this.hooks.tracks[id];
     const laps = tr ? careerLaps(c, tr.length) : 5;
-    const obj = objectiveFor(c.team);
-    const team = TEAMS[c.team];
-    const dr = driverStandings(s).slice(0, 8);
-    const cons = constructorStandings(s).slice(0, 6);
+    const obj = { finish: raceObjective(c.team, c.rules.fieldSize) };
+    const mate = teamMate(c.team);
+    const h = c.h2h;
+    const bar = (a, b) => { const t = a + b; return `<div class="h2h"><b>${a}</b><div class="h2hbar"><span style="width:${t ? Math.round((a / t) * 100) : 50}%"></span></div><b>${b}</b></div>`; };
+    const offers = sponsorOffers(c);
+    const sp = offers.map((sid) => {
+      const g = SPONSOR_GOALS[sid];
+      return `<button class="sponsor ${c.sponsor === sid ? 'on' : ''}" data-sponsor="${sid}"><b>${esc(g.name)}</b><span>${esc(g.text)}</span><i>+${Math.round(g.pay * (c.rules.prize || 1))}</i></button>`;
+    }).join('');
+    return `<div class="grid2" style="grid-template-columns:1.15fr 1fr">
+        <div class="panel"><h3>Round ${s.round + 1} of ${s.calendar.length}</h3>
+          <div class="hubtrack">${tr ? trackThumb(tr) : ''}<div><b style="font-size:1.3rem">${esc(def.name)}</b><div class="hint">${esc(def.country)} · ${tr ? (tr.length / 1000).toFixed(2) + ' km' : ''} · ${laps} ${laps === 1 ? 'lap' : 'laps'}</div>
+          <div class="hint" style="margin-top:.5rem">Forecast: <b style="color:#fff">${esc(WEATHER_NAMES[weatherFor(s)])}</b>${weatherFor(s) !== 'dry' ? ' — be ready to change tyres' : ''}</div>
+          <div class="hint" style="margin-top:.3rem">Team target: finish <b style="color:#fff">P${obj.finish}</b> or better (+8 prize). Retainer: <b style="color:#fff">+${Math.round(retainerFor(c.team) * (c.rules.prize || 1))}</b> every race.</div></div></div>
+          <h3 style="margin-top:1rem">Sponsor challenge <small class="hint">optional · pick one</small></h3>
+          <div class="sponsors">${sp || '<div class="hint">No sponsor is interested in this race.</div>'}</div>
+          <div class="row" style="margin-top:.9rem"><button class="btn primary grow" data-act="careerrace" data-q="1">Qualify &amp; race</button><button class="btn grow" data-act="careerrace" data-q="0">Race now</button></div>
+        </div>
+        <div class="panel"><h3>You against ${esc(mate.name)}</h3>
+          <div class="hint">The first driver you have to beat is the one in the same car.</div>
+          <div class="h2hrow"><small>Races</small>${bar(h.race[0], h.race[1])}</div>
+          <div class="h2hrow"><small>Qualifying</small>${bar(h.quali[0], h.quali[1])}</div>
+          <h3 style="margin-top:1rem">Paddock news</h3>
+          ${c.news.length ? c.news.slice(0, 4).map((n, i) => `<div class="news ${i ? '' : 'top'}">${esc(n)}</div>`).join('') : `<div class="hint">Your first race for ${esc(team.short)}. Nobody has written anything about you yet.</div>`}
+        </div>
+      </div>`;
+  }
+
+  /** Every round of the season: where, the forecast, and how it went. */
+  career_calendar(c, s) {
+    const rows = s.calendar.map((id, i) => {
+      const def = TRACK_DEFS.find((d) => d.id === id);
+      const res = s.results.find((r) => r.round === i);
+      const me = res && res.order.find((o) => o.name === 'You');
+      const win = res && res.order.find((o) => o.pos === 1);
+      const state = res ? (me ? `<b class="${me.pos <= 3 ? 'gold' : ''}">P${me.pos}</b>` : '–') : i === s.round ? '<b style="color:#31d17a">Next</b>' : '';
+      return `<tr class="${i === s.round ? 'me' : ''}"><td class="pos">${i + 1}</td><td>${esc(def ? def.name : id)}</td><td class="hint">${esc(def ? def.country : '')}</td><td class="hint">${res ? '' : esc(WEATHER_NAMES[weatherFor(s, i)])}</td><td>${state}</td><td>${me ? `<b>${me.pts}</b> pts` : ''}</td><td class="hint">${win ? 'Won by ' + esc(win.name) : ''}</td></tr>`;
+    }).join('');
+    return `<div class="panel"><h3>Season ${c.seasonNo} calendar</h3><table class="results">${rows}</table></div>`;
+  }
+
+  /** Spending the budget on the car, and how every team's car compares this season. */
+  career_development(c) {
     const ups = UPGRADE_KEYS.map((k) => {
       const lv = c.upgrades[k] || 0;
       const cost = upgradeCost(lv);
@@ -703,36 +774,61 @@ export class Menu {
       return `<div class="upg"><div><b>${esc(UPGRADE_INFO[k].name)}</b><div class="hint">${esc(UPGRADE_INFO[k].blurb)}</div><div class="pips">${pips}</div></div>
         <button class="btn sm" data-buy="${k}" ${lv >= UPGRADE_MAX || c.budget < cost ? 'disabled' : ''}>${lv >= UPGRADE_MAX ? 'Max' : `Upgrade · ${cost}`}</button></div>`;
     }).join('');
-    return `<section class="screen panel-screen full">
-      <div class="row"><h2>Career <span>season ${c.seasonNo}</span></h2><div class="grow"></div><div class="hint"><b style="color:#fff">${esc(team.name)}</b> · budget <b style="color:#ffd24a;font-size:1.3rem">${c.budget}</b></div></div>
-      <div class="grid2" style="grid-template-columns:1.1fr 1fr">
-        <div class="panel"><h3>Round ${s.round + 1} of ${s.calendar.length}</h3>
-          <div class="hubtrack">${tr ? trackThumb(tr) : ''}<div><b style="font-size:1.3rem">${esc(def.name)}</b><div class="hint">${esc(def.country)} · ${tr ? (tr.length / 1000).toFixed(2) + ' km' : ''} · ${laps} ${laps === 1 ? "lap" : "laps"}</div>
-          <div class="hint" style="margin-top:.5rem">Forecast: <b style="color:#fff">${esc(WEATHER_NAMES[weatherFor(s)])}</b>${weatherFor(s) !== 'dry' ? ' — be ready to change tyres' : ''}</div>
-          <div class="hint" style="margin-top:.3rem">Objective: finish <b style="color:#fff">P${obj.finish}</b> or better (+8 prize). Constructors target: P${obj.constructor}.</div></div></div>
-          <div class="row" style="margin-top:.8rem"><button class="btn primary grow" data-act="careerrace" data-q="1">Qualify &amp; race</button><button class="btn grow" data-act="careerrace" data-q="0">Race now</button></div>
-        </div>
-        <div class="panel"><h3>Car development</h3>${ups}</div>
-      </div>
-      <div class="grid2" style="margin-top:1rem">
+    const grid = TEAMS.map((t, i) => ({ t, i, v: teamStrength(c, i), d: (c.teamForm[i] || 0) })).sort((a, b) => b.v - a.v).map(({ t, i, v, d }) => {
+      const pct = Math.round(55 + v * 45);
+      const arrow = d > 0.02 ? '<span style="color:#31d17a">▲</span>' : d < -0.02 ? '<span style="color:#ff6b6b">▼</span>' : '';
+      return `<div class="carbar ${i === c.team ? 'me' : ''}"><span class="tc" style="--c:${t.color}"></span><small>${esc(t.short)} ${arrow}</small><div class="bar"><span style="width:${pct}%;background:${barColor(t)}"></span></div><b>${pct}</b></div>`;
+    }).join('');
+    return `<div class="grid2">
+        <div class="panel"><h3>Car development <small class="hint">budget ${c.budget}</small></h3>${ups}</div>
+        <div class="panel"><h3>The grid this season</h3><div class="hint" style="margin-bottom:.5rem">Every team develops over the winter: ▲ found pace, ▼ lost it. Your upgrades come on top of your team's car.</div>${grid}</div>
+      </div>`;
+  }
+
+  career_standings(c, s, team) {
+    const dr = driverStandings(s);
+    const cons = constructorStandings(s);
+    return `<div class="grid2">
         <div class="panel"><h3>Drivers' championship</h3><table class="results">${dr.length ? dr.map((d, i) => `<tr class="${d.name === 'You' ? 'me' : ''}"><td class="pos">${i + 1}</td><td>${esc(d.name)}</td><td>${esc(d.team)}</td><td><b>${d.pts}</b></td></tr>`).join('') : '<tr><td class="hint">No races yet</td></tr>'}</table></div>
-        <div class="panel"><h3>Constructors</h3><table class="results">${cons.length ? cons.map((d, i) => `<tr class="${d.team === team.short ? 'me' : ''}"><td class="pos">${i + 1}</td><td>${esc(d.team)}</td><td><b>${d.pts}</b></td></tr>`).join('') : '<tr><td class="hint">No races yet</td></tr>'}</table></div>
-      </div>
-      <div class="footer"><button class="btn sm" data-act="main">Main menu</button><div class="hint">${c.history.length ? `Previous seasons: ${c.history.map((h) => `S${h.seasonNo} P${h.driverPos}`).join(' · ')}` : ''}</div><div class="row"><button class="btn sm" data-act="careerrules">Career rules</button><button class="btn sm" data-act="careerwipe" data-confirm="0">Abandon career</button></div></div></section>`;
+        <div class="panel"><h3>Constructors</h3><table class="results">${cons.length ? cons.map((d, i) => `<tr class="${d.team === team.short ? 'me' : ''}"><td class="pos">${i + 1}</td><td>${esc(d.team)}</td><td><b>${d.pts}</b></td></tr>`).join('') : '<tr><td class="hint">No races yet</td></tr>'}</table>
+        <div class="hint" style="margin-top:.6rem">Constructors target for ${esc(team.short)}: P${objectiveFor(c.team).constructor}.</div></div>
+      </div>`;
+  }
+
+  /** Reputation, the seats it could earn, career statistics and past seasons. */
+  career_driver(c, s, team) {
+    const st = c.stats;
+    const rank = teamRank(c.team);
+    const ladder = TEAMS.map((t, i) => ({ t, i, r: teamRank(i) })).sort((a, b) => a.r - b.r).map(({ t, i, r }) => {
+      const need = repNeeded(r);
+      const state = i === c.team ? 'Your team' : c.rep >= need ? (r < rank ? 'Would sign you' : 'Open to you') : `Needs ${need}`;
+      return `<div class="carbar ${i === c.team ? 'me' : ''}"><span class="tc" style="--c:${t.color}"></span><small>${esc(t.short)}</small><div class="bar"><span style="width:${need}%;background:${c.rep >= need ? '#31d17a' : '#555c66'}"></span></div><b class="hint" style="min-width:7.5rem;text-align:right">${state}</b></div>`;
+    }).join('');
+    const hist = c.history.slice().reverse().map((h) => `<tr><td class="pos">S${h.seasonNo}</td><td>${esc(TEAMS[h.team].short)}</td><td>Drivers' <b>P${h.driverPos}</b></td><td>Team <b>P${h.teamPos}</b></td><td>${h.points} pts</td><td>${h.wins} wins</td><td>${h.champion ? '<b class="gold">Champion</b>' : ''}</td></tr>`).join('');
+    return `<div class="grid2">
+        <div class="panel"><h3>Reputation <small class="hint">${esc(repLabel(c.rep))}</small></h3>
+          <div class="repbar"><span style="width:${c.rep}%"></span><i style="left:${repNeeded(rank)}%" title="What ${esc(team.short)} expects"></i></div>
+          <div class="hint" style="margin:.4rem 0 .8rem"><b style="color:#fff">${c.rep.toFixed(0)}</b> / 100. It rises when you beat the team's target, your team-mate and the podium, and falls with missed targets, penalties and retirements. The marker is what ${esc(team.short)} expects of its driver: fall 18 below it without meeting the constructors' target and the seat is gone.</div>
+          ${ladder}</div>
+        <div class="panel"><h3>Career record</h3>
+          <div class="bigstats"><div><small>Races</small><b>${st.races}</b></div><div><small>Wins</small><b>${st.wins}</b></div><div><small>Podiums</small><b>${st.podiums}</b></div><div><small>Poles</small><b>${st.poles}</b></div><div><small>Fastest laps</small><b>${st.fastest}</b></div><div><small>Points</small><b>${st.points}</b></div><div><small>Best finish</small><b>${st.best ? 'P' + st.best : '–'}</b></div><div><small>Titles</small><b>${st.titles}</b></div></div>
+          <h3 style="margin-top:1rem">Seasons</h3>${hist ? `<table class="results">${hist}</table>` : '<div class="hint">Your first season.</div>'}</div>
+      </div>`;
   }
 
   screen_career_end() {
     const c = this.save.career;
     const r = c.seasonRecap;
     const team = TEAMS[c.team];
-    const offers = (r.offers || []).map((i) => `<button class="team" data-coffer="${i}" style="--c:${TEAMS[i].color};--c2:${TEAMS[i].accent}"><i></i><div><b>${esc(TEAMS[i].name)}</b><div class="hint">Offer: join for season ${c.seasonNo + 1} · car ${Math.round(55 + TEAMS[i].rating * 45)}%</div><div class="bar"><span style="width:${Math.round(55 + TEAMS[i].rating * 45)}%"></span></div></div></button>`).join('');
+    const offers = (r.offers || []).map((i) => `<button class="team" data-coffer="${i}" style="--c:${TEAMS[i].color};--c2:${TEAMS[i].accent}"><i></i><div><b>${esc(TEAMS[i].name)}</b><div class="hint">Offer: join for season ${c.seasonNo + 1} · car ${Math.round(55 + TEAMS[i].rating * 45)}% · pays ${retainerFor(i)} a race</div><div class="bar"><span style="width:${Math.round(55 + TEAMS[i].rating * 45)}%"></span></div></div></button>`).join('');
     return `<section class="screen panel-screen full">
       <div class="row"><h2>Season ${r.seasonNo} <span>${r.champion ? 'champion!' : 'complete'}</span></h2></div>
       <div class="grid2"><div class="panel"><h3>Your season</h3>
         <div class="bigstats"><div><small>Drivers'</small><b>P${r.driverPos}</b></div><div><small>${esc(team.short)}</small><b>P${r.teamPos}</b></div><div><small>Points</small><b>${r.points}</b></div><div><small>Wins</small><b>${r.wins}</b></div><div><small>Podiums</small><b>${r.podiums}</b></div></div>
-        <div class="hint" style="margin-top:.6rem">Constructors objective (P${r.constructorObjective}): <b style="color:${r.metConstructor ? '#31d17a' : '#ff6b6b'}">${r.metConstructor ? 'achieved' : 'missed'}</b>. Season bonus added to your budget: now <b style="color:#ffd24a">${c.budget}</b>.</div></div>
-        <div class="panel"><h3>Contracts for next season</h3><div class="teams">${offers || '<div class="hint">No offers this year. Finish higher in the standings to attract bigger teams.</div>'}
-          <button class="team on" data-coffer="${c.team}" style="--c:${team.color};--c2:${team.accent}"><i></i><div><b>Stay with ${esc(team.short)}</b><div class="hint">Keep your car development</div></div></button></div></div></div>
+        <div class="hint" style="margin-top:.6rem">Constructors objective (P${r.constructorObjective}): <b style="color:${r.metConstructor ? '#31d17a' : '#ff6b6b'}">${r.metConstructor ? 'achieved' : 'missed'}</b>. Season bonus added to your budget: now <b style="color:#ffd24a">${c.budget}</b>.</div>
+        <div class="hint" style="margin-top:.4rem">Reputation: <b style="color:#fff">${c.rep.toFixed(0)}</b> / 100 · ${esc(repLabel(c.rep))}. Every team develops its car over the winter, so the order next year will not be quite this one.</div></div>
+        <div class="panel"><h3>Contracts for next season</h3><div class="teams">${offers || '<div class="hint">No offers this year. Build your reputation to attract bigger teams.</div>'}
+          ${r.dropped ? `<div class="hint" style="color:#ff6b6b;margin-top:.4rem">${esc(team.short)} has not renewed your contract: your reputation fell too far below what the team expects.</div>${offers ? '' : `<button class="team on" data-coffer="${c.team}" style="--c:${team.color};--c2:${team.accent}"><i></i><div><b>One more year with ${esc(team.short)}</b><div class="hint">Nobody else made an offer, so the team keeps you on</div></div></button>`}` : `<button class="team on" data-coffer="${c.team}" style="--c:${team.color};--c2:${team.accent}"><i></i><div><b>Stay with ${esc(team.short)}</b><div class="hint">Keep your car development</div></div></button>`}</div></div></div>
       <div class="footer"><button class="btn sm" data-act="main">Main menu</button><div class="hint">Moving teams starts car development again.</div></div></section>`;
   }
 
@@ -854,6 +950,8 @@ export class Menu {
     }
     if (t.dataset.coffer != null) return H.careerNext(+t.dataset.coffer);
     if (t.dataset.buy) return H.careerBuy(t.dataset.buy);
+    if (t.dataset.ctab) { this.ctab = t.dataset.ctab; return this.rerender(); }
+    if (t.dataset.sponsor) return H.careerSponsor(t.dataset.sponsor);
     if (t.dataset.preset) {
       this.config.assists = { ...ASSIST_PRESETS[t.dataset.preset] };
       this.persist();

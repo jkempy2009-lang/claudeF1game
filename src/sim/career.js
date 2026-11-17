@@ -136,6 +136,12 @@ export function objectiveFor(teamIdx) {
   return { finish: Math.min(16, r === 0 ? 2 : 2 * r + 2), constructor: Math.min(10, r + 1) };
 }
 
+/** The finishing position the team expects in a race with `cars` on the grid (the target is set for a full grid of 20). */
+export function raceObjective(teamIdx, cars = 20) {
+  const full = objectiveFor(teamIdx).finish;
+  return Math.max(1, Math.min(full, Math.round((full * Math.max(2, Math.min(20, cars))) / 20)));
+}
+
 export function prizeFor(pos, objectiveMet, fastestLap = false) {
   const table = [20, 15, 12, 10, 8, 7, 6, 5, 4, 3];
   return (table[pos - 1] ?? 2) + (objectiveMet ? 8 : 0) + (fastestLap ? 3 : 0);
@@ -188,8 +194,8 @@ export const SPONSOR_GOALS = {
 
 /** The three challenges on the table for the coming race: the same three every time the hub is opened. */
 export function sponsorOffers(career) {
-  const obj = objectiveFor(career.team).finish;
   const cars = (career.rules && career.rules.fieldSize) || 20;
+  const obj = raceObjective(career.team, cars);
   const ids = Object.keys(SPONSOR_GOALS).filter((id) => {
     const g = SPONSOR_GOALS[id];
     if (g.top && (g.top >= obj || g.top > cars - 2)) return false; // already expected of this car, or everybody gets it
@@ -221,7 +227,7 @@ export function repDelta(r) {
   return d;
 }
 /** A short season must be able to make or break a name as much as a long one. */
-const repScale = (career) => Math.max(0.3, Math.min(1.5, 6 / Math.max(1, career.rounds)));
+const repScale = (career) => Math.max(0.25, Math.min(1, 4 / Math.max(1, career.rounds)));
 const clampRep = (v) => Math.max(0, Math.min(100, Math.round(v * 10) / 10));
 
 export const newStats = () => ({ races: 0, wins: 0, podiums: 0, poles: 0, fastest: 0, points: 0, dnfs: 0, best: 0, titles: 0 });
@@ -299,7 +305,7 @@ export function settleRace(career, row, cls, opts = {}) {
   const me = row.order.find((o) => o.name === 'You');
   const mine = cls.find((e) => e.info.isPlayer);
   const mateE = cls.find((e) => !e.info.isPlayer && e.info.teamIdx === career.team);
-  const obj = objectiveFor(career.team);
+  const obj = { finish: raceObjective(career.team, cls.length) };
   const pos = me ? me.pos : cls.length;
   const met = !!me && me.pos <= obj.finish;
   const fl = cls.find((e) => e.info.isPlayer && Number.isFinite(e.best) && e.best === Math.min(...cls.map((c) => c.best)));

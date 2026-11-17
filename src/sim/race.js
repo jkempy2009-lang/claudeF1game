@@ -887,7 +887,8 @@ export class Race {
         rs.pitAct = false;
         for (const r of stepPitGame(pg, rs.service.t, press)) this.pushEvent({ type: 'pitWheel', car, k: r.k, res: r.res });
         if (pg.done && rs.service.dur === Infinity) {
-          rs.service.dur = pg.dur + (rs.service.repair || 0); // bodywork repair time is added to the wheel work (the crew cannot do both at once)
+          const crew = this.opt.upgrades ? upgradeEffects(this.opt.upgrades).pit : 0; // career: a drilled crew is quicker whatever the driver does
+          rs.service.dur = Math.max(1.8, pg.dur - crew) + (rs.service.repair || 0); // bodywork repair time is added to the wheel work (the crew cannot do both at once)
           if (pg.perfects === 4) rs.perfectStops = (rs.perfectStops || 0) + 1;
           this.pushEvent({ type: 'pitGameDone', car, dur: pg.dur, repair: rs.service.repair || 0, perfects: pg.perfects, misses: pg.misses });
         }

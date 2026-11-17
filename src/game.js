@@ -354,6 +354,7 @@ class Game {
     if (this.session) this.endSession();
     this.state = 'menu';
     this.hud.show(false);
+    this.menu.ctab = 'overview'; // back from a race (or the main menu): the race weekend first
     if (!c) return this.menu.show('career_new');
     if (Career.seasonDone(c.season)) {
       if (!c.seasonRecap) Career.endSeason(c);

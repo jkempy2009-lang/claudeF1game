@@ -242,6 +242,15 @@ for (const [name, bad] of [
   const b = await page.evaluate(() => window.apex.save.career.budget);
   step('prize money paid', b > 20, String(b));
   await page.click('[data-act=careercontinue]');
+  // the hub: the race weekend tab shows the sponsor's challenges and the team-mate, development is a tab of its own
+  await page.waitForSelector('[data-sponsor]');
+  const sid = await page.$eval('[data-sponsor]', (e) => e.dataset.sponsor);
+  await page.click(`[data-sponsor=${sid}]`);
+  step('a sponsor challenge can be accepted', (await page.evaluate(() => window.apex.save.career.sponsor)) === sid);
+  const cres = await page.evaluate(() => { const c = window.apex.save.career; return { races: c.stats.races, h2h: c.h2h.race[0] + c.h2h.race[1], news: c.news.length, rep: c.rep }; });
+  step('the race counted for the career record', cres.races === 1 && cres.h2h === 1 && cres.news === 1 && cres.rep >= 0 && cres.rep <= 100, JSON.stringify(cres));
+  for (const tab of ['calendar', 'standings', 'driver', 'development']) { await page.click(`[data-ctab=${tab}]`); await page.waitForTimeout(120); }
+  step('career hub tabs', (await page.locator('[data-buy]').count()) === 6);
   await page.waitForSelector('[data-buy=power]');
   await page.click('[data-buy=power]');
   const up = await page.evaluate(() => window.apex.save.career.upgrades.power);
