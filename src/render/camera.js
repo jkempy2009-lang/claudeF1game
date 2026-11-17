@@ -73,11 +73,11 @@ export class CameraRig {
     let fovTarget = 62 + clamp(speed * 0.1, 0, 14);
     if (this._view !== view) {
       // a driver's helmet hidden for the cockpit view comes back as soon as the rig follows another car
-      if (this._view) this._view.helmet.visible = true;
+      if (this._view) this._view.setOnboard('chase');
       this._view = view;
       this.tvIndex = -1;
     }
-    view.helmet.visible = this.mode !== 'cockpit' && this.mode !== 'tcam';
+    view.setOnboard(this.mode);
     if (this.mode === 'finish' && !this.init) this.fT = 0;
 
     if (this.mode === 'chase' || this.mode === 'close' || this.mode === 'heli') {
@@ -96,7 +96,7 @@ export class CameraRig {
       cam.lookAt(lookAt);
       if (this.mode === 'heli') fovTarget = 52;
     } else if (this.mode === 'cockpit' || this.mode === 'tcam') {
-      const local = this.mode === 'cockpit' ? v2.set(0.12, 1.0, 0) : v2.set(-0.25, 1.38, 0);
+      const local = this.mode === 'cockpit' ? v2.set(0.1, 0.83, 0) : v2.set(-0.3, 1.3, 0); // the driver's eyes; the camera pod on the airbox
       view.model.updateWorldMatrix(true, false);
       view.model.localToWorld(local);
       cam.position.copy(local);

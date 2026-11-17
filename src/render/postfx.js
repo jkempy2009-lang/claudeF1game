@@ -68,8 +68,8 @@ export class PostFX {
           // grade (display space): a touch more contrast and colour, cool shadows, and a soft vignette that settles the eye on the road
           vec3 c = gl_FragColor.rgb;
           float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
-          c = mix(vec3(lum), c, 1.0 + 0.12 * grade);
-          c = (c - 0.5) * (1.0 + 0.07 * grade) + 0.5;
+          c = mix(vec3(lum), c, 1.0 + 0.3 * grade);
+          c = (c - 0.5) * (1.0 + 0.1 * grade) + 0.5;
           c += vec3(-0.004, 0.0, 0.012) * (1.0 - lum) * grade;
           float v = smoothstep(0.42, 1.08, length(d * vec2(aspect, 1.0) * 1.15));
           c *= 1.0 - 0.34 * v * v * grade;

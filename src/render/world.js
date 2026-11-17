@@ -60,12 +60,22 @@ void main() {
   }
   float sd = max(dot(d, normalize(sunDir)), 0.0);
   col += sunColor * (pow(sd, 6000.0) * 3.0 + pow(sd, 22.0) * 0.22 + pow(sd, 4.0) * 0.07);
+  // a pale band of haze along the horizon
+  col = mix(col, mix(horizon, vec3(1.0), 0.2), 0.4 * exp(-max(h, 0.0) * 10.0));
   if (h > 0.0) {
-    vec2 uv = d.xz / (h + 0.18) * 1.6 + vec2(time * 0.004, 0.0);
-    float c = fbm(uv * 1.4);
-    float m = smoothstep(0.52 - cloud * 0.2, 0.9, c) * smoothstep(0.0, 0.2, h);
-    vec3 cc = mix(vec3(0.82), vec3(1.0), c) * mix(vec3(0.75, 0.8, 0.9), vec3(1.0), sd * 0.6 + 0.4);
-    col = mix(col, cc, m * 0.85 * cloud);
+    // cumulus: separate clouds with bright edges and shaded bases; more cloud cover (rain) joins them into an overcast
+    vec2 uv = d.xz / (h + 0.16) * 1.25 + vec2(time * 0.0035, time * 0.001);
+    float c = fbm(uv * 1.15) * 0.72 + fbm(uv * 3.1 + 7.3) * 0.28;
+    float th = mix(0.66, 0.36, clamp(cloud, 0.0, 1.2));
+    float m = smoothstep(th, th + 0.1, c) * smoothstep(0.0, 0.16, h);
+    float body = smoothstep(th + 0.05, th + 0.3, c);
+    float over = smoothstep(0.75, 1.15, cloud);
+    vec3 lit = mix(vec3(1.0), sunColor, 0.35) * (0.94 + 0.3 * pow(sd, 3.0));
+    vec3 shade = mix(vec3(0.66, 0.71, 0.8), vec3(0.42, 0.45, 0.5), over);
+    vec3 cc = mix(lit, shade, body * (0.55 + 0.35 * over));
+    cc *= mix(1.0, 0.1, night);
+    cc = mix(cc, col, 0.5 * exp(-h * 7.0)); // clouds fade into the haze far away
+    col = mix(col, cc, m * (0.92 - 0.25 * (1.0 - smoothstep(0.0, 0.3, h))));
   }
   gl_FragColor = vec4(col, 1.0);
 }`;
@@ -84,7 +94,7 @@ function makeSky(theme) {
       sunDir: { value: new THREE.Vector3(...sky.sun).normalize() },
       sunColor: { value: new THREE.Color(sky.sunColor) },
       time: { value: 0 },
-      cloud: { value: theme.cloud ?? 0.8 },
+      cloud: { value: theme.cloud ?? 0.3 },
       night: { value: 0 },
     },
   });
@@ -229,7 +239,7 @@ export class World {
       this._base = {
         top: new THREE.Color(th.sky.top), horizon: new THREE.Color(th.sky.horizon), sunColor: new THREE.Color(th.sky.sunColor),
         sunDir: new THREE.Vector3(...th.sky.sun).normalize(), fog: new THREE.Color(th.fog), hemiInt: this.hemi.intensity, sunInt: this.sun.intensity,
-        ground: new THREE.Color(th.fog).multiplyScalar(0.75), cloud: th.cloud ?? 0.8,
+        ground: new THREE.Color(th.fog).multiplyScalar(0.75), cloud: th.cloud ?? 0.3,
       };
       this._tmpA = new THREE.Color();
       this.atmo = { fog: new THREE.Color(th.fog), fogMul: 1, envMul: 1, exposure: 1 };
@@ -249,7 +259,7 @@ export class World {
     const k = Math.sqrt(Math.max(0.0001, 1 - elev * elev)) / hl;
     this.sunDir.set(hx * k, elev, hz * k).normalize();
     u.sunDir.value.copy(this.sunDir);
-    u.cloud.value = clamp(b.cloud + 0.25 * rain, 0, 1.2);
+    u.cloud.value = clamp(b.cloud + 0.8 * rain, 0, 1.2);
     // night: deep blue sky with stars, a pale moon, and the track lit by floodlights
     const nTop = this._tmpF || (this._tmpF = new THREE.Color('#050a1e')), nHor = this._tmpG || (this._tmpG = new THREE.Color('#1b2a4e')), nMoon = this._tmpH || (this._tmpH = new THREE.Color('#9db8ff'));
     u.top.value.lerp(nTop, night);
@@ -748,6 +758,31 @@ export class World {
     }
     cm.castShadow = true;
     this.group.add(cm);
+    // the upper floor: a band of dark glass over the garages (it mirrors the sky), a roof that overhangs it, and mullions
+    // along the glass, so the building is not one bare slab
+    const glass = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: 0x16222e, roughness: 0.06, metalness: 0.92, envMapIntensity: 1.6 }), nseg);
+    const roof = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: 0x3a3f46, roughness: 0.55, metalness: 0.2 }), nseg);
+    const pillars = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: 0xf4f5f7, roughness: 0.6 }), nseg + 1);
+    const face = -p.width / 2 - 0.8; // the facade, as an offset from the lane's centre
+    for (let k = 0; k <= nseg; k++) {
+      if (k < nseg) {
+        const s = sA + k * 6 + 3;
+        tr.pointAt(s, tr.pitCentre(s) + face + 0.04, pt);
+        q.setFromAxisAngle(up, pt.heading);
+        mt.compose(pv.set(pt.x, pt.h + 5.85, -pt.y), q, sc.set(6.02, 1.35, 0.14));
+        glass.setMatrixAt(k, mt);
+        tr.pointAt(s, tr.pitCentre(s) + face - depth / 2 + 1.3, pt);
+        mt.compose(pv.set(pt.x, pt.h + hgt + 0.16, -pt.y), q, sc.set(6.04, 0.32, depth + 3.2));
+        roof.setMatrixAt(k, mt);
+      }
+      const sp = sA + k * 6;
+      tr.pointAt(sp, tr.pitCentre(sp) + face + 0.12, pt);
+      q.setFromAxisAngle(up, pt.heading);
+      mt.compose(pv.set(pt.x, pt.h + 5.9, -pt.y), q, sc.set(0.3, 2.3, 0.3)); // upper floor only: the garage doors below are not on this grid
+      pillars.setMatrixAt(k, mt);
+    }
+    roof.castShadow = true;
+    this.group.add(glass, roof, pillars);
 
     // garage doors, team signs, name labels and painted service boxes: one merged mesh per kind
     const place = (geo, x, y, z, rotY, pitchX = 0) => {
@@ -928,43 +963,138 @@ export class World {
       g.setAttribute('color', new THREE.BufferAttribute(col, 3));
       return g;
     };
+    const fine = this.quality === 'high';
+    // Foliage is shaded as one soft volume, not as a pile of facets: every vertex gets a smooth normal that leans away from
+    // the middle of the crown, and a colour that is darker low down and inside and lighter where the sun reaches it.
+    const n3 = (x, y, z, f) => fbm(x * f + z * 0.71 + 13.1, y * f - z * 0.53 + 7.7, 3);
+    const crown = (blobs, hue, sat, lum, det) => {
+      let cx = 0, cy = 0, cz = 0, wsum = 0, yMin = Infinity, yMax = -Infinity;
+      for (const [x, y, z, r] of blobs) { cx += x * r; cy += y * r; cz += z * r; wsum += r; yMin = Math.min(yMin, y - r); yMax = Math.max(yMax, y + r); }
+      cx /= wsum; cy /= wsum; cz /= wsum;
+      const out = [];
+      const c = new THREE.Color(), v = new THREE.Vector3(), nb = new THREE.Vector3(), nc = new THREE.Vector3();
+      blobs.forEach(([bx, by, bz, r, sy = 0.86], bi) => {
+        const g = new THREE.IcosahedronGeometry(1, bi < 3 ? det : 1);
+        g.deleteAttribute('uv');
+        const p = g.attributes.position, nr = g.attributes.normal, col = new Float32Array(p.count * 3);
+        const dh = rnd() * 0.03 - 0.015, dl = rnd() * 0.05 - 0.025;
+        for (let i = 0; i < p.count; i++) {
+          v.fromBufferAttribute(p, i);
+          nb.copy(v);
+          const bump = 0.8 + 0.42 * n3(v.x + bx, v.y + by, v.z + bz, 1.9); // lumpy, not a ball
+          v.multiplyScalar(r * bump);
+          v.y *= sy;
+          v.x += bx; v.y += by; v.z += bz;
+          p.setXYZ(i, v.x, v.y, v.z);
+          nc.set(v.x - cx, (v.y - cy) * 1.2, v.z - cz).normalize();
+          nb.lerp(nc, 0.55).normalize();
+          nr.setXYZ(i, nb.x, nb.y, nb.z);
+          const hgt = (v.y - yMin) / (yMax - yMin); // 0 under the crown .. 1 on top
+          const depth = clamp(Math.hypot(v.x - cx, v.y - cy, v.z - cz) / (r * 1.5), 0, 1); // 0 inside .. 1 at the outside
+          c.setHSL(hue + dh + 0.02 * hgt, sat, (lum + dl) * (0.5 + 0.38 * hgt + 0.3 * depth) * (0.9 + 0.2 * n3(v.x, v.y, v.z, 0.9)));
+          col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+        }
+        g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+        out.push(g);
+      });
+      return mergeGeometries(out);
+    };
+    const det = fine ? 2 : 1; // subdivision of the three main lobes of a crown beside the road; everything else is one level coarser
+    let leafGeoFar = null;
     if (kind === 'pine') {
-      trunkGeo = paint(new THREE.CylinderGeometry(0.25, 0.4, 5, 6).translate(0, 2.5, 0), brown);
-      const parts = [];
-      for (let k = 0; k < 5; k++) {
-        const r = 3.4 - k * 0.55;
-        parts.push(paint(new THREE.ConeGeometry(r, 3.4, 8).translate(0, 4.2 + k * 2.1, 0), new THREE.Color().setHSL(0.36, 0.45, 0.17 + k * 0.012)));
-      }
-      leafGeo = mergeGeometries(parts);
+      trunkGeo = paint(new THREE.CylinderGeometry(0.2, 0.42, 5.4, 8).translate(0, 2.7, 0), brown);
+      // a conifer: overlapping skirts of drooping branches, ragged at the edge, tapering to a point
+      const skirts = (seg, L) => {
+        const parts = [];
+        const c = new THREE.Color();
+        for (let k = 0; k < L; k++) {
+          const t = k / (L - 1), r = 3.5 * (1 - t * 0.8), h = (3.2 - t * 0.9) * (7 / L), y0 = 3.0 + (k * 10.5) / (L - 1);
+          const g = new THREE.ConeGeometry(r, h, seg, 2, true);
+          g.deleteAttribute('uv');
+          g.translate(0, y0 + h / 2, 0);
+          const p = g.attributes.position, col = new Float32Array(p.count * 3);
+          for (let i = 0; i < p.count; i++) {
+            const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+            const rr = Math.hypot(x, z), up = (y - y0) / h; // 0 at the skirt's edge .. 1 at its tip
+            const a = Math.atan2(z, x);
+            const rag = 1 + (1 - up) * (0.16 * Math.sin(a * 5 + k * 1.7) + 0.1 * Math.sin(a * 11 + k * 3.1)); // ragged edge
+            p.setXYZ(i, x * rag, y - (1 - up) * (1 - up) * 0.55 * (rr / r), z * rag); // the branch tips droop
+            c.setHSL(0.385 + 0.015 * t, 0.5, (0.07 + 0.035 * t) * (0.7 + 0.8 * (1 - up) * (rr / r) + 0.25 * up));
+            col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+          }
+          g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+          g.computeVertexNormals();
+          // the seam of a cone has two rows of vertices: give both the same normal
+          const nr = g.attributes.normal, ring = seg + 1;
+          for (let row = 0; row < p.count / ring; row++) {
+            const a0 = row * ring, b0 = row * ring + seg;
+            const nx = nr.getX(a0) + nr.getX(b0), ny = nr.getY(a0) + nr.getY(b0), nz = nr.getZ(a0) + nr.getZ(b0), l = Math.hypot(nx, ny, nz) || 1;
+            nr.setXYZ(a0, nx / l, ny / l, nz / l);
+            nr.setXYZ(b0, nx / l, ny / l, nz / l);
+          }
+          parts.push(g);
+        }
+        return mergeGeometries(parts);
+      };
+      leafGeo = skirts(fine ? 14 : 9, fine ? 7 : 6);
+      if (fine) leafGeoFar = skirts(7, 5);
       this.treeScale = [1.1, 1.9];
     } else if (kind === 'palm') {
-      trunkGeo = paint(new THREE.CylinderGeometry(0.2, 0.32, 9, 6).translate(0, 4.5, 0), new THREE.Color('#8a6c4a'));
-      const fr = [];
-      for (let k = 0; k < 8; k++) {
-        const g = new THREE.PlaneGeometry(1.1, 5, 1, 3);
-        g.rotateX(-Math.PI / 2 + 0.5);
-        g.translate(0, 0, 2.4);
-        g.rotateY((k / 8) * Math.PI * 2);
-        g.translate(0, 9, 0);
-        fr.push(paint(g, new THREE.Color('#2f7a3a')));
+      trunkGeo = paint(new THREE.CylinderGeometry(0.17, 0.3, 9, 8, 6).translate(0, 4.5, 0), new THREE.Color('#8a6c4a'));
+      { // a gentle lean
+        const p = trunkGeo.attributes.position;
+        for (let i = 0; i < p.count; i++) { const y = p.getY(i) / 9; p.setX(i, p.getX(i) + y * y * 0.9); }
+        trunkGeo.computeVertexNormals();
       }
-      leafGeo = mergeGeometries(fr);
+      const fr = [];
+      const c = new THREE.Color();
+      const N = fine ? 11 : 8;
+      for (let k = 0; k < N; k++) {
+        // a frond: arching out and down, folded along its midrib
+        const g = new THREE.PlaneGeometry(1.5, 5.2, 2, 7);
+        g.deleteAttribute('uv');
+        const p = g.attributes.position, col = new Float32Array(p.count * 3);
+        const lift = 0.35 + 0.35 * ((k * 7) % 5) / 4;
+        for (let i = 0; i < p.count; i++) {
+          const x = p.getX(i), t = (p.getY(i) + 2.6) / 5.2; // 0 at the trunk .. 1 at the tip
+          const wd = x * (0.35 + 1.1 * t) * (1 - t * t * 0.9);
+          p.setXYZ(i, wd, lift * 2.2 * t - 2.6 * t * t - Math.abs(wd) * 0.45, 0.3 + t * 4.4);
+          c.setHSL(0.3 + 0.02 * t, 0.5, 0.2 + 0.1 * t + 0.05 * Math.abs(x));
+          col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+        }
+        g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+        g.rotateY((k / N) * Math.PI * 2 + (k % 2) * 0.2);
+        g.translate(0.9, 9, 0);
+        g.computeVertexNormals();
+        fr.push(g);
+      }
+      fr.push(paint(new THREE.IcosahedronGeometry(0.42, 1).translate(0.9, 8.85, 0), new THREE.Color('#5a4a2c')));
+      for (const g of fr) g.deleteAttribute('uv');
+      leafGeo = mergeGeometries(fr.map((g) => (g.index ? g.toNonIndexed() : g)));
       this.treeScale = [0.9, 1.3];
     } else {
-      trunkGeo = paint(new THREE.CylinderGeometry(0.3, 0.5, 4.2, 6).translate(0, 2.1, 0), brown);
-      const blobs = [];
-      const offs = [[0, 6.2, 0, 3.4], [1.9, 5.2, 0.6, 2.5], [-1.7, 5.4, -0.9, 2.6], [0.4, 7.6, 0.4, 2.4]];
-      for (const [x, y, z, r] of offs) blobs.push(paint(new THREE.IcosahedronGeometry(r, 1).translate(x, y, z), new THREE.Color().setHSL(0.27 + rnd() * 0.04, 0.45, 0.24 + rnd() * 0.05)));
-      leafGeo = mergeGeometries(blobs);
+      trunkGeo = paint(new THREE.CylinderGeometry(0.26, 0.5, 4.6, 8).translate(0, 2.3, 0), brown);
+      const blobs = [[0, 6.3, 0, 3.1], [2.0, 5.3, 0.6, 2.3], [-1.8, 5.5, -0.9, 2.4], [0.5, 7.9, 0.4, 2.2], [-0.4, 5.2, 1.9, 2.1], [0.6, 5.6, -2.0, 2.1], [-1.1, 7.3, 0.9, 1.8]];
+      leafGeo = crown(fine ? blobs.slice(0, 6) : blobs.slice(0, 5), 0.27, 0.46, 0.3, det);
+      if (fine) leafGeoFar = crown(blobs.slice(0, 4), 0.27, 0.46, 0.3, 1);
       this.treeScale = [0.8, 1.5];
     }
     const total = Math.floor(2200 * density * (tr.length / 5000));
-    const mats = { trunk: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 }), leaf: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, flatShading: kind !== 'palm', side: kind === 'palm' ? THREE.DoubleSide : THREE.FrontSide }) };
+    const mats = { trunk: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 }), leaf: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.88, side: kind === 'broadleaf' ? THREE.FrontSide : THREE.DoubleSide }) }; // fronds and the open skirts of a conifer are seen from below too
     const trunks = new THREE.InstancedMesh(trunkGeo, mats.trunk, total);
+    // the trees near the road get the detailed crown, the ones behind them a lighter one (same shape, a quarter of the triangles)
     const leaves = new THREE.InstancedMesh(leafGeo, mats.leaf, total);
+    const leavesFar = leafGeoFar ? new THREE.InstancedMesh(leafGeoFar, mats.leaf, total) : null;
+    // a soft patch of shade under every tree: they are too many to put in the shadow map, and without it they float
+    const shadeGeo = new THREE.PlaneGeometry(1, 1);
+    shadeGeo.rotateX(-Math.PI / 2);
+    const shade = this.quality === 'low' ? null : new THREE.InstancedMesh(shadeGeo, new THREE.MeshBasicMaterial({ map: softParticleTexture(), color: 0x06140a, transparent: true, opacity: 0.5, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }), total);
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), s = new THREE.Vector3();
+    const up = new THREE.Vector3(0, 1, 0), q0 = new THREE.Quaternion(), sp = new THREE.Vector3(), ss = new THREE.Vector3();
     const col = new THREE.Color();
-    let n = 0;
+    const sun = this.sunDir || new THREE.Vector3(0.4, 0.8, 0.3);
+    const crownH = kind === 'palm' ? 9 : kind === 'pine' ? 8 : 6;
+    let n = 0, nNear = 0, nFar = 0;
     const pt = {};
     let tries = 0;
     while (n < total && tries < total * 12) {
@@ -978,20 +1108,36 @@ export class World {
       const gy = this.groundHeight(pt.x, pt.y);
       if (this.waterLevel != null && gy < this.waterLevel + 0.6) continue;
       p.set(pt.x, gy - 0.1, -pt.y);
-      q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rnd() * 6.28);
+      q.setFromAxisAngle(up, rnd() * 6.28);
       const sc = this.treeScale[0] + rnd() * (this.treeScale[1] - this.treeScale[0]);
       s.set(sc * (0.85 + rnd() * 0.3), sc * (0.85 + rnd() * 0.4), sc * (0.85 + rnd() * 0.3));
       m.compose(p, q, s);
       trunks.setMatrixAt(n, m);
-      leaves.setMatrixAt(n, m);
-      col.setHSL(0.0, 0, 0.8 + rnd() * 0.4);
-      leaves.setColorAt(n, col);
+      col.setHSL(0.0, 0, 0.82 + rnd() * 0.36);
+      if (leavesFar && extra > 24) { leavesFar.setMatrixAt(nFar, m); leavesFar.setColorAt(nFar++, col); }
+      else { leaves.setMatrixAt(nNear, m); leaves.setColorAt(nNear++, col); }
+      if (shade) {
+        // cast away from the sun, by about the height of the crown
+        const reach = (crownH * s.y * 0.55) / Math.max(0.35, sun.y);
+        sp.set(p.x - sun.x * reach, 0, p.z - sun.z * reach);
+        sp.y = this.groundHeight(sp.x, -sp.z) + 0.12;
+        const r = (kind === 'palm' ? 6 : kind === 'pine' ? 8.5 : 10.5) * sc;
+        m.compose(sp, q0, ss.set(r, 1, r));
+        shade.setMatrixAt(n, m);
+      }
       n++;
     }
-    trunks.count = leaves.count = n;
-    trunks.castShadow = false;
-    leaves.castShadow = false;
-    this.group.add(trunks, leaves);
+    trunks.count = n;
+    leaves.count = nNear;
+    if (leavesFar) leavesFar.count = nFar;
+    if (shade) shade.count = n;
+    for (const im of [trunks, leaves, leavesFar, shade]) {
+      if (!im) continue;
+      im.castShadow = false;
+      im.instanceMatrix.needsUpdate = true;
+      this.group.add(im);
+    }
+    if (shade) { shade.renderOrder = 1; shade.receiveShadow = false; }
   }
 
   buildStands() {

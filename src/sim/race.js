@@ -35,7 +35,8 @@ export const DEFAULT_OPTIONS = {
   weather: 'dry', // dry | light | heavy | changing
   safetyCar: true, // pace car and yellow flags when 3+ cars are stranded
   equalCars: true, // all cars share the player's specification
-  upgrades: null, // career car development { power, aero, grip } levels
+  upgrades: null, // career car development: levels of power, aero, grip, ers, tyres, pit
+  teamForm: null, // career: how each team's car has developed this season (added to its rating)
   qualiTimes: null, // { driverCode: bestLap } from a qualifying session: sets the grid
   laps: 5,
   level: 0.55,
@@ -114,12 +115,18 @@ export class Race {
     return p;
   }
 
+  /** A team's car strength in this race: its rating, plus how its development has gone in a career season. */
+  teamRating(team) {
+    const f = this.opt.teamForm, i = TEAMS.indexOf(team);
+    return clamp(team.rating + (Array.isArray(f) && i >= 0 ? +f[i] || 0 : 0), 0.05, 1.08);
+  }
+
   makeCarSpec(team, compound, isPlayer) {
     const opt = this.opt;
     const rec = this.track.def.setup || { front: 5, rear: 5 };
     const fuel = this.isQuali ? 14 : this.opt.mode === 'timetrial' ? 18 : clamp(Math.min(this.totalLaps, 60) * (this.track.length / 1000) * FUEL_KG_PER_KM * 1.1 + 2, 6, 105);
     // identical cars: every team runs the same machinery, only the drivers differ (career keeps the team pecking order)
-    const rating = opt.equalCars ? 1 : team.rating;
+    const rating = opt.equalCars ? 1 : this.teamRating(team);
     const grip = 0.985 + 0.015 * rating;
     const setup = isPlayer
       ? { frontWing: opt.setup.frontWing ?? rec.front, rearWing: opt.setup.rearWing ?? rec.rear, brakeBias: opt.setup.brakeBias, pressure: opt.setup.pressure }
@@ -148,6 +155,7 @@ export class Race {
       spec.clAr *= u.aero;
       spec.frontGrip *= u.grip;
       spec.rearGrip *= u.grip;
+      spec.ersCapacity *= u.ers;
     }
     return spec;
   }
@@ -177,7 +185,7 @@ export class Race {
       }
     }
     // qualifying-ish order from car + driver + luck
-    ai.forEach((s) => (s.q = s.team.rating * 0.55 + s.driver.talent * 0.45 + (rng() - 0.5) * 0.16));
+    ai.forEach((s) => (s.q = (opt.equalCars ? s.team.rating : this.teamRating(s.team)) * 0.55 + s.driver.talent * 0.45 + (rng() - 0.5) * 0.16));
     ai.sort((a, b) => b.q - a.q);
     let grid = ai.map((s) => ({ seat: s, player: false }));
     const pg = clamp(Math.round(opt.playerGrid) - 1, 0, grid.length);
@@ -203,7 +211,7 @@ export class Race {
       const spec = this.makeCarSpec(team, compound, player);
       const car = new Car(spec, track);
       if (timeTrial) car.fuelRate = 0; // a time trial runs at one constant, light weight: lap times say nothing about the fuel load
-      car.wearMult = opt.tyreWear;
+      car.wearMult = opt.tyreWear * (player && opt.upgrades ? upgradeEffects(opt.upgrades).tyres : 1);
       const slot = track.gridSlot(k);
       const pt = track.pointAt(slot.s, slot.d);
       car.reset(pt.x, pt.y, pt.heading, 0);
@@ -860,6 +868,7 @@ export class Race {
       let dur = 2.3 + this.rng() * (1.1 + (1 - this.opt.level) * 1.2);
       const dm = car.damageSummary();
       const repair = 4 * dm.fw + 2.5 * (dm.sideL + dm.sideR) + 2 * dm.rw + 1.5 * dm.floor;
+      if (car === this.player && this.opt.upgrades) dur = Math.max(1.8, dur - upgradeEffects(this.opt.upgrades).pit); // a drilled crew
       dur += repair;
       rs.service = { t: 0, dur, repair };
       if (car === this.player && this.opt.assists.pitGame && this.opt.mode === 'race') {

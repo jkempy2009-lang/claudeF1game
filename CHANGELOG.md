@@ -4,6 +4,24 @@
 
 Everything below was added or fixed in this release, grouped by area.
 
+### Latest: a new look (cars, trees, sky, pit building)
+The game looked like it was built from boxes because much of it was. This round replaces the worst of that.
+
+- **The car is a new model.** The old one was a smooth tube with boxes attached: slab wings, box mirrors, a box floor, box suspension arms, flat discs for wheel faces. The new one is built from a small geometry toolkit (`src/render/carshape.js`):
+  - *bodywork* lofted through spline-joined cross-sections, with separate roundness for the top and bottom of each section and an undercut: a drooping nose that lands on the front wing, a flat-bottomed tub, sidepods with a tall inlet and the body tucked in beneath it, an airbox and engine-cover spine, a tail that tightens into the "coke bottle" between the rear wheels;
+  - *wings* that are real airfoil sections swept along a curved span: a four-element front wing that sweeps back and rises towards its endplates, a spoon-shaped rear wing with a separate DRS flap, a two-element beam wing, a swan-neck pylon;
+  - *plates* with smooth outlines and rounded edges: curved front endplates, two-tone rear endplates, the engine-cover fin, a floor that is wide ahead of the rear wheels and tucked in between them, tunnel fences, a floor-edge lip, a diffuser with fences;
+  - *suspension* as aero-section wishbones, push rods, track rods and drive shafts that still follow the wheels as the suspension works;
+  - *wheels* with low-profile tyres (bulging sidewall, rounded shoulders), dished wheel covers with a bright lip and a centre nut, and the tyre compound as a thin stripe on the sidewall instead of a painted ring; rubber is matt and the covers satin metal in the same mesh;
+  - a halo, mirrors on stalks, a helmet with a visor and a stripe, a T-cam pod, an exhaust and a rain light.
+  From the driver's seat the eye point is now where the driver's eyes are (it was 17 cm above the helmet), the steering wheel sits in the cockpit instead of floating over it, and the halo is drawn as its slim centre pillar only.
+- **Three levels of car detail** with the same shape: about 25,000 triangles for the car you drive, 13,400 for the rest of the grid on High, and a lighter mesh still on Medium and Low (the old car was 5,900). `tests/carshape.mjs` checks that every builder produces a closed, consistently wound, outward-facing solid.
+- **Trees are no longer faceted.** Broadleaf crowns are lumpy overlapping lobes shaded as one soft volume (smooth normals that lean away from the middle of the crown, darker underneath and inside, lighter on top); conifers are overlapping skirts of drooping, ragged-edged branches; palms have arching, folded fronds and a leaning trunk. The trees nearest the road get a finer mesh than the ones behind them, and every tree has a soft patch of shade on the ground under it, because they are too many to put in the shadow map and floated without one.
+- **The sky is a sky.** It was three-quarters covered in flat grey cloud on a dry day. Now: separate cumulus with bright edges and shaded bases over a clear blue, a band of haze at the horizon, and cloud that thickens into a real overcast as rain arrives. The image-based lighting on the cars comes from this sky, so the paint picks up the blue as well.
+- **The pit building** has an upper storey of dark glass that mirrors the sky, mullions and an overhanging roof.
+- **Colour grade**: a little more saturation and contrast after tone mapping.
+- **Cost, measured** (one frame, 20 cars on the grid at Northfield, shadow pass included): 2.1 million triangles on High against 1.3 million before, 1.6 against 1.15 million on Medium. Draw calls are almost unchanged (1,754 against 1,686). The first version of this work was 3.6 million; the detail levels above brought it down. This was counted, not timed: the test machine renders in software, so there is no frame-rate measurement. The automatic quality scaler still drops a level if the frame rate falls.
+
 ### Latest: why rivals crashed, traced and fixed
 A new tool, `tools/incident-causes.mjs`, records for every marshal recovery what happened to that car in the ten seconds before it, and what first damaged it. It showed that rivals almost never ran off on their own on the racing line; the recoveries came from three specific faults:
 

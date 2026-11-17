@@ -177,6 +177,7 @@ class Game {
       careerStart: (o) => this.careerStart(o),
       careerRace: (q) => this.careerRace(q),
       careerBuy: (k) => this.careerBuy(k),
+      careerSponsor: (id) => this.careerSponsor(id),
       careerNext: (t) => this.careerNext(t),
       careerAbandon: () => this.careerAbandon(),
       nextRound: () => this.nextRound(),
@@ -380,6 +381,16 @@ class Game {
     this.menu.show('career_hub');
   }
 
+  /** Accepts (or, clicked again, drops) a sponsor's challenge for the coming career race. */
+  careerSponsor(id) {
+    const c = this.save.career;
+    if (!c) return;
+    Career.chooseSponsor(c, c.sponsor === id ? null : id);
+    this.audio.ui('good');
+    persist(this.save);
+    this.menu.show('career_hub');
+  }
+
   careerNext(teamIdx) {
     const c = this.save.career;
     if (!c) return this.toMain();
@@ -425,6 +436,7 @@ class Game {
       qualiTimes: null,
       seed: undefined,
       upgrades: { ...c.upgrades },
+      teamForm: c.teamForm ? c.teamForm.slice() : null,
       career: true,
     };
     this.startRace(cfg);
@@ -540,6 +552,7 @@ class Game {
       seed: cfg.seed ?? ((Math.random() * 1e6) | 0),
       qualiTimes: cfg.mode === 'race' ? cfg.qualiTimes || null : null,
       upgrades: cfg.upgrades || null,
+      teamForm: cfg.teamForm || null,
       weather: cfg.weather || 'dry',
       equalCars: cfg.career ? false : cfg.equalCars !== false,
       carPower: cfg.carPower,
@@ -565,8 +578,9 @@ class Game {
     pm.dispose();
 
     const views = new Map();
-    const detail = quality === 'low' ? 'low' : 'high';
     for (const car of race.cars) {
+      // the car being driven gets the full mesh; the other nineteen a lighter one of the same shape
+      const detail = quality === 'low' ? 'low' : car === race.player ? 'high' : quality === 'high' ? 'mid' : 'low';
       const view = new CarView(car.info.team, car.info, { detail });
       view.setCompound(car.compound);
       scene.add(view.group);
@@ -1782,7 +1796,7 @@ class Game {
       s.careerRecorded = true;
       const c = this.save.career;
       const row = Career.recordRound(c.season, cls);
-      careerRes = Career.settleRace(c, row, cls);
+      careerRes = Career.settleRace(c, row, cls, { qualified: !!cfg.qualiTimes });
       careerRes.budget = c.budget;
       if (Career.seasonDone(c.season)) {
         const rc = Career.endSeason(c);
