@@ -448,7 +448,7 @@ class Game {
     const weather = rules.weather === 'forecast' ? Career.weatherFor(s) : rules.weather;
     const cfg = {
       ...base,
-      mode: qualify ? 'qualifying' : 'race',
+      mode: qualify === true ? 'qualifying' : 'race',
       trackId,
       laps: Career.careerLaps(c, track.length),
       level: c.level,
