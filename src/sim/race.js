@@ -3,12 +3,12 @@ import { makeSpec, COMPOUNDS, COMPOUND_IDS, DRY_COMPOUND_IDS, wetGripFactor } fr
 import { buildSpeedProfile, lineGeometry } from './speedprofile.js';
 import { AIDriver } from './ai.js';
 import { collideCars, collideWalls } from './collision.js';
-import { pitWindowCall } from './racecraft.js';
+import { pitWindowCall, RC_TUNE } from './racecraft.js';
 import { TEAMS, DRIVERS } from './teams.js';
 import { SURF } from './track.js';
 import { upgradeEffects } from './career.js';
 import { makePitGame, stepPitGame } from './pitgame.js';
-import { clamp, loopDelta, mod, mulberry32 } from '../util/math.js';
+import { clamp, loopDelta, mod, mulberry32, smoothstep } from '../util/math.js';
 
 export const DT = 1 / 240;
 /** Optional boost for the player's car (not used in career, which has its own upgrades): engine power, downforce and tyre grip multipliers. */
@@ -209,6 +209,9 @@ export class Race {
       const okTyres = aiCompounds.filter((id) => this.tyreLife(id) >= stintNeed);
       const pick = rng();
       let compound = player ? opt.compound : okTyres.length ? okTyres[pick < 0.5 ? 0 : pick < 0.85 ? Math.min(1, okTyres.length - 1) : okTyres.length - 1] : 'hard';
+      // a race strategy from the stint solver (SPEC 7.1): it chooses the starting tyre too
+      const plan = RC_TUNE.planner && !player && !timeTrial && !this.isQuali && this.opt.mode === 'race' && this.wet <= 0.4 && track.pit ? this.planStrategy(rng) : null;
+      if (plan) compound = plan.compounds[0];
       if (!player && this.wet > 0.4) compound = 'wet';
       const spec = this.makeCarSpec(team, compound, player);
       const car = new Car(spec, track);
@@ -252,6 +255,11 @@ export class Race {
         // pit strategy: stop once somewhere in the middle of the race if the race is long enough / wear is high
         const stopLap = Math.round(this.totalLaps * (0.35 + 0.35 * rng()));
         car.rs.plannedStop = !this.isQuali && this.totalLaps >= 4 && (opt.mandatoryStop || opt.tyreWear >= 2.5 || rng() < 0.3) ? Math.max(1, stopLap) : null;
+        if (plan) {
+          car.rs.plan = plan;
+          car.rs.plannedStop = plan.stops.length ? plan.stops[0] : null;
+          car.rs.nextCompound = plan.compounds[1] || null;
+        }
       }
       if (player) {
         this.player = car;
@@ -401,6 +409,7 @@ export class Race {
       this.adaptPace();
       this.recoverStuck(dt * 4);
       this.updateRetirements();
+      if (this.isQuali) for (const c of this.cars) c.qualiYield = c.rs.laps === 0 || !!c.rs.invalidLap || !!c.rs.finished;
       if (this.phase === 'countdown') this.checkFalseStart();
     }
     if (this.opt.mode === 'timetrial') this.recordGhost();
@@ -868,7 +877,7 @@ export class Race {
     const drv = car.driver;
     if (drv) {
       const ts = car.tyreSummary();
-      const done = rs.stops >= 1;
+      const done = rs.plan ? rs.stops >= rs.plan.stops.length : rs.stops >= 1;
       const lapsLeft = this.totalLaps - rs.laps;
       if (!drv.wantsPit && drv.pitState === 'none' && lapsLeft > 1) {
         // timing against the car ahead: undercut (stop early out of its dirty air) or overcut (stay out when it stops)
@@ -992,6 +1001,14 @@ export class Race {
         rs.compounds.push(next);
         rs.stops++;
         rs.stopLaps.push(rs.laps);
+        if (rs.plan) {
+          // the next stint of the plan (the plan is redone around a stop that came early or late: the stints keep their lengths)
+          const shift = rs.laps - (rs.plan.stops[rs.stops - 1] ?? rs.laps);
+          if (rs.plan.stops[rs.stops] != null) {
+            rs.plannedStop = Math.min(this.totalLaps - 1, rs.plan.stops[rs.stops] + shift);
+            rs.nextCompound = rs.plan.compounds[rs.stops + 1] || null;
+          } else rs.plannedStop = null;
+        }
         rs.service = null;
         rs.pitRequested = false;
         rs.boxLatch = true;
@@ -1034,6 +1051,44 @@ export class Race {
 
   // ---- weather -----------------------------------------------------------------------------------------------
   /** Laps a set of this compound is good for at the chosen wear setting (about 0.45 of its nominal life: racing wears tyres faster than a clean lap). */
+  /**
+   * The stint solver (SPEC 7.1): no-stop, one-stop and two-stop plans over the dry compounds, each stint within the tyre's
+   * life, costed as its laps times the compound's pace deficit plus the degradation that builds through the stint, plus
+   * about 22 s for every stop. A rule that demands a stop and two compounds is respected. The driver takes one of the plans
+   * within 3 s of the best (so the field does not all do the same thing), with the stop laps jittered by a lap.
+   */
+  planStrategy(rng) {
+    const N = this.totalLaps;
+    if (N < 8) return null; // a short race is a sprint: the varied start tyres and the old one-stop window make for more racing
+    const ids = ['soft', 'medium', 'hard'];
+    const pace = { soft: 0, medium: 0.35, hard: 0.7 }; // s/lap slower than the soft on fresh tyres
+    const life = (c) => this.tyreLife(c);
+    const stint = (c, n) => (n > life(c) * 1.02 ? Infinity : n * pace[c] + (1.6 / life(c)) * n * n * 0.5);
+    const PIT = 22;
+    const mand = !!this.opt.mandatoryStop;
+    const opts = [];
+    for (const a of ids) if (!mand) opts.push({ cost: stint(a, N), stops: [], compounds: [a] });
+    for (const a of ids) for (const b of ids) {
+      if (mand && a === b) continue;
+      for (let L = 2; L <= N - 2; L++) opts.push({ cost: stint(a, L) + stint(b, N - L) + PIT, stops: [L], compounds: [a, b] });
+    }
+    if (N >= 9) for (const a of ids) for (const b of ids) for (const c of ids) {
+      if (mand && a === b && b === c) continue;
+      for (let L1 = 3; L1 <= N - 6; L1++) for (let L2 = L1 + 3; L2 <= N - 3; L2++) opts.push({ cost: stint(a, L1) + stint(b, L2 - L1) + stint(c, N - L2) + 2 * PIT, stops: [L1, L2], compounds: [a, b, c] });
+    }
+    const ok = opts.filter((o) => Number.isFinite(o.cost));
+    if (!ok.length) return null;
+    ok.sort((x, y) => x.cost - y.cost);
+    const near = ok.filter((o) => o.cost < ok[0].cost + 6); // within 6 s: different strategies mix the field up, which is what makes a race
+    // one choice per distinct strategy shape (the cheapest stop laps of it), then pick among them
+    const shapes = new Map();
+    for (const o of near) { const k = o.compounds.join('-'); if (!shapes.has(k)) shapes.set(k, o); }
+    const list = [...shapes.values()];
+    const pick = list[Math.min(list.length - 1, Math.floor(rng() * rng() * list.length))]; // the best plan most often
+    const jit = () => Math.round((rng() - 0.5) * 2);
+    return { stops: pick.stops.map((L) => Math.max(1, Math.min(N - 1, L + jit()))), compounds: pick.compounds.slice(), cost: pick.cost };
+  }
+
   tyreLife(id) {
     return (COMPOUNDS[id].wearLaps / Math.max(0.3, this.opt.tyreWear || 1)) * 0.45;
   }
@@ -1150,7 +1205,8 @@ export class Race {
       const off = Math.abs(c.d - ld[c.i]);
       const band = off < 1.2 ? 1 : off > 3.2 ? 0 : 1 - (off - 1.2) / 2;
       c.wetness = this.wet * (1 - this.lineDry * band);
-      c.rubberGrip = 1 + 0.012 * this.rubber * band * (1 - this.wet);
+      // rubber on the racing line grips in the dry and is greasy in the wet (why drivers leave the line in the rain)
+      c.rubberGrip = 1 + 0.012 * this.rubber * band * (1 - this.wet) - 0.05 * (0.4 + 0.6 * this.rubber) * band * smoothstep(0.25, 0.75, this.wet);
     }
     const pl = this.player;
     if (pl) pl.rs.maxDamage = Math.max(pl.rs.maxDamage || 0, pl.damageSummary().worst);
@@ -1336,6 +1392,7 @@ export class Race {
         rs.limitTimer = 2.5;
         rs.invalidLap = true;
         rs.warnings++;
+        rs.cutCp = rs.cpIdx; // judged two checkpoints on: was time gained?
         if (this.opt.mode === 'race') {
           if (rs.warnings % 3 === 0) this.addPenalty(car, 5, 'Track limits (3 warnings)');
           else this.pushEvent({ type: 'warning', car, n: rs.warnings % 3 });
@@ -1343,6 +1400,16 @@ export class Race {
       }
     } else rs.offTimer = 0;
     if (rs.limitTimer > 0) rs.limitTimer -= dt;
+    // leaving the track and gaining an advantage (SPEC 7.3): more than 0.25 s quicker through the cut than the car's best there
+    if (rs.cutCp != null && rs.cpIdx >= rs.cutCp + 2) {
+      const tr = this.track, k0 = ((rs.cutCp % tr.cpCount) + tr.cpCount) % tr.cpCount, k2 = (((rs.cutCp + 2) % tr.cpCount) + tr.cpCount) % tr.cpCount;
+      const t0 = rs.cpTimes[rs.cutCp + 8], t2 = rs.cpTimes[rs.cutCp + 2 + 8];
+      if (rs.lapCpBest && k2 > k0 && Number.isFinite(t0) && Number.isFinite(t2)) {
+        const gained = rs.lapCpBest[k2] - rs.lapCpBest[k0] - (t2 - t0);
+        if (gained > 0.25 && this.opt.mode === 'race') this.addPenalty(car, 5, `Leaving the track and gaining an advantage (${gained.toFixed(2)} s)`);
+      }
+      rs.cutCp = null;
+    }
   }
 
   // ---- race end -------------------------------------------------------------------------------------------------------

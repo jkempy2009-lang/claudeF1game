@@ -22,6 +22,15 @@ export function difficultyParams(level) {
   };
 }
 
+
+
+/** Box-filtered copy of a closed-loop array (radius r samples). */
+function smoothArr(a, r) {
+  const N = a.length, out = new Float64Array(N);
+  for (let i = 0; i < N; i++) { let s = 0; for (let k = -r; k <= r; k++) s += a[(i + k + N) % N]; out[i] = s / (2 * r + 1); }
+  return out;
+}
+
 /**
  * Autonomous driver. Same inputs a human has (throttle, brake, steering, DRS, ERS boost, pit limiter) and the same
  * car physics - it simply tracks a minimum-curvature racing line at the speeds from the speed profile.
@@ -75,7 +84,20 @@ export class AIDriver {
 
   // ---- reference path ------------------------------------------------------------------------
   basePath(s) {
-    return this.track.lineAt(s) * this.dp.lineScale;
+    const tr = this.track;
+    let d = tr.lineAt(s) * this.dp.lineScale;
+    // the wet line (SPEC 3.1): in the rain the rubbered racing line is greasy; through the corners take a line away from it
+    const wet = this.car.wetness || 0;
+    if (wet > 0.25 && RC_TUNE.wetLine) {
+      const cs = tr._curvSm || (tr._curvSm = smoothArr(tr.curv, Math.round(15 / tr.ds)));
+      const i = tr.idx(s);
+      const k = smoothstep(0.002, 0.006, Math.abs(cs[i]));
+      // (half as far between walls: a street circuit has no room for it)
+      const street = tr.def.runoff && tr.def.runoff.mode === 'street' ? 0.5 : 1;
+      // tanh, not the spec's sign(): the line crosses the centre inside many corners and a sign() there jumps the path 5 m sideways
+      if (k > 0) d = clamp(d - Math.tanh(tr.lineD[i] / 2.5) * 2.4 * street * smoothstep(0.25, 0.75, wet) * k, -tr.wr[i] + 2, tr.wl[i] - 2);
+    }
+    return d;
   }
 
   pathD(s, withOffset = true) {
@@ -150,7 +172,13 @@ export class AIDriver {
       const punct = Math.max(car.puncture[0], car.puncture[1], car.puncture[2], car.puncture[3]);
       g *= wetGripFactor(comp, car.wetness || 0);
       g *= 1 - clamp(0.4 * (car.damageFront || 0) + 0.15 * (car.damageRear || 0) + 0.2 * (car.damageFloor || 0) + 0.12 * ((car.damageSideL || 0) + (car.damageSideR || 0)) + 0.35 * punct, 0, 0.6);
-      const want = Math.sqrt(clamp(g / 0.96, 0.35, 1));
+      let want = Math.sqrt(clamp(g / 0.96, 0.35, 1));
+      // the out-lap (SPEC 3.4): new tyres below their window are driven gently until they come in
+      const rsx = car.rs;
+      if (rsx && rsx.stops > 0 && rsx.stopLaps && rsx.laps === rsx.stopLaps[rsx.stopLaps.length - 1]) {
+        const avgT = (car.temp[0] + car.temp[1] + car.temp[2] + car.temp[3]) / 4;
+        want *= 0.91 + 0.09 * smoothstep(60, comp.tOpt - 5, avgT);
+      }
       this.gripAdapt += (Math.min(1, want) - this.gripAdapt) * 0.5;
     }
 
@@ -190,7 +218,8 @@ export class AIDriver {
     const paceK = this.dp.pace * this.skill * this.raceK * this.paceAdapt * this.gripAdapt * air * it.push * it.yieldLift;
     let vt = prof.v[idx] * paceK * (this.mistake && this.mistake.active ? this.mistake.factor : 1);
     // off the racing line (defending the inside, going round the outside) the corner is tighter than the profile assumes
-    const offLine = RC_TUNE.offLine && Math.abs(this.offset) > 0.6 && this.pitState === 'none';
+    // (the wet line is off the racing line too: its corners are tighter than the speed profile's)
+    const offLine = RC_TUNE.offLine && (Math.abs(this.offset) > 0.6 || (RC_TUNE.wetLine && RC_TUNE.wetOffLine && (car.wetness || 0) > 0.25)) && this.pitState === 'none';
     if (offLine) vt = Math.min(vt, this.offLineV(s + look, prof) * paceK);
     // use the whole car on the straights: with the wing open the drag falls and the car keeps accelerating past the plain profile speed
     if (this.managePower && this.pitState === 'none' && Math.abs(kt) < 0.0025 && Math.abs(kPath) < 0.006) vt *= 1 + (inp.drs ? 0.05 : 0) + (inp.boost ? 0.02 : 0);
@@ -303,6 +332,11 @@ export class AIDriver {
         // friction circle: the more lateral grip we are using, the less throttle the rears can take
         const ayUse = Math.min(1, Math.abs(car.ayF) / Math.max(8, prof.env.latAccel(Math.max(V, 10), 0.97) * this.gripAdapt * this.gripAdapt * gzK));
         thr = Math.min(thr, 0.15 + 1.1 * Math.sqrt(Math.max(0, 1 - ayUse * ayUse)));
+        // corner exit with hot rears (SPEC 7.2): feed the throttle in more gently to keep them alive over a stint
+        if (RC_TUNE.exitCare && Math.abs(kt) > 0.004 && thr < 0.99) {
+          const rearT = (car.temp[2] + car.temp[3]) / 2;
+          thr *= 1 - 0.35 * clamp((rearT - car.compound.tOpt) / 25, 0, 1);
+        }
         // rear stepping out: lift
         const aR = Math.max(Math.abs(car.alpha[2]), Math.abs(car.alpha[3]));
         if (aR > 0.06) thr *= clamp(1 - (aR - 0.06) * 18, 0.1, 1);

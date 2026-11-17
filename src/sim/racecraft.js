@@ -15,11 +15,16 @@ import { clamp, smoothstep } from '../util/math.js';
 /** Switches for the optional behaviours, so each can be measured on its own (tools/racing-quality.mjs reads RC_OFF=a,b,c). */
 // Measured over 8 seeds at Northfield (20 cars, F1 level): `saving` on its own nearly doubled car-to-car contact (53 -> 94), because a car
 // that stops deploying is swamped by the train behind it; `pitTight` (a late merge into the garage lane) also doubled contact.
-// Both stay off until they are reworked. Undercut, surge and switchback made no measurable difference.
+// `pitTight` stays off. `saving` is back on since it gives up the moment a car is closing fast behind (SPEC 3.2): over 4 seeds
+// it measured 11 contacts against 7 at Elite and 11 against 10 at F1, inside the spread. Undercut, surge and switchback made no
+// measurable difference. `planner` (the stint solver, races of 8+ laps) cut contact from 37 to 3 over two 10-lap races at
+// Vettore while keeping about 125 position changes a race. `wetLine` (SPEC 3.1, leave the rubbered line in the rain) is off: the
+// racing line already uses the full width, so the only way off it is a tighter path the speed profile does not fit, and in heavy
+// rain it measured 4-30 s a lap slower (Rade, Northfield) with more spins. The greasy wet line itself is in the physics.
 // `offLine` (brake for the corner speed of the path you are on, not the racing line's) roughly halved contact and cut marshal
 // recoveries by two thirds at Elite and Legend; `weakAxle` (pace yourself to the weaker axle, not the average tyre) halved the
 // recoveries left at F1 level. Numbers and method in CHANGELOG.md; tools/quality-seeds.sh and tools/incident-causes.mjs repeat them.
-export const RC_TUNE = { switchback: true, surge: true, saving: false, undercut: true, pitTight: false, pitTeam: true, offLine: true, weakAxle: true };
+export const RC_TUNE = { switchback: true, surge: true, saving: true, undercut: true, pitTight: false, pitTeam: true, offLine: true, weakAxle: true, wetLine: false, wetOffLine: true, exitCare: true, planner: true, towBreak: true };
 
 export const ACTIONS = ['LINE', 'FOLLOW', 'DRAFT', 'ATTACK', 'COVER', 'BLOCK', 'YIELD', 'SWITCHBACK'];
 export const FEATURES = ['close', 'edge', 'brake', 'corner', 'straight', 'room', 'drs', 'threat', 'lapped', 'risk'];
@@ -46,7 +51,7 @@ export const MATRIX = {
   ATTACK: { bias: -0.55, close: 1.0, edge: 0.9, brake: 0.9, corner: 1.0, straight: -0.6, room: 0.8, drs: 0.9, threat: -0.2, risk: -1.1 },
   COVER:  { bias: -0.35, threat: 1.2, straight: 0.6, brake: -0.5 },
   BLOCK:  { bias: -0.55, threat: 1.1, brake: 0.9, corner: 0.5 },
-  YIELD:  { bias: -2.0, lapped: 3.2, threat: 0.4 },
+  YIELD:  { bias: -2.0, lapped: 4.2, threat: 0.4 },
   // not scored: a switchback is a committed two-part move, started when an outside pass is boxed out at the turn-in (see think)
   SWITCHBACK: { bias: -9 },
 };
@@ -158,7 +163,10 @@ export class RaceBrain {
       }
     }
     // a committed attack is only dropped when it is no longer possible or something clearly better appears
-    if (best !== this.action) this.since = now;
+    if (best !== this.action) {
+      this.since = now;
+      this.towBreak = null; // a new action: one more tow-break allowed (once per COVER)
+    }
     this.action = best;
     // an attack that did not get its nose alongside by the turn-in is abandoned (and not retried straight away)
     if (best === 'ATTACK' && s.atkInside && ctx.dCorner < 52 && s.ahead.ds > 3.2 && !s.alongsideAny) {
@@ -207,7 +215,9 @@ export class RaceBrain {
         s.alongsideAny = true;
       }
       // a leader a lap up on us coming up behind: blue flags
-      if (n.ds < 0 && n.ds > -140 && o.rs.laps > car.rs.laps && lat(n) < 8 && (!s.lapper || n.ds > s.lapper.ds)) s.lapper = n;
+      // qualifying (SPEC 7.4): a car on its out-lap or a ruined lap gives way to one on a flying lap the same way
+      const hotLap = !!ctx.race.isQuali && !!car.qualiYield && !o.qualiYield;
+      if (n.ds < 0 && n.ds > -140 && (o.rs.laps > car.rs.laps || hotLap) && lat(n) < 8 && (!s.lapper || n.ds > s.lapper.ds)) s.lapper = n;
     }
     if (s.ahead) {
       s.ahead.gap = s.ahead.ds - 5.5;
@@ -302,6 +312,9 @@ export class RaceBrain {
         // one move onto the attacker's line, never more than a car and a half across and never into another car
         const pd = clamp(car.d + this.side * 3.5, -wr, wl);
         if (s.free(pd)) it.target = pd;
+        // a long straight with the attacker sitting in the wake: one clean diagonal drift breaks the tow (SPEC 7.2), then the line is held
+        if (RC_TUNE.towBreak && be && ctx.dCorner > 220 && Math.abs(be.dd) < 1.2 && !this.towBreak && now - this.since > 0.5) this.towBreak = { t: now, d: clamp(car.d + (be.dd >= 0 ? -1 : 1) * 2.2, -wr, wl) };
+        if (this.towBreak && now - this.towBreak.t < 3 && ctx.dCorner > 220 && s.free(this.towBreak.d)) it.target = this.towBreak.d;
         it.push = 1 + 0.008 * aggr;
       } else if (action === 'BLOCK') {
         // the inside line, taken once and early: a defender never moves in the braking zone
@@ -310,9 +323,16 @@ export class RaceBrain {
         if (ctx.dCorner > 38 && s.free(clamp(want, -wr, wl))) it.target = clamp(want, -wr, wl);
         it.push = 1 + 0.008 * aggr;
       } else if (action === 'YIELD' && s.lapper) {
-        it.target = clamp(this.side * 3.4, -wr, wl);
         const gap = -s.lapper.ds;
-        it.yieldLift = gap < 40 ? 0.93 : 1;
+        if (gap < 65) {
+          // blue flags (SPEC 3.4): off the racing line, to the side the faster car is not using, and a lift to let it by
+          const away = ctx.base ? -Math.sign(ctx.base) : this.side || 1;
+          it.target = clamp(away * (Math.min(wl, wr) - 1.5), -wr, wl);
+          it.yieldLift = 0.86;
+        } else {
+          it.target = clamp(this.side * 3.4, -wr, wl);
+          it.yieldLift = 1;
+        }
       }
     }
     this.plan(ctx, it, s, action);
@@ -335,6 +355,10 @@ export class RaceBrain {
     if (RC_TUNE.saving && this.energy === 'none' && this.stuckT > 12 && soc < 0.7 && lapsLeft > 1.5) {
       this.energy = 'saving';
       this.energyT = now;
+    } else if (this.energy === 'saving' && s && s.behind && s.behind.gapT < 0.65 && s.behind.closing > 2.5) {
+      // never save with a car closing fast behind (SPEC 3.2): the car that stops deploying is the one that gets hit
+      this.energy = 'none';
+      this.stuckT = 0;
     } else if (this.energy === 'saving') {
       const lapT = drv.track.length / 62; // a rough lap, in seconds
       if (!tucked && this.stuckT <= 0) this.energy = 'none'; // the fight is over

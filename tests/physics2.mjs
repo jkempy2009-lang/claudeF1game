@@ -152,9 +152,7 @@ const drive = (c, secs, inp) => { for (let t = 0; t < secs; t += DT) c.step(DT, 
   const seen = new Set();
   let vscSpeed = 0, vscN = 0, normalSpeed = 0, normalN = 0, deltaMax = -99, penalised = false;
   for (let n = 0; race.phase !== 'finished' && n < 240 * 600; n++) {
-    let inp = race.phase === 'racing' ? bot.update(RDT, race) : { throttle: 0, brake: 1, steer: 0 };
-    // the player ignores the VSC for a few seconds: too fast
-    if (race.sc.state === 'vsc' && race.sc.t < 9) inp = { ...inp, throttle: 1, brake: 0 };
+    const inp = race.phase === 'racing' ? bot.update(RDT, race) : { throttle: 0, brake: 1, steer: 0 };
     race.step(RDT, { throttle: inp.throttle, brake: inp.brake, steer: inp.steer });
     const t = race.time - race.t0;
     if (race.phase === 'racing' && t > 45 && !victim.failed) victim.engStress = 1;
@@ -184,5 +182,43 @@ const drive = (c, secs, inp) => { for (let t = 0; t < secs; t += DT) c.step(DT, 
   for (let k = 0; k < 40; k++) r3.policeVsc(0.25);
   ok('...one who slows down keeps a negative delta', r3.player.rs.vscDelta < 0);
   ok('finishNow ends the race with every running car classified', race.phase === 'finished' && race.cars.every((c) => c.rs.finished || c.rs.dnf));
+}
+// ---- AI strategy planner, qualifying traffic, corner cutting (SPEC 7.1, 7.4, 7.3)
+{
+  const track = new Track(TRACK_DEFS.find((d) => d.id === 'northfield'));
+  const r = new Race(track, { mode: 'race', laps: 20, level: 0.7, fieldSize: 20, seed: 4, tyreWear: 1 });
+  const plans = r.cars.filter((c) => c.rs.plan).map((c) => c.rs.plan);
+  const life = (c) => r.tyreLife(c);
+  const valid = plans.every((p) => {
+    const edges = [0, ...p.stops, r.totalLaps];
+    return p.compounds.length === p.stops.length + 1 && p.compounds.every((c, k) => edges[k + 1] - edges[k] <= life(c) * 1.02 + 1.01);
+  });
+  const shapes = new Set(plans.map((p) => p.compounds.join('-')));
+  ok('every AI car has a plan whose stints fit its tyres', plans.length === 19 && valid, [...shapes].join(' '));
+  ok('the field does not all run the same strategy', shapes.size >= 2);
+  const m = new Race(track, { mode: 'race', laps: 20, level: 0.7, fieldSize: 20, seed: 4, tyreWear: 1, mandatoryStop: true });
+  ok('a mandatory stop rule: every plan stops and uses two compounds', m.cars.filter((c) => c.rs.plan).every((c) => c.rs.plan.stops.length >= 1 && new Set(c.rs.plan.compounds).size >= 2));
+  const short = new Race(track, { mode: 'race', laps: 5, level: 0.7, fieldSize: 20, seed: 4, tyreWear: 3 });
+  ok('a sprint keeps the varied start tyres (no planner under 8 laps)', short.cars.every((c) => !c.rs.plan) && new Set(short.cars.filter((c) => !c.info.isPlayer).map((c) => c.compound.id)).size >= 2);
+
+  const q = new Race(track, { mode: 'qualifying', laps: 99, level: 0.7, fieldSize: 6, seed: 4 });
+  q.start();
+  for (let n = 0; n < 240 * 8; n++) q.step(RDT, { throttle: 0, brake: 1, steer: 0 });
+  ok('qualifying: cars on their out-lap are flagged to give way to flying laps', q.cars.every((c) => c.qualiYield === true));
+
+  // corner cutting: through the cut the car was 0.6 s quicker than its best: an immediate penalty
+  const c = new Race(track, { mode: 'race', laps: 5, level: 0.7, fieldSize: 2, seed: 4 });
+  c.start(); c.phase = 'racing'; c.t0 = c.time;
+  const p = c.player, rs = p.rs;
+  rs.lapCpBest = Array.from({ length: track.cpCount }, (_, k) => k * 2);
+  rs.cutCp = 3; rs.cpIdx = 5;
+  rs.cpTimes[3 + 8] = 100; rs.cpTimes[5 + 8] = 103.4; // the best took 4.0 s over these two checkpoints
+  let pen = null;
+  c.updateRules(p, 0.01);
+  for (const e of c.events) if (e.type === 'penalty') pen = e;
+  ok('leaving the track and gaining 0.6 s is penalised at once', !!pen && pen.secs === 5 && /gaining an advantage/.test(pen.reason), pen ? pen.reason : 'none');
+  rs.cutCp = 3; rs.cpIdx = 5; rs.cpTimes[5 + 8] = 104.1; c.events.length = 0;
+  c.updateRules(p, 0.01);
+  ok('...losing time through it is not', !c.events.some((e) => e.type === 'penalty'));
 }
 process.exit(bad ? 1 : 0);
