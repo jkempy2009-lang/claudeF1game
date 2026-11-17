@@ -43,7 +43,7 @@ export class ReplayBuffer {
       d[o + 15] = car.speed;
     }
     const sc = race.sc;
-    if (sc && sc.state !== 'none') {
+    if (sc && (sc.state === 'deployed' || sc.state === 'ending')) {
       const p = track.pointAt(sc.s, 0);
       this.sc[f * 3] = p.x; this.sc[f * 3 + 1] = p.y; this.sc[f * 3 + 2] = p.heading;
     } else this.sc[f * 3] = NaN;

@@ -199,7 +199,9 @@ export class AIDriver {
     if (car.onGrass || (!inPitArea && (car.d > tr.wl[car.i] + 1.5 || -car.d > tr.wr[car.i] + 1.5))) vt = Math.min(vt, 28);
     // traffic cap
     vt = Math.min(vt, this.trafficCap(vt, race));
-    if (race.sc && race.sc.state !== 'none' && (this.pitState === 'none' || !tr.inPitRange(car.s))) {
+    // virtual safety car (SPEC 3.3): everyone holds 60 % of the reference speed, wherever they are
+    if (race.sc && race.sc.state === 'vsc' && this.pitState === 'none') vt = Math.min(vt, prof.v[idx] * 0.6);
+    if (race.sc && (race.sc.state === 'deployed' || race.sc.state === 'ending') && (this.pitState === 'none' || !tr.inPitRange(car.s))) {
       // behind the pace car everyone slows; cars at the back may close up the queue a little faster
       const ahead = car.ahead;
       const gapM = ahead ? Math.max(0, loopDelta(ahead.s, car.s, tr.length)) : 0;
@@ -365,7 +367,7 @@ export class AIDriver {
     }
     // the pace car counts as the car in front
     const sc = race.sc;
-    if (sc && sc.state !== 'none') {
+    if (sc && (sc.state === 'deployed' || sc.state === 'ending')) {
       const ds = loopDelta(sc.s, car.s, Ltr);
       if (ds > 0 && ds < 90) list.push({ c: sc.pseudo, ds, dd: 0, v: sc.v, pace: true });
     }

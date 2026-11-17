@@ -186,7 +186,7 @@ export class HUD {
       <div class="title">${title}</div>
       <div class="facts"><div><span>Race time</span><b>${formatTime(info.time)}</b></div><div><span>Gap</span><b>${gap}</b></div><div><span>Best lap</span><b>${info.best < Infinity ? formatTime(info.best) : '—'}</b></div></div>
       ${info.penalty ? `<div class="hint">Includes pending time penalties (+${info.penalty}s) when classified</div>` : ''}
-      <div class="cont" id="fin-cont">Press <kbd>Enter</kbd> or click for the results</div>`;
+      <div class="cont" id="fin-cont"><button class="btn primary" id="fin-skip">Results ▶</button> <span>or press <kbd>Enter</kbd></span></div>`;
     this.el.finish.classList.remove('hidden');
     document.getElementById('hud').classList.add('cine');
     clearTimeout(this._finT);
@@ -195,7 +195,7 @@ export class HUD {
     this._finT = setTimeout(() => {
       const c = document.getElementById('fin-cont');
       if (c) c.classList.add('show');
-    }, 3000);
+    }, 600);
   }
 
   hideFinish() {
@@ -424,7 +424,11 @@ export class HUD {
     txt(el.last, formatTime(rs.last));
     txt(el.best, formatTime(rs.best));
     txt(el.fast, race.fastest.car ? `${race.fastest.car.info.code} ${formatTime(race.fastest.time)}` : '--:--.---');
-    if (rs.delta != null && rs.lapCpBest) {
+    if (race.sc && race.sc.state === 'vsc' && rs.vscDelta != null) {
+      // under the virtual safety car the delta is to the VSC minimum time: + (red) = too fast, keep it at or below zero
+      txt(el.delta, 'VSC ' + (rs.vscDelta > 0 ? '+' : '-') + Math.abs(rs.vscDelta).toFixed(2));
+      cls(el.delta, 'delta ' + (rs.vscDelta <= 0 ? 'neg' : 'pos'));
+    } else if (rs.delta != null && rs.lapCpBest) {
       txt(el.delta, (rs.delta >= 0 ? '+' : '-') + Math.abs(rs.delta).toFixed(2));
       cls(el.delta, 'delta ' + (rs.delta < 0 ? 'neg' : 'pos'));
     } else txt(el.delta, '');
@@ -446,7 +450,7 @@ export class HUD {
     }
     const rt = race.t0 != null ? race.time - race.t0 : 0;
     let clockTxt = race.phase === 'grid' || race.phase === 'countdown' ? (race.opt.mode === 'timetrial' ? 'Time trial' : 'Formation') : formatTime(Math.max(0, rt), 1);
-    if (race.sc && race.sc.state !== 'none') clockTxt = race.sc.state === 'ending' ? 'SC in this lap' : 'SAFETY CAR';
+    if (race.sc && race.sc.state !== 'none') clockTxt = race.sc.state === 'vsc' ? 'VIRTUAL SC' : race.sc.state === 'ending' ? 'SC in this lap' : 'SAFETY CAR';
     else if (race.isQuali) clockTxt = rs.laps < 1 ? 'Out lap' : rs.finished ? 'Session over' : rs.laps < 2 ? 'Push lap' : 'Flying lap';
     else if (race.opt.mode === 'timetrial') clockTxt = rs.laps < 2 ? (rs.laps === 0 ? 'Out lap' : 'Push lap') : 'Flying lap';
     txt(el.tbClock, clockTxt);

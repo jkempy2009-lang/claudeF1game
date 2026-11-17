@@ -989,14 +989,10 @@ class Game {
     this.input.rumble(player, camRig.impact, dt);
     if (s.fin) {
       s.fin.t += dt;
-      if (((pin.confirm || s.finConfirm) && s.fin.t > 1.5) || s.fin.t > 40) {
-        if (!s.skipToResults) {
-          s.skipToResults = true;
-          this.hud.hideFinish();
-          this.hud.message('Finishing the classification…', '', 'Waiting for the rest of the field', 3);
-        }
-      }
-    }
+      // Enter / click / the button: straight to the results. The cars still running are given the finish they were on
+      // course for (Race.finishNow) instead of being raced home, which used to take a minute or more.
+      if (((pin.confirm || s.finConfirm) && s.fin.t > 0.6) || s.fin.t > 14) this.skipToResults(s);
+    } else if (player.rs.dnf && race.phase === 'racing' && pin.confirm) this.skipToResults(s); // retired: no point watching the rest
     if (pin.autoToggle) this.toggleAutopilot();
     const autoDrive = () => s.auto && (race.phase === 'racing' || (s.fin && race.phase === 'finished'));
     if (autoDrive()) pin.aiDriven = true;
@@ -1169,7 +1165,7 @@ class Game {
     // results
     if (race.phase === 'finished' && !s.finishedShown && (!s.fin || s.skipToResults)) {
       s.finishedShown = true;
-      setTimeout(() => { if (this.session === s) this.showResults(); }, race.opt.mode === 'timetrial' ? 0 : 600); // not if the session was left in the meantime
+      setTimeout(() => { if (this.session === s) this.showResults(); }, race.opt.mode === 'timetrial' || s.skipToResults ? 0 : 600); // not if the session was left in the meantime
     }
   }
 
@@ -1251,6 +1247,18 @@ class Game {
           hud.radio('Safety car in this lap. Get ready to go green.', 5);
           hud.flag('SC IN THIS LAP', '#ffc400', 4, 'sc');
           break;
+        case 'vscDeploy':
+          hud.flag('VIRTUAL SAFETY CAR', '#ffc400', 6, 'sc');
+          hud.radio('VSC, VSC. Slow down and keep your delta positive: green on the timing screen.', 6);
+          this.audio.ui('bad');
+          break;
+        case 'vscWarn':
+          if (e.car === player) hud.message('VSC delta', 'bad', 'Too fast: slow down or take a 5 s penalty', 3);
+          break;
+        case 'vscEnd':
+          hud.flag('GREEN FLAG', '#31d17a', 4, 'green');
+          hud.radio('VSC ending. Green, green, green.', 4);
+          break;
         case 'scEnd':
           hud.flag('GREEN FLAG', '#31d17a', 4, 'green');
           hud.radio('Green, green, green. We are racing again.', 4);
@@ -1303,7 +1311,7 @@ class Game {
           break;
         case 'retired':
           if (e.car === player) {
-            hud.message('Retired', 'bad', `${e.reason} failure`, 5);
+            hud.message('Retired', 'bad', `${e.reason} failure · Enter for the results`, 8);
             hud.radio(`We have lost the ${e.reason.toLowerCase()}. Bring it to a stop safely, I'm sorry.`, 6);
           } else hud.radio(`${e.car.info.name} is out: ${e.reason.toLowerCase()} failure.`, 4);
           break;
@@ -1333,6 +1341,13 @@ class Game {
   }
 
   /** The player takes the chequered flag: hand the car to a slow cool-down, run a cinematic camera and show the result. */
+  skipToResults(s) {
+    if (s.skipToResults) return;
+    s.skipToResults = true;
+    this.hud.hideFinish();
+    if (s.race.phase !== 'finished') s.race.finishNow();
+  }
+
   startFinishScene(s, e) {
     const { race, player, camRig } = s;
     if (s.fin) return;
@@ -1559,7 +1574,7 @@ class Game {
     s.guide.setVisible(this.save.settings.line !== false);
     s.camRig.init = false;
     for (const v of s.views.values()) v.group.visible = true;
-    if (s.scView) s.scView.group.visible = s.race.sc.state !== 'none';
+    if (s.scView) s.scView.group.visible = s.race.sc.state === 'deployed' || s.race.sc.state === 'ending';
     if (this.replayFrom === 'results') {
       this.state = 'results';
       this.menu.show('results', this.menu.lastData);
@@ -1636,7 +1651,7 @@ class Game {
     const sc = s.race.sc;
     const v = s.scView;
     if (!v) return;
-    const on = sc.state !== 'none';
+    const on = sc.state === 'deployed' || sc.state === 'ending'; // a virtual safety car has no car
     v.group.visible = on;
     if (!on) return;
     const tr = s.track;

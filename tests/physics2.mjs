@@ -142,4 +142,47 @@ const drive = (c, secs, inp) => { for (let t = 0; t < secs; t += DT) c.step(DT, 
   const vc = cls.find((e) => e.car === victim);
   ok('a retired car is classified last with no points', vc.pos === cls.length && vc.points === 0 && vc.dnf === 'Power unit', `P${vc.pos} of ${cls.length}`);
 }
+// ---- race control: virtual safety car, and skipping to the results
+{
+  const track = new Track(TRACK_DEFS.find((d) => d.id === 'vettore'));
+  const race = new Race(track, { mode: 'race', laps: 4, level: 0.7, fieldSize: 12, playerGrid: 6, seed: 9, tyreWear: 1 });
+  const p = race.player, bot = new AIDriver({ car: p, track, profile: race.getProfile(p.spec, 'bot'), level: 0.7, seed: 7 });
+  race.start();
+  const victim = race.cars.find((c) => c !== p && c.info.gridPos === 2);
+  const seen = new Set();
+  let vscSpeed = 0, vscN = 0, normalSpeed = 0, normalN = 0, deltaMax = -99, penalised = false;
+  for (let n = 0; race.phase !== 'finished' && n < 240 * 600; n++) {
+    let inp = race.phase === 'racing' ? bot.update(RDT, race) : { throttle: 0, brake: 1, steer: 0 };
+    // the player ignores the VSC for a few seconds: too fast
+    if (race.sc.state === 'vsc' && race.sc.t < 9) inp = { ...inp, throttle: 1, brake: 0 };
+    race.step(RDT, { throttle: inp.throttle, brake: inp.brake, steer: inp.steer });
+    const t = race.time - race.t0;
+    if (race.phase === 'racing' && t > 45 && !victim.failed) victim.engStress = 1;
+    for (const e of race.events) { seen.add(e.type); if (e.type === 'penalty' && e.car === p) penalised = true; }
+    race.events.length = 0;
+    const others = race.cars.filter((c) => c !== p && c !== victim && !c.rs.inPitLane);
+    const avg = others.reduce((a, c) => a + c.speed, 0) / others.length;
+    if (race.sc.state === 'vsc' && race.sc.t > 6) { vscSpeed += avg; vscN++; deltaMax = Math.max(deltaMax, p.rs.vscDelta || 0); }
+    else if (race.sc.state === 'none' && t > 20) { normalSpeed += avg; normalN++; }
+    if (seen.has('vscEnd') && race.chequered) { race.finishNow(); break; }
+  }
+  ok('one stranded car brings out the virtual safety car, and it ends', seen.has('vscDeploy') && seen.has('vscEnd') && !seen.has('scDeploy'));
+  ok('under the VSC the field slows to about 60 % of its pace', vscN > 0 && vscSpeed / vscN < 0.72 * (normalSpeed / normalN), `${(vscSpeed / vscN * 3.6).toFixed(0)} vs ${(normalSpeed / normalN * 3.6).toFixed(0)} km/h`);
+  // the delta itself: a player holding racing speed under the VSC goes over the delta and is penalised after 5 s
+  const r2 = new Race(track, { mode: 'race', laps: 4, level: 0.7, fieldSize: 2, playerGrid: 1, seed: 9 });
+  r2.start();
+  r2.phase = 'racing'; r2.t0 = r2.time;
+  r2.deployVsc();
+  const pl = r2.player;
+  pl.u = 75;
+  let pen = null;
+  for (let k = 0; k < 80; k++) { r2.policeVsc(0.25); for (const e of r2.events) if (e.type === "penalty") pen = e; }
+  ok('a player who ignores the VSC goes over the delta and is penalised', pl.rs.vscDelta > 1.5 && !!pen && pen.secs === 5, `delta +${pl.rs.vscDelta.toFixed(2)} s`);
+  const r3 = new Race(track, { mode: 'race', laps: 4, level: 0.7, fieldSize: 2, playerGrid: 1, seed: 9 });
+  r3.start(); r3.phase = 'racing'; r3.t0 = r3.time; r3.deployVsc();
+  r3.player.u = 12;
+  for (let k = 0; k < 40; k++) r3.policeVsc(0.25);
+  ok('...one who slows down keeps a negative delta', r3.player.rs.vscDelta < 0);
+  ok('finishNow ends the race with every running car classified', race.phase === 'finished' && race.cars.every((c) => c.rs.finished || c.rs.dnf));
+}
 process.exit(bad ? 1 : 0);

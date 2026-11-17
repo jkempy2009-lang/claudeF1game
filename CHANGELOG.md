@@ -4,6 +4,10 @@
 
 Everything below was added or fixed in this release, grouped by area.
 
+### Latest: skip straight to the results; virtual safety car
+- **No more waiting at the end of a race.** Finishing used to mean watching a cool-down lap and then a fast-forward of the rest of the field, which could take a minute or more. The finish card now has a **Results ▶** button (Enter or a click do the same) from 0.6 s after the flag, and it moves on by itself after 14 s. The cars still running are given the finish they were on course for (the rest of their current lap at their recent pace, `Race.finishNow`) instead of being raced home. On a 20-car test race the estimated classification matched the fully raced one in all 20 positions. A player whose car has retired can press Enter to skip the rest of the race too.
+- **Virtual safety car (SPEC 3.3).** One or two stranded or retired cars now bring out a VSC (after 3 s of yellow) for 18-28 s and until the track is clear; three or more still bring out the real safety car, and a VSC turns into one if more cars stop. There is no pace car: every driver must hold 62 % of the reference speed. The AI holds 60 %. The timing panel shows your **VSC delta** (green at or below zero, red when too fast); more than 1.5 s over for 5 s, or at the end, is a 5 s penalty. DRS is off, and the AI takes a cheap pit stop under the VSC as it does under the safety car. Measured in `tests/physics2.mjs`: the field slows to about 60 % of its pace (148 against 249 km/h), the VSC comes in and goes, a player who ignores it is penalised and one who slows down is not.
+
 ### Latest: v2 physics (SPEC-v2 sections 1 and 5)
 Each feature has a switch in `PHYS` (`src/sim/car.js`) so it can be measured on its own; all are on. `tests/physics2.mjs` (24 checks) covers them.
 

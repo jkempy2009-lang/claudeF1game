@@ -453,7 +453,7 @@ export class Race {
         if (car.brakeStress > 0.6 && !rs.brakeWarned) { rs.brakeWarned = true; this.pushEvent({ type: 'stressWarn', car, what: 'brakes', level: 1 }); }
       }
       // the marshals push a stopped, retired car behind the barrier (the player's stays where it is, the camera is on it)
-      if (rs.dnf && !car.inGarage && car !== this.player && car.speed < 1.5 && this.time - rs.dnfAt > 6) car.inGarage = true;
+      if (rs.dnf && !car.inGarage && car !== this.player && car.speed < 1.5 && this.time - rs.dnfAt > 14) car.inGarage = true;
     }
   }
 
@@ -915,7 +915,7 @@ export class Race {
             rs.nextCompound = DRY_COMPOUND_IDS[1];
           }
         }
-        if (this.sc.state === 'deployed' && ts.wear > 0.4 && rs.stops === 0 && lapsLeft > 3 && rs.plannedStop != null) drv.wantsPit = true; // a cheap stop
+        if ((this.sc.state === 'deployed' || this.sc.state === 'vsc') && ts.wear > (this.sc.state === 'vsc' ? 0.32 : 0.4) && rs.stops === 0 && lapsLeft > 3 && rs.plannedStop != null) drv.wantsPit = true; // a cheap stop under neutralised pace
       }
     }
     // heavy damage: the pit wall calls the player in (B cancels it)
@@ -1164,7 +1164,7 @@ export class Race {
     for (const c of this.cars) {
       if (!c.driver || c.rs.finished || c.rs.inPitLane || c.rs.service || c.inGarage) continue;
       const beside = c.d > tr.wl[c.i] + 1.5 || -c.d > tr.wr[c.i] + 1.5;
-      if (c.speed < 3.5 && (c.driver.stuckT > 1.2 || (beside && c.speed < 1.5))) out.push(c);
+      if (c.speed < 3.5 && (c.driver.stuckT > 1.2 || (beside && c.speed < 1.5) || c.rs.dnf)) out.push(c);
     }
     return out;
   }
@@ -1182,10 +1182,21 @@ export class Race {
       this.yellow = yel;
       this.pushEvent({ type: yel ? 'yellow' : 'yellowClear' });
     }
+    const lapsLeft = this.sorted[0] ? this.totalLaps - this.sorted[0].rs.laps : 9;
     if (sc.state === 'none') {
       sc.count = stalled.length;
-      const lapsLeft = this.sorted[0] ? this.totalLaps - this.sorted[0].rs.laps : 9;
+      // one or two stranded cars: a virtual safety car once the yellow has been out a moment (SPEC 3.3); three or more: the real one
+      sc.yellowT = stalled.length ? (sc.yellowT || 0) + dt : 0;
       if (stalled.length >= 3 && lapsLeft > 1 && !this.chequered) this.deploySafetyCar();
+      else if (stalled.length && sc.yellowT > 3 && lapsLeft > 1 && !this.chequered && this.opt.vsc !== false) this.deployVsc();
+      return;
+    }
+    if (sc.state === 'vsc') {
+      sc.t += dt;
+      if (stalled.length >= 3 && lapsLeft > 1) { this.endVsc(false); this.deploySafetyCar(); return; }
+      sc.clearT = stalled.length ? 0 : sc.clearT + dt;
+      this.policeVsc(dt);
+      if ((sc.clearT > 4 && sc.t > sc.minT) || this.chequered) this.endVsc(true);
       return;
     }
     // positions the pace car uses
@@ -1224,6 +1235,55 @@ export class Race {
       this.pushEvent({ type: 'scEnd' });
     }
     this.policeSafetyCar();
+  }
+
+  /** Virtual safety car: no pace car, every driver holds a delta to 62 % of the reference speed (SPEC 3.3). */
+  deployVsc() {
+    const sc = this.sc;
+    sc.state = 'vsc';
+    sc.t = 0;
+    sc.clearT = 0;
+    sc.minT = 18 + this.rng() * 10;
+    this.yellow = false;
+    for (const c of this.cars) {
+      c.drsAllowed = false;
+      c.rs.drsEligible = [];
+      c.rs.vscDelta = 0;
+      c.rs.vscOverT = 0;
+    }
+    this.pushEvent({ type: 'vscDeploy' });
+  }
+
+  endVsc(green) {
+    const sc = this.sc, p = this.player;
+    // ending over the delta is an infringement (unless it was already penalised)
+    if (p && this.opt.mode === 'race' && (p.rs.vscDelta || 0) > 1.5 && !p.rs.vscPenalised) this.addPenalty(p, 5, 'VSC delta infringement');
+    if (p) p.rs.vscPenalised = false;
+    sc.state = 'none';
+    sc.yellowT = 0;
+    if (green) this.pushEvent({ type: 'vscEnd' });
+  }
+
+  /**
+   * The player's VSC delta in seconds: + = ahead of the minimum time (too fast). It integrates the speed against 62 % of the
+   * reference speed at this point of the lap; more than 1.5 s for 5 s (or at the end) is a 5 s penalty.
+   */
+  policeVsc(dt) {
+    const p = this.player;
+    if (!p || p.rs.finished || this.opt.mode !== 'race') return;
+    const rs = p.rs;
+    if (rs.inPitLane || rs.service) return;
+    const prof = this.vscRef || (this.vscRef = this.getProfile(p.spec, 'vsc-ref'));
+    const vref = Math.max(8, prof.v[p.i] * 0.62);
+    rs.vscDelta = clamp((rs.vscDelta || 0) + (dt * (p.speed - vref)) / vref, -15, 15);
+    if (rs.vscDelta > 1.5) {
+      if (!rs.vscOverT) this.pushEvent({ type: 'vscWarn', car: p });
+      rs.vscOverT = (rs.vscOverT || 0) + dt;
+      if (rs.vscOverT > 5 && !rs.vscPenalised) {
+        rs.vscPenalised = true;
+        this.addPenalty(p, 5, 'VSC delta infringement');
+      }
+    } else rs.vscOverT = 0;
   }
 
   deploySafetyCar() {
@@ -1298,6 +1358,30 @@ export class Race {
         this.endRace();
       }
     }
+  }
+
+  /**
+   * Ends the race now, for a player who does not want to wait for the rest of the field: every car still running is given
+   * the finish it was on course for (the rest of its current lap at its recent pace), so the classification is the one the
+   * race would almost certainly have produced, without simulating the last minutes.
+   */
+  finishNow() {
+    if (this.phase === 'finished') return;
+    const L = this.track.length;
+    const ref = Number.isFinite(this.fastest.time) ? this.fastest.time : 90;
+    for (const c of this.cars) {
+      const rs = c.rs;
+      if (rs.finished || rs.dnf) continue;
+      const lapT = Number.isFinite(rs.best) ? rs.best * 1.02 : ref * 1.06;
+      const toLine = mod(-c.s, L); // metres to the next crossing of the line
+      const t = this.time - this.t0 + (toLine / L) * lapT;
+      rs.finished = true;
+      rs.finishTime = t;
+      rs.laps = Math.min(this.totalLaps, rs.laps + (this.chequered ? 1 : 1));
+      rs.maxDist = Math.max(rs.maxDist || 0, rs.dist || 0) + toLine;
+    }
+    if (!this.chequered) { this.chequered = true; this.chequeredAt = this.time; }
+    this.endRace();
   }
 
   endRace() {
