@@ -153,8 +153,21 @@ export class CameraRig {
       cam.position.copy(this.tvPoints[best]);
       const target = v3.copy(carPos).addScaledVector(fwd, speed * 0.05).setY(carPos.y + 0.8);
       cam.lookAt(target);
+      // a long lens on a tripod (SPEC 6.4): the operator's small sway, and a zoom that leads the car in and widens as it passes
+      const tt = performance.now() / 1000;
+      cam.rotateY(Math.sin(tt * 2.1) * 0.003 + Math.sin(tt * 0.7) * 0.002);
+      cam.rotateX(Math.sin(tt * 1.7 + 1) * 0.002);
       const d = this.tvPoints[best].distanceTo(carPos);
-      fovTarget = clamp(2 * Math.atan(10 / Math.max(d, 15)) * (180 / Math.PI), 8, 55);
+      const lead = clamp(v2.copy(this.tvPoints[best]).sub(carPos).dot(fwd) / Math.max(d, 1), -1, 1); // 1 = coming at us, -1 = going away
+      fovTarget = clamp(2 * Math.atan((10 - 2.5 * lead) / Math.max(d, 15)) * (180 / Math.PI), 7, 58);
+    } else if (this.mode === 'pitbox') {
+      // the pit-stop camera (SPEC 6.4): low on the gantry beside the box, looking at the car
+      const p = this.pitCam;
+      if (p) {
+        cam.position.set(p.x, p.y, p.z);
+        cam.lookAt(carPos.x, carPos.y + 0.5, carPos.z);
+        fovTarget = 46;
+      }
     }
     this.init = true;
 

@@ -23,12 +23,15 @@ export class PostFX {
     this.cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
     this.mat = new THREE.ShaderMaterial({
       uniforms: { tDiffuse: { value: null }, tBloom: { value: null }, bloom: { value: 0 }, strength: { value: 0 }, aspect: { value: 1 }, center: { value: new THREE.Vector2(0.5, 0.46) }, grade: { value: 1 },
+        visor: { value: 0 }, vspeed: { value: 0 }, vlat: { value: 0 },
         time: { value: 0 }, haze: { value: [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()] }, sun: { value: new THREE.Vector3() }, sunCol: { value: new THREE.Color(1, 0.9, 0.75) } },
       vertexShader: VERT,
       fragmentShader: `
         uniform sampler2D tDiffuse; uniform sampler2D tBloom; uniform float bloom; uniform float strength; uniform float aspect; uniform vec2 center; uniform float grade;
         uniform float time; uniform vec3 haze[4]; uniform vec3 sun; uniform vec3 sunCol;
+        uniform float visor; uniform float vspeed; uniform float vlat;
         varying vec2 vUv;
+        float vh(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
         void main() {
           // heat haze: the air behind a hot exhaust bends the picture (haze[i] = screen position and radius of each plume)
           vec2 uv = vUv;
@@ -39,6 +42,20 @@ export class PostFX {
               float f = exp(-dot(hd, hd) / (haze[i].z * haze[i].z));
               uv += f * 0.0011 * vec2(sin(vUv.y * 130.0 + time * 17.0), cos(vUv.x * 110.0 + time * 14.0));
             }
+          }
+          // raindrops on the visor (SPEC 2.3): one drop per screen cell, each a little lens; at speed they streak back and out
+          if (visor > 0.001) {
+            vec2 sp = vec2(vUv.x * aspect, vUv.y) * 7.0;
+            vec2 drift = vec2(-vlat * 0.6, -vspeed * 1.6) * time * 0.05;
+            vec2 q = sp - drift;
+            vec2 cell = floor(q), f = fract(q);
+            float h = vh(cell), h2 = vh(cell + 5.3);
+            float on = step(1.0 - visor * 0.85, h);
+            vec2 c = vec2(0.2 + 0.6 * h2, 0.2 + 0.6 * fract(h * 7.1));
+            vec2 dv = (f - c) * vec2(1.0, 1.0 + vspeed * 2.0); // stretched along the streak at speed
+            float r = length(dv), rad = 0.1 + 0.16 * fract(h * 13.7);
+            float inside = on * (1.0 - smoothstep(rad * 0.85, rad, r));
+            uv += (dv / max(rad, 1e-3)) * 0.02 * inside;
           }
           vec2 d = uv - center;
           float r = length(d * vec2(aspect, 1.0));

@@ -8,8 +8,9 @@ attribute float size; attribute float alpha; attribute vec3 tint;
 varying float vA; varying vec3 vTint;
 uniform float scale;
 void main() {
-  vA = alpha; vTint = tint;
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
+  vA = alpha * smoothstep(0.5, 4.0, -mv.z); // no puff fills the lens: they fade out in the last few metres (SPEC 6.3)
+  vTint = tint;
   gl_PointSize = size * scale / max(0.1, -mv.z);
   gl_Position = projectionMatrix * mv;
 }`;
@@ -204,16 +205,18 @@ export class Effects {
     this.dust = new ParticlePool(500, { drag: 0.8, gravity: -3 });
     this.sparks = new ParticlePool(500, { additive: true, gravity: -14, drag: 0.4, bounce: 0.3 });
     this.spray = new ParticlePool(1600, { drag: 1.5, gravity: -1.2 });
+    // exhaust flames (SPEC 2.3): a short blue-orange flash at a lift or an upshift
+    this.flames = new ParticlePool(160, { additive: true, drag: 4.0, gravity: 0 });
     this.skid = new SkidMarks();
     this.wet = 0;
-    scene.add(this.smoke.points, this.dust.points, this.sparks.points, this.spray.points, this.skid.mesh);
+    scene.add(this.smoke.points, this.dust.points, this.sparks.points, this.spray.points, this.flames.points, this.skid.mesh);
     this.rnd = mulberry32(99);
     this.state = new WeakMap(); // car -> { skid: [slot x4], spray/smoke/dust: accumulators x4, spark }
   }
 
   /** Daylight scale for the unlit puffs (1 = full sun): they should dim with the evening, the rain and the night. */
   setLight(k) {
-    for (const p of [this.smoke, this.dust, this.spray]) p.points.material.uniforms.light.value = k;
+    for (const p of [this.smoke, this.dust, this.spray, this.brakeDustPool].filter(Boolean)) p.points.material.uniforms.light.value = k;
   }
 
   /** Emit for one car per frame (smoke when sliding, dirt when off-road, sparks on scrapes). */
@@ -244,6 +247,13 @@ export class Effects {
           const sp = 0.8 + R() * 0.2;
           this.spray.emit(wx + (R() - 0.5) * 0.4, wh + 0.12, wz + (R() - 0.5) * 0.4, -car.u * co * 0.12 + (R() - 0.5) * 2, 0.9 + R() * 1.8, car.u * si * 0.12 + (R() - 0.5) * 2, 0.5 + R() * 0.5, 1.6 + car.speed * 0.012, (0.11 + 0.07 * this.wet) * Math.min(1, car.speed / 45), 0.55 + R() * 0.55, sp * 0.92, sp * 0.96, sp);
         }
+      }
+      // carbon brake dust from the front hubs under heavy braking (SPEC 6.3)
+      if (w < 2 && car.brake > 0.75 && car.speed > 40) {
+        st.bd = (st.bd || 0) + dt * 22;
+        let k = Math.floor(st.bd);
+        st.bd -= k;
+        while (k-- > 0) this.smoke.emit(wx, wh + 0.33, wz, -car.u * co * 0.25 + (R() - 0.5), 0.3 + R() * 0.4, car.u * si * 0.25 + (R() - 0.5), 0.35 + R() * 0.25, 1.2, 0.28, 0.22, 0.12, 0.12, 0.13);
       }
       // smoke
       if (onAsphalt && slip > 0.18 && car.speed > 5) {
@@ -308,11 +318,26 @@ export class Effects {
     for (let k = 0; k < 10; k++) this.smoke.emit(x, y + 0.4, z, (R() - 0.5) * 4, 1 + R() * 2, (R() - 0.5) * 4, 1.5, 4, 0.4, 1.5, 0.6, 0.6, 0.6);
   }
 
+  /**
+   * Exhaust flash: 2-3 hot particles at the exhaust (car frame [-2.47, 0.415, 0]) on an upshift or a sharp lift at high revs.
+   * The caller decides when (Game, per car near the camera).
+   */
+  backfire(car) {
+    const R = this.rnd, co = Math.cos(car.theta), si = Math.sin(car.theta);
+    const x = car.x - 2.47 * co, y = car.trackH + 0.415, z = -(car.y - 2.47 * si);
+    const n = 2 + Math.floor(R() * 2);
+    for (let k = 0; k < n; k++) {
+      const hot = R() < 0.5;
+      this.flames.emit(x, y, z, -co * (4 + R() * 3) + car.u * co * 0.9, (R() - 0.5) * 0.6, si * (4 + R() * 3) - car.u * si * 0.9, 0.22 + R() * 0.16, 1.4, 1, 0.04 + R() * 0.03, hot ? 0.45 : 1.0, hot ? 0.65 : 0.45, hot ? 1.0 : 0.1);
+    }
+  }
+
   update(dt, viewportScale) {
     this.smoke.update(dt, viewportScale);
     this.dust.update(dt, viewportScale);
     this.sparks.update(dt, viewportScale);
     this.spray.update(dt, viewportScale);
+    this.flames.update(dt, viewportScale);
     this.skid.flush();
   }
 }

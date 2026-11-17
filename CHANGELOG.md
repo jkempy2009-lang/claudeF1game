@@ -4,6 +4,20 @@
 
 Everything below was added or fixed in this release, grouped by area.
 
+### Latest: graphics and lighting (SPEC-v2 sections 2 and 6)
+- **Road surface (2.1).** The asphalt has a normal map made from its own height texture (a Sobel filter), so the aggregate catches low sun. The rubbered line is a little glossier than the tarmac beside it, and the braking zones darken with the rubber laid there. The barriers get a normal map too, and the kerbs are scuffed where cars run over them.
+- **Reflections that follow the sky (2.2).** The environment map is rendered again from the sky as dusk, night or rain come in, so car paint and wet road reflect the sky as it is now rather than the midday sky from the start of the race. In the rain the road gets moving ripple rings in its normal map, and the floodlight pools on a wet road are softer.
+- **Visor rain and backfires (2.3).** In the cockpit camera, rain beads on the visor and streaks sideways in corners and back at speed. Cars spit a short flame from the exhaust on an upshift at high revs and on a sharp lift.
+- **Driver arms and landmarks (2.4).** In the cockpit view the driver's arms (in the team's suit colour) reach the wheel and follow it as it turns. Each circuit gets one or two landmarks from a table (a Ferris wheel, a control tower, yachts in the harbour, a bridge arch), corner number boards, LED panels that show the flag in force (yellow, VSC, SC) and searchlights at night.
+- **Shadows and contact shading (6.1).** The sun's shadow covers a wider area around the camera car (±95 m), and each tyre sits on a soft contact shadow, so cars no longer look as if they hover.
+- **Marbles you can see (6.2).** The marbles from the physics are drawn on the road beside the line, updated every two seconds.
+- **Particles and brake dust (6.3).** Smoke and spray fade out as they reach the camera instead of cutting through it. Hard braking puffs carbon dust from the front wheels.
+- **Cameras (6.4).** The TV camera sways a little and leads the car with its zoom. During your pit stop the view cuts to a camera in the box and back after.
+- **The crowd** gets louder and waves more on the last lap.
+- **Carbon fibre.** Bare carbon parts have a twill weave in their shader.
+- **A texture leak fixed.** Each race used to leave two GPU textures behind when it ended (the reflection map's render target was released but not the texture inside it; the same with the marble map), so a long session of quick races slowly filled video memory. `tests/leak.mjs` caught it once the reflections started refreshing during a race; it now holds steady.
+- **Not done, or changed from the spec.** The spec asked for a blended second shadow cascade; there is one wider shadow map instead, and shadows can still end abruptly at its edge. The spec's AgX tone mapping was tried and washed the colours out, so the game stays on ACES. The backfire is a flame sprite, not a light that lights the road.
+
 ### Latest: the driver market, contracts and season goals
 - **A living grid.** A career has its own copy of the 20 drivers, each with an age and a talent, and races use it. Every winter the drivers age a year: up to 26 they improve, from 33 they decline, and a good or bad season nudges the change. Drivers retire from 34 (always by 38), and rookies from the junior series take their seats. Up to three transfers happen each winter: the best performer of a weaker team takes the seat of a disappointing driver at a stronger one, and they swap. A new **Driver market** tab shows every team's line-up with ages and talent, the driver without a seat, and last winter's moves; the moves also make the paddock news.
 - **Contracts.** You start on a two-year deal. Every offer now comes with terms: one to three seasons, and pay from ×0.8 to ×1.6 on the team's retainer, longer and better paid the more the team wants you. While a contract runs, staying is your choice. When it runs out, the team offers a renewal if it still wants you. Joining another team puts its displaced driver in your old seat.

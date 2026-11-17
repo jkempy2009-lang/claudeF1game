@@ -576,7 +576,8 @@ class Game {
     const envScene = new THREE.Scene();
     const skyClone = world.sky.clone();
     envScene.add(skyClone);
-    scene.environment = pm.fromScene(envScene, 0.02).texture;
+    const envRT = pm.fromScene(envScene, 0.02); // kept: disposing only its texture leaves the render target's GL texture behind
+    scene.environment = envRT.texture;
     scene.environmentIntensity = 0.75;
     pm.dispose();
 
@@ -631,7 +632,7 @@ class Game {
     }
     this.perf = null;
     this.session = {
-      cfg: { ...cfg, seed: race.opt.seed }, track, race, world, scene, views, effects, rain, headlights, camRig, ghostView, guide,
+      cfg: { ...cfg, seed: race.opt.seed }, track, race, world, scene, envRT, views, effects, rain, headlights, camRig, ghostView, guide,
       acc: 0, alpha: 0, intro: 4.2, introT: 0, paused: false, finishedShown: false, radioT: 0, fast: false,
       player: race.player, pin: null, sunDir: world.sunDir, stopTimer: 0, lastEventCar: null, seasonRound: this.save.season ? this.save.season.round : null,
       useSeason: cfg.__season,
@@ -653,10 +654,29 @@ class Game {
     if (cfg.mode === 'race') this.hud.radio('Welcome to ' + track.name + '. Lights out when you are ready — good luck.', 6);
   }
 
+  /** Re-renders the environment map from the sky as it is now (its uniforms follow the time of day and the weather). */
+  refreshEnvironment(s, dusk, night, rain) {
+    s.envDusk = dusk;
+    s.envNight = night;
+    s.envRain = rain;
+    const pm = s.pmrem || (s.pmrem = new THREE.PMREMGenerator(this.renderer));
+    if (!s.envScene) {
+      s.envScene = new THREE.Scene();
+      s.envScene.add(s.world.sky.clone()); // a clone shares the sky's material, so it is always the current sky
+    }
+    const old = s.envRT;
+    s.envRT = pm.fromScene(s.envScene, 0.02);
+    s.scene.environment = s.envRT.texture;
+    if (old) old.dispose(); // the render target, not just its texture: that alone leaked one GL texture each time
+  }
+
   endSession() {
     const s = this.session;
     if (!s) return;
     disposeScene(s.scene);
+    if (s.pmrem) s.pmrem.dispose();
+    if (s.envRT) s.envRT.dispose();
+    if (s.world && s.world.marbleTex) s.world.marbleTex.dispose(); // bound through onBeforeCompile, so disposeScene cannot see it
     if (s.rain) s.rain.dispose();
     if (s.rec) s.rec.data = null;
     if (this._replayUI) this._replayUI.classList.add('hidden');
@@ -885,6 +905,12 @@ class Game {
   /** Screen-space effects that need to know where things are: exhaust heat haze behind the nearest cars and the glare of a low sun. */
   updateScreenFx(s) {
     const u = this.post.mat.uniforms;
+    // rain on the visor from the driver's seat (SPEC 2.3)
+    const onboard = s.camRig.mode === 'cockpit' || s.camRig.mode === 'tcam';
+    const vk = onboard && !this.save.settings.calm ? clamp((s.race.rain - 0.05) * 1.6, 0, 1) : 0;
+    u.visor.value += (vk - u.visor.value) * 0.05;
+    u.vspeed.value = clamp(s.player.speed / 80, 0, 1.5);
+    u.vlat.value = clamp(s.player.latG || 0, -3, 3) * 0.3;
     const cam = this.camera, v = this._fxV || (this._fxV = new THREE.Vector3());
     const on = this.post.gradeOn && !this.save.settings.calm;
     const hz = u.haze.value;
@@ -1058,8 +1084,28 @@ class Game {
       v.setLod(!near && car !== player);
       v.setShadow(near && this.save.settings.quality !== 'low');
       if (car !== player && near) effects.car(car, dt);
+      // exhaust flames on an upshift or a sharp lift at high revs (SPEC 2.3)
+      if (near || car === player) {
+        const bf = s.bf || (s.bf = new WeakMap());
+        let b = bf.get(car);
+        if (!b) bf.set(car, (b = { gear: car.gear, thr: car.throttle }));
+        if (((car.gear > b.gear && car.rpm > 10000) || (b.thr > 0.8 && car.throttle < 0.25 && car.rpm > 11000)) && Math.random() < 0.75) effects.backfire(car);
+        b.gear = car.gear;
+        b.thr = car.throttle;
+      }
     }
     effects.car(player, dt);
+    // the pit-stop camera (SPEC 6.4): cut to the box while the crew work on the player's car, back to the driver's camera after
+    if (player.rs.service && !s.pitCamFrom && s.camRig.mode !== 'finish') {
+      s.pitCamFrom = s.camRig.mode;
+      const g = views.get(player).group, h = g.rotation.y;
+      s.camRig.pitCam = { x: g.position.x + Math.cos(h) * 4.5 + Math.sin(h) * 3.2, y: g.position.y + 1.6, z: g.position.z - Math.sin(h) * 4.5 + Math.cos(h) * 3.2 };
+      s.camRig.mode = 'pitbox';
+    } else if (!player.rs.service && s.pitCamFrom) {
+      s.camRig.mode = s.pitCamFrom;
+      s.pitCamFrom = null;
+      s.camRig.init = false;
+    }
     // pit crews appear around any car being serviced
     s.crews = s.crews || new Map();
     for (const car of race.cars) {
@@ -1128,11 +1174,15 @@ class Game {
     s.nightK = night;
     s.duskK = dusk;
     const atmo = world.setAtmosphere({ dusk, wet: race.wet, rain: race.rain, night, lineDry: race.lineDry || 0, rubber: race.rubber || 0 });
-    world.setFlag(race.chequered ? 'chequered' : race.yellow || race.sc.state !== 'none' ? 'yellow' : race.phase === 'racing' && race.time - race.t0 < 8 ? 'green' : 'none');
+    world.setFlag(race.chequered ? 'chequered' : race.sc.state === 'vsc' ? 'vsc' : race.sc.state !== 'none' ? 'sc' : race.yellow ? 'yellow' : race.phase === 'racing' && race.time - race.t0 < 8 ? 'green' : 'none');
+    // the crowd is on its feet on the last lap (SPEC 6.5)
+    world.crowdExcite = race.phase === 'racing' && race.sorted && race.sorted[0] && race.totalLaps - race.sorted[0].rs.laps <= 1 ? 1 : race.chequered ? 0.6 : 0;
     s.scene.fog.color.copy(atmo.fog);
     s.scene.fog.density = 1.1 / (s.track.theme.fogFar * atmo.fogMul);
     s.scene.background.copy(atmo.fog);
     s.scene.environmentIntensity = 0.75 * atmo.envMul;
+    // the reflections follow the sky (SPEC 2.2): the image-based lighting is re-rendered from the sky as dusk, night or rain come on
+    if (Math.abs(dusk - (s.envDusk ?? -1)) > 0.08 || Math.abs(night - (s.envNight ?? -1)) > 0.08 || Math.abs(race.rain - (s.envRain ?? -1)) > 0.15) this.refreshEnvironment(s, dusk, night, race.rain);
     this.renderer.toneMappingExposure = atmo.exposure;
     for (const hl of s.headlights) hl.intensity = night * 120;
     effects.wet = race.wet;
@@ -1140,6 +1190,8 @@ class Game {
     s.rain.update(dt, this.camera.position, race.rain);
     world.focusShadow(views.get(player).group.position);
     world.update(dt, performance.now() / 1000);
+    s.marbT = (s.marbT || 0) + dt;
+    if (s.marbT > 2) { s.marbT = 0; world.setMarbles(race.marbles); }
     world.setStartLights(race.phase === 'countdown' ? race.lights : 0, race.phase === 'racing' && race.time - race.t0 < 1.5);
 
     // HUD + audio

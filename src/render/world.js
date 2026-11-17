@@ -4,6 +4,7 @@ import { SURF } from '../sim/track.js';
 import { clamp, lerp, mod, smoothstep, mulberry32, loopDelta } from '../util/math.js';
 import * as TX from './textures.js';
 import { softParticleTexture } from './textures.js';
+import { buildHeroLandmarks, buildCornerSigns, buildLedPanels, setLedPanels, buildSearchlights } from './landmarks.js';
 import { TEAMS } from '../sim/teams.js';
 
 /** Physics (x, y, height) -> three.js (x, height, -y). */
@@ -179,6 +180,7 @@ export class World {
     this.tex = {};
     const th = this.theme;
     this.rnd = mulberry32(1234);
+    this.profile = opts.profile || null;
     this.waterLevel = null;
 
     this.sky = makeSky(th);
@@ -195,6 +197,9 @@ export class World {
     if (opts.profile) this.buildBrakeBoards(opts.profile);
     this.buildDrsMarkers();
     this.buildLandmarks();
+    buildHeroLandmarks(this);
+    buildCornerSigns(this);
+    buildSearchlights(this);
     this.buildFloodlights();
     this.buildMountains();
   }
@@ -209,10 +214,11 @@ export class World {
     this.sun = new THREE.DirectionalLight(new THREE.Color(th.sky.sunColor), 2.6);
     this.sun.castShadow = this.quality !== 'low';
     const sc = this.sun.shadow.camera;
-    sc.left = -70;
-    sc.right = 70;
-    sc.top = 70;
-    sc.bottom = -70;
+    // (SPEC 6.1: a wider frustum, so the shadow's edge is further away from the camera)
+    sc.left = -95;
+    sc.right = 95;
+    sc.top = 95;
+    sc.bottom = -95;
     sc.near = 10;
     sc.far = 500;
     this.sun.shadow.mapSize.set(this.quality === 'high' ? 4096 : 2048, this.quality === 'high' ? 4096 : 2048);
@@ -226,7 +232,11 @@ export class World {
    * Returns the fog settings the scene should use. Cheap to call every frame (quantised, skipped when unchanged).
    */
   setAtmosphere({ dusk = 0, wet = 0, rain = 0, night = 0, lineDry = 0, rubber = 0 } = {}) {
+    this.night = night;
+    if (this.nightEmissive) for (const m of this.nightEmissive) m.emissiveIntensity = 1.6 * Math.max(night, dusk * 0.4);
+    if (this.nightGlow) for (const m of this.nightGlow) m.color.setRGB(1, 0.89, 0.69).multiplyScalar(0.2 + 2.6 * Math.max(night, dusk * 0.5));
     if (this.roadU) {
+      this.roadU.uRain.value = rain;
       this.roadU.uWet.value = clamp(wet, 0, 1);
       this.roadU.uLineDry.value = lineDry;
       this.roadU.uRubber.value = 0.35 + 0.65 * rubber; // a used circuit is never perfectly clean
@@ -273,7 +283,7 @@ export class World {
     this.hemi.color.copy(this._hemiSky || (this._hemiSky = this.hemi.color.clone())).lerp(nHor, night * 0.8);
     if (this.nightMats) {
       this.nightMats.glow.opacity = clamp(night * 1.15, 0, 1);
-      this.nightMats.pool.opacity = clamp(night * 0.3, 0, 0.3);
+      this.nightMats.pool.opacity = clamp(night * 0.3 * (1 - 0.55 * wet), 0, 0.3); // a wet road mirrors the lamps instead of glowing under them
       for (const m of this.facadeMats || []) m.userData.nightU.value = night;
       for (const m of this.nightMats.visible) m.visible = night > 0.04;
     }
@@ -475,21 +485,29 @@ export class World {
 
   buildRoad() {
     const tr = this.track, N = tr.N, T = this.tex;
-    const roadMat = new THREE.MeshStandardMaterial({ map: T.asphalt, bumpMap: T.asphaltBump, bumpScale: 1.6, roughness: 0.92, metalness: 0.0, color: 0xffffff });
+    // a real normal map from the height map (SPEC 2.1): the aggregate catches the light at low sun angles and in the wet
+    T.asphaltNormal = TX.heightToNormalTexture(T.asphaltBump, 1.4);
+    const roadMat = new THREE.MeshStandardMaterial({ map: T.asphalt, normalMap: T.asphaltNormal, normalScale: new THREE.Vector2(0.38, 0.38), roughness: 0.92, metalness: 0.0, color: 0xffffff });
     this.roadMat = roadMat;
     // Per-pixel surface state: the racing line dries first after rain (puddles and reflections stay off line), and the line
     // darkens and gains a sheen as rubber goes down. `lineOff` is each vertex's signed distance from the racing line.
-    this.roadU = { uWet: { value: 0 }, uLineDry: { value: 0 }, uRubber: { value: 0.35 } };
+    // the race's marble grid (SPEC 1.3 / 6.2) as a texture: one texel per track sample and lateral bin
+    this.marbleData = new Uint8Array(N * 5);
+    this.marbleTex = new THREE.DataTexture(this.marbleData, N, 5, THREE.RedFormat, THREE.UnsignedByteType);
+    this.marbleTex.minFilter = this.marbleTex.magFilter = THREE.LinearFilter;
+    this.marbleTex.needsUpdate = true;
+    this.roadU = { uWet: { value: 0 }, uLineDry: { value: 0 }, uRubber: { value: 0.35 }, uRain: { value: 0 }, uTime: { value: 0 }, uMarb: { value: this.marbleTex }, uLen: { value: tr.length / 7.5 }, uWidth: { value: (tr.wl[0] + tr.wr[0]) / 7.5 } };
     roadMat.customProgramCacheKey = () => 'road-surface';
     roadMat.onBeforeCompile = (sh) => {
       Object.assign(sh.uniforms, this.roadU);
       sh.vertexShader = sh.vertexShader
-        .replace('#include <common>', '#include <common>\nattribute float lineOff;\nvarying float vLineOff;')
-        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvLineOff = lineOff;');
+        .replace('#include <common>', '#include <common>\nattribute float lineOff;\nvarying float vLineOff;\nattribute float brakeRub;\nvarying float vBrakeRub;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvLineOff = lineOff;\nvBrakeRub = brakeRub;');
       sh.fragmentShader = sh.fragmentShader
         .replace('#include <common>', `#include <common>
-          uniform float uWet; uniform float uLineDry; uniform float uRubber;
-          varying float vLineOff;
+          uniform float uWet; uniform float uLineDry; uniform float uRubber; uniform float uRain; uniform float uTime;
+          uniform sampler2D uMarb; uniform float uLen; uniform float uWidth;
+          varying float vLineOff; varying float vBrakeRub;
           float rsHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
           float rsNoise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
             return mix(mix(rsHash(i), rsHash(i + vec2(1.0, 0.0)), f.x), mix(rsHash(i + vec2(0.0, 1.0)), rsHash(i + vec2(1.0, 1.0)), f.x), f.y); }`)
@@ -498,10 +516,32 @@ export class World {
           float rsN = rsNoise(vMapUv * 2.3) * 0.65 + rsNoise(vMapUv * 7.1) * 0.35;
           float rsWet = clamp(uWet * (1.0 - uLineDry * rsBand * (0.75 + 0.5 * rsN)), 0.0, 1.0);
           float rsPud = smoothstep(0.56, 0.74, rsN) * smoothstep(0.3, 0.75, uWet) * (1.0 - rsBand * max(uLineDry, 0.5));
-          float rsRub = uRubber * (1.0 - smoothstep(0.5, 1.9, abs(vLineOff))) * (0.75 + 0.5 * rsNoise(vMapUv * vec2(9.0, 0.6))) * (1.0 - 0.6 * uWet);
-          diffuseColor.rgb *= (1.0 - 0.42 * rsWet) * (1.0 - 0.22 * rsPud) * (1.0 - 0.3 * rsRub);`)
+          // rubber: laid on the line over the race, heaviest in the braking zones and at the apexes (SPEC 6.2)
+          float rsRub = uRubber * (1.0 - smoothstep(0.5, 1.9 + 0.8 * vBrakeRub, abs(vLineOff))) * (0.75 + 0.5 * rsNoise(vMapUv * vec2(9.0, 0.6))) * (1.0 - 0.6 * uWet) * (1.0 + 1.3 * vBrakeRub);
+          diffuseColor.rgb *= (1.0 - 0.42 * rsWet) * (1.0 - 0.22 * rsPud) * (1.0 - 0.3 * rsRub);
+          // marbles: a scatter of dark rubber crumbs off the line, where the race has thrown them
+          float rsM = texture2D(uMarb, vec2(vMapUv.y / uLen, clamp(vMapUv.x / uWidth, 0.0, 1.0))).r;
+          diffuseColor.rgb *= 1.0 - 0.55 * clamp(rsM * 1.6, 0.0, 1.0) * smoothstep(0.55, 0.85, rsNoise(vMapUv * 60.0)) * (1.0 - uWet);`)
         .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
-          roughnessFactor = clamp(roughnessFactor - 0.62 * rsWet - 0.22 * rsPud - 0.16 * rsRub, 0.04, 1.0);`);
+          roughnessFactor = clamp(roughnessFactor - 0.62 * rsWet - 0.22 * rsPud - 0.08 * min(rsRub, 1.0), 0.04, 1.0); // rubber is darker, barely shinier`)
+        .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+          // raindrops on the puddles (SPEC 6.2): rings spreading from random points, a new drop every moment in every cell
+          if (uRain > 0.02 && rsPud > 0.05) {
+            vec2 rp = vMapUv * 6.0;
+            vec2 cell = floor(rp);
+            vec2 rip = vec2(0.0);
+            for (int k = 0; k < 2; k++) {
+              vec2 cc = cell + vec2(float(k) * 0.5);
+              float h = rsHash(cc);
+              vec2 ctr = cc + vec2(rsHash(cc + 3.1), rsHash(cc + 7.7));
+              float ph = fract(uTime * (0.9 + 0.6 * h) + h);
+              vec2 dv = rp - ctr;
+              float r = length(dv);
+              float ring = sin((r - ph * 0.7) * 45.0) * exp(-abs(r - ph * 0.7) * 14.0) * (1.0 - ph);
+              rip += ring * dv / max(r, 1e-3);
+            }
+            normal = normalize(normal + vec3(rip.x, 0.0, rip.y) * 0.35 * rsPud * uRain);
+          }`);
     };
     const full = ranges(N, () => true);
     const wl = tr.wl, wr = tr.wr;
@@ -512,15 +552,26 @@ export class World {
     // close the loop
     const loopGeo = this.ribbonGeometry(N - 1, 0, (i) => -wr[i], (i) => wl[i], { vLen: 7.5, uRepeat: roadW / 7.5 });
     const ld = tr.lineD;
+    // where rubber goes down hardest: the braking zones (the speed profile falling ahead) and the apexes
+    const pv = this.profile ? this.profile.v : null;
+    const brakeRaw = new Float32Array(N);
+    for (let i = 0; i < N; i++) {
+      const drop = pv ? (pv[i] - pv[(i + 14) % N]) / Math.max(pv[i], 1) : 0;
+      brakeRaw[i] = Math.max(clamp(drop * 5, 0, 1), clamp(Math.abs(tr.curv[i]) * 70 - 0.2, 0, 0.7));
+    }
+    const brakeK = new Float32Array(N);
+    for (let i = 0; i < N; i++) { let s = 0; for (let k = -6; k <= 6; k++) s += brakeRaw[(i + k + N) % N]; brakeK[i] = s / 13; }
     for (const [geo, a] of [[roadGeo, 0], [loopGeo, N - 1]]) {
       const n = geo.attributes.position.count / 2;
-      const off = new Float32Array(n * 2);
+      const off = new Float32Array(n * 2), br = new Float32Array(n * 2);
       for (let k = 0; k < n; k++) {
         const i = (a + k) % N;
         off[k * 2] = -wr[i] - ld[i];
         off[k * 2 + 1] = wl[i] - ld[i];
+        br[k * 2] = br[k * 2 + 1] = brakeK[i];
       }
       geo.setAttribute('lineOff', new THREE.BufferAttribute(off, 1));
+      geo.setAttribute('brakeRub', new THREE.BufferAttribute(br, 1));
     }
     this.road = this.addRibbons([roadGeo, loopGeo], roadMat, { order: 0 });
     this.road.material.polygonOffset = true;
@@ -537,11 +588,23 @@ export class World {
     this.addRibbons(eg, edgeMat, { receive: false, order: 2 });
 
     // kerbs
-    const kerbMat = new THREE.MeshStandardMaterial({ map: T.kerb, bumpMap: T.kerbBump, bumpScale: 3.5, roughness: 0.7, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
+    const kerbMat = new THREE.MeshStandardMaterial({ map: T.kerb, bumpMap: T.kerbBump, bumpScale: 3.5, roughness: 0.7, vertexColors: true, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
     this.kerbMat = kerbMat;
     const kg = [];
-    for (const [a, b] of ranges(N, (i) => tr.kl[i] > 0.1)) kg.push(this.ribbonGeometry(a, b, (i) => wl[i], (i) => wl[i] + tr.kl[i], { yOff: 0.025, vLen: 2.0, uRepeat: 1 }));
-    for (const [a, b] of ranges(N, (i) => tr.kr[i] > 0.1)) kg.push(this.ribbonGeometry(a, b, (i) => -wr[i] - tr.kr[i], (i) => -wr[i], { yOff: 0.025, vLen: 2.0, uRepeat: 1 }));
+    // the kerbs at the apexes and exits are black with rubber (SPEC 6.5): a vertex shade from the corner's tightness, patchy
+    const scuffed = (geo, a) => {
+      const n = geo.attributes.position.count / 2, col = new Float32Array(n * 6);
+      for (let k = 0; k < n; k++) {
+        const i = (a + k) % N;
+        const sc = clamp(Math.abs(tr.curv[i]) * 90 - 0.25, 0, 1) * (0.55 + 0.45 * fbm(i * 0.11, 3.7, 2));
+        const v = 1 - 0.5 * sc;
+        col.set([v, v, v * 0.98, v, v, v * 0.98], k * 6);
+      }
+      geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      return geo;
+    };
+    for (const [a, b] of ranges(N, (i) => tr.kl[i] > 0.1)) kg.push(scuffed(this.ribbonGeometry(a, b, (i) => wl[i], (i) => wl[i] + tr.kl[i], { yOff: 0.025, vLen: 2.0, uRepeat: 1 }), a));
+    for (const [a, b] of ranges(N, (i) => tr.kr[i] > 0.1)) kg.push(scuffed(this.ribbonGeometry(a, b, (i) => -wr[i] - tr.kr[i], (i) => -wr[i], { yOff: 0.025, vLen: 2.0, uRepeat: 1 }), a));
     // kerb texture runs along u for stripes -> swap: rotate texture so stripes alternate along v
     T.kerb.rotation = 0;
     T.kerb.repeat.set(1, 1);
@@ -583,7 +646,9 @@ export class World {
   // ---- barriers ----------------------------------------------------------------------------------
   buildBarriers() {
     const tr = this.track, N = tr.N, T = this.tex;
-    const wallMat = plainBack(new THREE.MeshStandardMaterial({ map: T.barrier, roughness: 0.85, side: THREE.DoubleSide }));
+    T.barrierNormal = TX.heightToNormalTexture(TX.barrierHeightTexture(), 2.4);
+    T.barrierNormal.repeat.copy(T.barrier.repeat);
+    const wallMat = plainBack(new THREE.MeshStandardMaterial({ map: T.barrier, normalMap: T.barrierNormal, normalScale: new THREE.Vector2(0.7, 0.7), roughness: 0.85, side: THREE.DoubleSide }));
     const tyreMat = new THREE.MeshStandardMaterial({ map: T.tyres, roughness: 0.95, side: THREE.DoubleSide });
     const wallGeos = [], tyreGeos = [];
     const wallStrip = (a, b, sgn, off, h, vLen, dst) => {
@@ -1191,7 +1256,8 @@ export class World {
       im.receiveShadow = true;
       this.group.add(im);
     };
-    mk(tiers, tierGeo, new THREE.MeshStandardMaterial({ map: crowdTex, roughness: 0.95 }));
+    this.crowdMat = new THREE.MeshStandardMaterial({ map: crowdTex, roughness: 0.95 });
+    mk(tiers, tierGeo, this.crowdMat);
     mk(bases, new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: 0x9a9da3, roughness: 0.9 }));
     mk(roofs, new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: 0xe8eaee, roughness: 0.6, metalness: 0.2 }));
   }
@@ -1414,6 +1480,7 @@ export class World {
         }`,
     });
     this.flags = new THREE.Mesh(mergeGeometries(flags), this.flagMat);
+    buildLedPanels(this, posts);
     this.flags.frustumCulled = false;
     this.flags.visible = false;
     this.group.add(this.flags);
@@ -1421,11 +1488,14 @@ export class World {
 
   /** Marshal flags: 'none', 'yellow', 'green' or 'chequered'. */
   setFlag(kind) {
-    if (kind === this._flag || !this.flags) return;
-    this._flag = kind;
-    this.flags.visible = kind !== 'none';
-    this.flagMat.uniforms.chequer.value = kind === 'chequered' ? 1 : 0;
-    this.flagMat.uniforms.col.value.setHex(kind === 'green' ? 0x18c24a : 0xffd400);
+    this._led = kind;
+    // 'sc' and 'vsc' wave yellow flags; the LED panels spell them out
+    const flag = kind === 'sc' || kind === 'vsc' ? 'yellow' : kind;
+    if (flag === this._flag || !this.flags) return;
+    this._flag = flag;
+    this.flags.visible = flag !== 'none';
+    this.flagMat.uniforms.chequer.value = flag === 'chequered' ? 1 : 0;
+    this.flagMat.uniforms.col.value.setHex(flag === 'green' ? 0x18c24a : 0xffd400);
   }
 
   /** Floodlight masts along the circuit: glowing lamp heads and pools of light on the asphalt, shown at night. */
@@ -1557,8 +1627,20 @@ export class World {
     this.group.add(mesh);
   }
 
+  /** Copies the race's marble grid (0..1.5 per bin) into the road's texture (call every second or two). */
+  setMarbles(m) {
+    if (!m || !this.marbleData || m.length !== this.marbleData.length) return;
+    const N = this.track.N, d = this.marbleData;
+    for (let i = 0; i < N; i++) for (let b = 0; b < 5; b++) d[b * N + i] = Math.min(255, m[i * 5 + b] * 170);
+    this.marbleTex.needsUpdate = true;
+  }
+
   update(dt, time) {
     this.sky.material.uniforms.time.value = time;
+    if (this.animated) for (const f of this.animated) f(dt, time);
+    setLedPanels(this, this._led || 'none', time);
+    if (this.crowdMat && this.crowdMat.map) this.crowdMat.map.offset.y = this.crowdExcite ? Math.sin(time * 14) * 0.006 * this.crowdExcite : 0;
+    if (this.roadU) this.roadU.uTime.value = time % 1000;
     if (this.flagMat) this.flagMat.uniforms.time.value = time;
     if (this.water) this.water.position.y = this.waterLevel + Math.sin(time * 0.5) * 0.05;
   }

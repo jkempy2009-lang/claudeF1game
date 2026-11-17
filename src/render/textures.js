@@ -317,3 +317,54 @@ export function labelTexture(text, fg = '#fff', bg = '#111', w = 256, h = 64) {
   g.fillText(text, w / 2, h / 2 + 2, w - 10);
   return toTexture(c, { repeat: false });
 }
+
+/**
+ * A tangent-space normal map from a height map (SPEC 2.1): Sobel gradients of the luminance, encoded as RGB. Works on a
+ * texture's canvas; the result tiles the same way.
+ */
+export function heightToNormalTexture(tex, strength = 2.0) {
+  const src = tex.image;
+  const w = src.width, h = src.height;
+  const sg = src.getContext('2d').getImageData(0, 0, w, h).data;
+  const lum = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) lum[i] = (sg[i * 4] * 0.299 + sg[i * 4 + 1] * 0.587 + sg[i * 4 + 2] * 0.114) / 255;
+  const at = (x, y) => lum[((y + h) % h) * w + ((x + w) % w)];
+  const [c, g] = canvas(w, h);
+  const out = g.createImageData(w, h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const dx = (at(x + 1, y - 1) + 2 * at(x + 1, y) + at(x + 1, y + 1)) - (at(x - 1, y - 1) + 2 * at(x - 1, y) + at(x - 1, y + 1));
+    const dy = (at(x - 1, y + 1) + 2 * at(x, y + 1) + at(x + 1, y + 1)) - (at(x - 1, y - 1) + 2 * at(x, y - 1) + at(x + 1, y - 1));
+    let nx = -dx * strength, ny = -dy * strength, nz = 1;
+    const l = Math.hypot(nx, ny, nz);
+    nx /= l; ny /= l; nz /= l;
+    const o = (y * w + x) * 4;
+    out.data[o] = (nx * 0.5 + 0.5) * 255;
+    out.data[o + 1] = (ny * 0.5 + 0.5) * 255;
+    out.data[o + 2] = (nz * 0.5 + 0.5) * 255;
+    out.data[o + 3] = 255;
+  }
+  g.putImageData(out, 0, 0);
+  const t = toTexture(c, { srgb: false });
+  t.colorSpace = THREE.NoColorSpace;
+  t.repeat.copy(tex.repeat);
+  return t;
+}
+
+/** Height map of a concrete barrier: panel seams every few metres, a horizontal joint and the scuffs of past impacts. */
+export function barrierHeightTexture(seed = 9) {
+  const [c, g] = canvas(256, 128);
+  const rnd = mulberry32(seed);
+  g.fillStyle = '#808080';
+  g.fillRect(0, 0, 256, 128);
+  speckle(g, 256, 128, 1400, rnd, ['#747474', '#8c8c8c', '#6a6a6a', '#959595'], 0.5, 1.4, 0.6);
+  g.fillStyle = '#3a3a3a';
+  for (const x of [0, 128]) g.fillRect(x, 0, 3, 128); // panel seams
+  g.fillRect(0, 62, 256, 2); // the joint
+  g.strokeStyle = 'rgba(40,40,40,0.55)';
+  for (let k = 0; k < 9; k++) { // horizontal scuffs
+    const y = 20 + rnd() * 90, x = rnd() * 256, l = 20 + rnd() * 70;
+    g.lineWidth = 1 + rnd() * 2;
+    g.beginPath(); g.moveTo(x, y); g.lineTo(x + l, y + (rnd() - 0.5) * 4); g.stroke();
+  }
+  return toTexture(c, { srgb: false });
+}

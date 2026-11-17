@@ -99,6 +99,21 @@ function sharedBlobMaterial() {
 function sharedMaterials() {
   if (shared.ready) return shared;
   shared.carbon = new THREE.MeshStandardMaterial({ color: 0x15171b, roughness: 0.42, metalness: 0.45 });
+  // a carbon twill weave (SPEC 2.1), procedural in the car's own space (the merged carbon parts have no UVs): a 2/2 twill of
+  // 4 mm tows that changes the gloss and the shade a little, and fades out where it would only shimmer at a distance
+  shared.carbon.customProgramCacheKey = () => 'carbonTwill';
+  shared.carbon.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vCf;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvCf = position;');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vCf;').replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+      {
+        vec3 p = vCf * 250.0;
+        float u = p.x + p.y * 0.7, v = p.z - p.y * 0.7;
+        float tw = mod(floor(u) - floor(v), 4.0) < 2.0 ? 1.0 : 0.0;
+        float k = 1.0 - smoothstep(0.35, 0.9, fwidth(u) + fwidth(v));
+        roughnessFactor = clamp(roughnessFactor + (tw - 0.5) * 0.16 * k, 0.05, 1.0);
+        diffuseColor.rgb *= 1.0 + (tw - 0.5) * 0.22 * k;
+      }`);
+  };
   shared.tyre = new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.92, metalness: 0 });
   shared.rim = new THREE.MeshStandardMaterial({ color: 0x2b2e34, roughness: 0.35, metalness: 0.85 });
   shared.metal = new THREE.MeshStandardMaterial({ color: 0x555a62, roughness: 0.4, metalness: 0.8 });
@@ -453,6 +468,19 @@ export class CarView {
       blob.castShadow = blob.receiveShadow = false;
       blob.userData.noShadow = true;
       this.group.add(blob);
+      // and a tight dark patch under each tyre (SPEC 6.1): the contact itself, so a wheel never looks as if it floats
+      const pg = [];
+      for (const [x, z] of [[1.962, -0.8], [1.962, 0.8], [-1.638, -0.775], [-1.638, 0.775]]) {
+        const g = new THREE.PlaneGeometry(0.95, 0.65);
+        g.rotateX(-Math.PI / 2);
+        g.translate(x, 0.04, z);
+        pg.push(g);
+      }
+      const contact = new THREE.Mesh(mergeGeometries(pg), sharedBlobMaterial());
+      contact.renderOrder = 2;
+      contact.castShadow = contact.receiveShadow = false;
+      contact.userData.noShadow = true;
+      this.group.add(contact);
     }
     if (this.ghost) this.makeGhost();
     this.layoutWheels(1.962, 1.638, 1.6, 1.55, 3.6, 0);
@@ -535,6 +563,7 @@ export class CarView {
     // DRS flap, brake light, damage
     this.drsPivot.rotation.z = car.drsPos * 0.55;
     if (this.steeringWheel) this.steeringWheel.rotation.x = clamp(-car.steer * 6, -2.2, 2.2);
+    if (this.armsGroup && this.armsGroup.visible) this.updateArms();
     const br = car.brake > 0.08;
     // brake light; while the hybrid system harvests the lamp strobes amber/red
     this.harvT = (this.harvT || 0) + dt;
@@ -633,6 +662,55 @@ export class CarView {
     sw.add(this.steeringWheel);
     this.model.add(sw);
     this.drawDash(null);
+    this.buildArms(sw);
+  }
+
+  /**
+   * The driver's arms in the cockpit view (SPEC 2.4): gloves on the wheel's grips (they turn with it), forearms and upper arms
+   * from the gloves to the shoulders, re-aimed every frame (a two-bone chain with the elbow dropped and out).
+   */
+  buildArms(sw) {
+    const suit = new THREE.MeshStandardMaterial({ color: new THREE.Color(this.team.color).multiplyScalar(0.4), roughness: 0.8 }); // in shadow inside the cockpit
+    const glove = new THREE.MeshStandardMaterial({ color: 0x1a1c20, roughness: 0.6 });
+    this.armsGroup = new THREE.Group();
+    this.armsGroup.visible = false;
+    this.arm = [];
+    for (const sd of [-1, 1]) {
+      const g = new THREE.Mesh(new THREE.CapsuleGeometry(0.032, 0.05, 4, 10), glove);
+      g.rotation.z = Math.PI / 2;
+      g.position.set(0.012, -0.004, sd * 0.135);
+      this.steeringWheel.add(g);
+      const fore = new THREE.Mesh(new THREE.CylinderGeometry(0.034, 0.04, 1, 10), suit);
+      const upper = new THREE.Mesh(new THREE.CylinderGeometry(0.042, 0.046, 1, 10), suit);
+      this.armsGroup.add(fore, upper);
+      this.arm.push({ sd, grip: g, fore, upper });
+    }
+    for (const a of this.arm) a.grip.visible = false;
+    this.model.add(this.armsGroup);
+  }
+
+  updateArms() {
+    if (!this.arm || !this.armsGroup.visible) return;
+    const hand = new THREE.Vector3(), sh = new THREE.Vector3(), el = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0), d = new THREE.Vector3();
+    this.model.updateWorldMatrix(true, true);
+    const inv = new THREE.Matrix4().copy(this.model.matrixWorld).invert();
+    const bone = (m, a, b) => {
+      d.subVectors(b, a);
+      const len = d.length();
+      m.position.copy(a).addScaledVector(d, 0.5);
+      m.scale.set(1, len, 1);
+      m.quaternion.setFromUnitVectors(up, d.normalize());
+    };
+    for (const a of this.arm) {
+      a.grip.visible = true;
+      a.grip.getWorldPosition(hand).applyMatrix4(inv);
+      sh.set(0.05, 0.56, a.sd * 0.2);
+      el.addVectors(hand, sh).multiplyScalar(0.5);
+      el.y -= 0.12;
+      el.z += a.sd * 0.11;
+      bone(a.fore, hand, el);
+      bone(a.upper, el, sh);
+    }
   }
 
   /** Redraws the wheel display: shift lights, gear, speed, delta bar. Called a few times a second for the car the camera sits in. */
@@ -679,6 +757,8 @@ export class CarView {
   /** From the driver's seat: no helmet, and the halo reduced to its slim centre pillar. From the T-cam: no helmet. */
   setOnboard(mode) {
     this.helmet.visible = mode !== 'cockpit' && mode !== 'tcam';
+    if (this.armsGroup) this.armsGroup.visible = mode === 'cockpit';
+    if (this.arm) for (const a of this.arm) a.grip.visible = mode === 'cockpit';
     if (this.halo) this.halo.visible = mode !== 'cockpit';
     if (this.haloSlim) this.haloSlim.visible = mode === 'cockpit';
   }
