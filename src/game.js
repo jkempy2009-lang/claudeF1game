@@ -1564,7 +1564,7 @@ class Game {
       const p = track.pointAt(ss, d);
       c.x = c.px = p.x; c.y = c.py = p.y; c.theta = c.ptheta = p.heading;
       c.trackH = track.heightAt(ss, d); c.trackBank = 0;
-      c.u = 0; c.v = 0; c.r = 0; c.speed = 0; c.brake = 0; c.throttle = 0; c.steer = 0;
+      c.u = 0; c.v = 0; c.r = 0; c.brake = 0; c.throttle = 0; c.steer = 0;
       if (c.omega) c.omega.fill(0);
     });
     for (const car of race.cars) views.get(car).group.visible = top.includes(car);
