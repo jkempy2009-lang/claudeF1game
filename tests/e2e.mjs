@@ -142,7 +142,7 @@ for (const [name, bad] of [
   step('instant replay opens', await page.evaluate(() => window.apex.state === 'replay'));
   step('replay shows event markers', (await page.locator('#replay .rmark').count()) >= 1);
   await page.click('#replay .rmark.contact');
-  step('a marker jumps to its moment and car', await page.evaluate(() => { const r = window.apex.session.replay; return r.follow === 1 && r.t > 5; }));
+  step('a marker jumps to its moment and car', await page.evaluate(() => { const r = window.apex.session.replay, m = document.querySelector('#replay .rmark.contact'); return r.follow === 1 && Math.abs(r.t - Math.max(0, +m.dataset.mt - 2.5)) < 1.5; }));
   await page.waitForTimeout(2500);
   await page.click('#replay [data-r=cam]');
   await page.click('#replay [data-r=exit]');
@@ -286,6 +286,15 @@ for (const [name, bad] of [
   const up = await page.evaluate(() => window.apex.save.career.upgrades.power);
   step('upgrade purchased', up === 1);
   step('standings recorded', await page.evaluate(() => window.apex.save.career.season.round === 1 && Object.keys(window.apex.save.career.season.points).length > 3));
+  // practice: a session alone, its run plan earns a bonus for the weekend
+  await page.click('[data-ctab=overview]').catch(() => null);
+  await page.waitForSelector('[data-act=careerrace][data-q="p"]', { timeout: 20000 });
+  await page.click('[data-act=careerrace][data-q="p"]');
+  await waitHud(page);
+  step('career practice starts alone on the circuit', await page.evaluate(() => { const s = window.apex.session; return s.cfg.practice && s.race.opt.mode === 'timetrial' && !!s.practice; }));
+  await page.evaluate(() => { const a = window.apex; a.session.practice.quali = true; a.toMain(true); });
+  await page.waitForSelector('[data-act=careerrace][data-q="s"]', { timeout: 30000 });
+  step('ending practice returns to the hub with its result', await page.evaluate(() => { const s = window.apex.save.career.season; return s.practice && s.practice.round === s.round && s.practice.quali === true; }));
   // round 2 of 4 is a sprint weekend: the sprint runs first, scores, and leaves the Grand Prix to run from its order
   await page.click('[data-ctab=overview]').catch(() => null);
   await page.waitForSelector('[data-act=careerrace][data-q="s"]', { timeout: 20000 });
@@ -293,6 +302,7 @@ for (const [name, bad] of [
   await waitHud(page);
   const sp = await page.evaluate(() => ({ sprint: !!window.apex.session.cfg.sprint, laps: window.apex.session.race.totalLaps }));
   step('a sprint weekend starts with a short sprint', sp.sprint && sp.laps >= 2 && sp.laps < laps + 1, JSON.stringify(sp));
+  step('the practice bonus applies to the weekend', await page.evaluate(() => { const b = window.apex.session.cfg.practiceBonus; return !!b && b.grip > 1; }));
   await page.evaluate(() => { const a = window.apex; return a.debugUntil(() => a.session.player.rs.finished, 700); });
   await page.waitForFunction(() => window.apex.session.fin && window.apex.session.fin.t > 2, null, { timeout: 120000 });
   await page.keyboard.press('Enter');

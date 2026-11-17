@@ -38,6 +38,8 @@ export const DEFAULT_OPTIONS = {
   upgrades: null, // career car development: levels of power, aero, grip, ers, tyres, pit
   teamForm: null, // career: how each team's car has developed this season (added to its rating)
   qualiTimes: null, // { driverCode: bestLap } from a qualifying session: sets the grid
+  formation: false,
+  practiceBonus: null, // career practice: { grip, wear } multipliers for the player's car this weekend // a formation lap behind the front of the field before the lights (SPEC 9)
   laps: 5,
   level: 0.55,
   adaptive: false,
@@ -218,6 +220,11 @@ export class Race {
       const car = new Car(spec, track);
       if (timeTrial) car.fuelRate = 0; // a time trial runs at one constant, light weight: lap times say nothing about the fuel load
       car.wearMult = opt.tyreWear * (player && opt.upgrades ? upgradeEffects(opt.upgrades).tyres : 1);
+      if (player && opt.practiceBonus) {
+        car.wearMult *= opt.practiceBonus.wear || 1;
+        car.spec.frontGrip *= opt.practiceBonus.grip || 1;
+        car.spec.rearGrip *= opt.practiceBonus.grip || 1;
+      }
       const slot = track.gridSlot(k);
       const pt = track.pointAt(slot.s, slot.d);
       car.reset(pt.x, pt.y, pt.heading, 0);
@@ -326,6 +333,7 @@ export class Race {
   // ---- control ------------------------------------------------------------------------------------
   start() {
     if (this.phase !== 'grid') return;
+    if (this.opt.formation && this.opt.mode === 'race' && !this.isQuali && !this.formationDone && this.cars.length > 1) return this.startFormation();
     for (const c of this.cars) c.gridAt = { x: c.x, y: c.y };
     this.phase = 'countdown';
     this.cdStart = this.time;
@@ -333,6 +341,59 @@ export class Race {
     this.lightsSeq = quick ? [0.6, 1.2, 1.8] : [1.2, 2.2, 3.2, 4.2, 5.2];
     this.holdTime = quick ? 0.5 : 0.7 + this.rng() * 2.2;
     this.lightsOutAt = this.cdStart + this.lightsSeq[this.lightsSeq.length - 1] + this.holdTime;
+  }
+
+  /**
+   * Formation lap (SPEC 9): the field drives one slow lap in grid order, weaving to warm the tyres and braking to warm the
+   * brakes, then lines up in its grid boxes (placed there, with the heat it built up) and the lights come on.
+   */
+  startFormation() {
+    this.phase = 'formation';
+    this.formation = { t: 0 };
+    for (const c of this.cars) {
+      c.rs.formD = 0;
+      c.rs.formFrom = { dist: c.rs.dist, lastS: c.rs.lastS };
+      if (c.driver) {
+        c.driver.goTime = null;
+        c.driver.formRelease = c.driver.releaseDelay || 0;
+        c.driver.releaseDelay = (c.info.gridPos - 1) * 0.45; // the cars pull away in order
+      }
+    }
+    this.pushEvent({ type: 'formation' });
+  }
+
+  updateFormation(dt) {
+    const f = this.formation;
+    f.t += dt;
+    let front = 0;
+    for (const c of this.cars) {
+      c.rs.formD += Math.max(0, c.speed) * dt;
+      if (c.rs.formD > front) front = c.rs.formD;
+    }
+    // the front of the field is back at the grid: everyone takes their box (or after five minutes whatever happened)
+    if (front >= this.track.length - 30 || f.t > 300) this.lineUp();
+  }
+
+  lineUp() {
+    this.cars.forEach((c, k) => {
+      const slot = this.track.gridSlot(c.info.gridPos - 1);
+      const pt = this.track.pointAt(slot.s, slot.d);
+      c.reset(pt.x, pt.y, pt.heading, 0); // tyre and brake temperatures are kept: that is what the lap was for
+      if (c.omega) c.omega.fill(0);
+      c.locate();
+      c.rs.dist = c.rs.formFrom.dist;
+      c.rs.lastS = c.rs.formFrom.lastS;
+      c.rs.formFrom = null;
+      if (c.driver) {
+        c.driver.goTime = null;
+        c.driver.releaseDelay = c.driver.formRelease;
+      }
+    });
+    this.formation = null;
+    this.formationDone = true;
+    this.phase = 'grid';
+    this.pushEvent({ type: 'formationEnd' });
+    this.start();
   }
 
   lapsLeft(car) {
@@ -374,6 +435,7 @@ export class Race {
       this.pushEvent({ type: 'chequered', car: null });
     }
     const racing = this.phase === 'racing' || this.phase === 'finished';
+    const formation = this.phase === 'formation';
     for (const car of this.cars) {
       if (car.inGarage) continue; // retired and wheeled away
       if (!car.marbleField && this.opt.mode !== 'timetrial') car.marbleField = this.marbles;
@@ -382,7 +444,7 @@ export class Race {
     }
     if (this.stepCount % 8 === 0 && racing && this.opt.mode !== 'timetrial') this.updateMarbles(dt * 8);
     // physical interactions
-    if (racing || this.phase === 'countdown') {
+    if (racing || formation || this.phase === 'countdown') {
       if (this.opt.collisions && this.cars.length > 1) this.collisions();
       for (const car of this.cars) {
         if (car.inGarage) continue;
@@ -394,6 +456,17 @@ export class Race {
           car.rs.lastImpact = this.time;
         } else if (hit) car.locate();
       }
+    }
+    if (formation) {
+      // no timing, rules, pit calls or race control on the formation lap
+      for (const car of this.cars) {
+        const d = loopDelta(car.s, car.rs.lastS, this.track.length);
+        car.rs.lastS = car.s;
+        car.rs.dist += d;
+      }
+      if (this.stepCount % 4 === 0) { this.updateRank(); this.updateAeroInteractions(); }
+      this.updateFormation(dt);
+      return;
     }
     for (const car of this.cars) this.updateTiming(car, dt);
     if (this.stepCount % 4 === 0) {
@@ -512,7 +585,7 @@ export class Race {
       if (manual && this.phase === 'countdown') {
         inp.hold = inp.brake > 0.3;
       } else {
-        inp.hold = !racing;
+        inp.hold = !racing && this.phase !== 'formation';
         if (inp.hold) inp.brake = 1;
       }
       if (rs.dnf) { inp.throttle = 0; inp.boost = false; }
@@ -557,7 +630,7 @@ export class Race {
     const drv = car.driver;
     if (!drv) return (this._idle || (this._idle = { throttle: 0, brake: 1, steer: 0, drs: false, boost: false }));
     inp = drv.update(dt, this);
-    inp.hold = !racing; // the clutch is in until the lights go out, then let in like everyone else's
+    inp.hold = !racing && this.phase !== 'formation'; // the clutch is in until the lights go out, then let in like everyone else's
     if (rs.dnf) {
       inp.throttle = 0;
       inp.brake = Math.max(inp.brake, 0.3);

@@ -3,7 +3,7 @@
 The to-do list for the next stage of the game, as written by the project owner. On top of the items below: make the
 graphics as realistic as possible, and do substantial work on the sound.
 
-Status: **not started**. Each item is ticked off in `CHANGELOG.md` as it lands.
+Status: **implemented**, every section including the additions in section 9. `CHANGELOG.md` lists each item as it landed and, item by item, where the game differs from this text and why: the wet line (3.1) is built but switched off because it made the AI slower and less safe; banking is 2.9° rather than 8°; a single wider shadow map instead of blended cascades; ACES tone mapping kept over AgX; the spoken engineer is not run through the radio filter; the formation lap's final line-up into the grid boxes is a cut.
 
 ---
 

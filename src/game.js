@@ -21,6 +21,7 @@ import { AudioEngine } from './ui/audio.js';
 import { HUD } from './ui/hud.js';
 import { Menu, loadSave, persist, sanitizeConfig } from './ui/menu.js';
 import * as Career from './sim/career.js';
+import { rivalLap } from './sim/pacetable.js';
 import { recordSession, ACHIEVEMENTS } from './sim/achievements.js';
 import { clamp, formatTime, lerp } from './util/math.js';
 
@@ -181,6 +182,7 @@ class Game {
       openSeason: () => this.openSeason(),
       replay: (from) => this.startReplay(from),
       photo: () => this.startPhoto(),
+      isPractice: () => !!(this.session && this.session.cfg.practice),
       openCareer: () => this.openCareer(),
       careerStart: (o) => this.careerStart(o),
       careerRace: (q) => this.careerRace(q),
@@ -331,6 +333,15 @@ class Game {
 
   // ---- navigation ------------------------------------------------------------------------------------------
   toMain(fromRace = false) {
+    // leaving a career practice session records its run plan and goes back to the hub
+    const prac = this.session && this.session.cfg.practice && this.session.practice;
+    if (prac && this.save.career) {
+      const season = this.save.career.season;
+      season.practice = { round: season.round, quali: prac.quali, long: prac.long };
+      persist(this.save);
+      this.endSession();
+      return this.openCareer();
+    }
     if (this.session) this.endSession();
     this.state = 'menu';
     this.hud.show(false);
@@ -462,6 +473,8 @@ class Game {
       lineup: Career.lineupFor(c),
       career: true,
     };
+    if (qualify === 'practice') Object.assign(cfg, { mode: 'timetrial', practice: true, laps: 9999 });
+    else cfg.practiceBonus = Career.practiceBonus(s);
     if (qualify === 'sprint') Object.assign(cfg, this.sprintFor(cfg));
     else if (!qualify && Career.sprintDone(s)) cfg.qualiTimes = { ...s.sprint.grid }; // Sunday: the sprint result is the grid
     this.startRace(cfg);
@@ -571,6 +584,8 @@ class Game {
       damage: cfg.damage,
       tyreWear: cfg.tyreWear,
       mandatoryStop: cfg.mandatoryStop,
+      formation: !!cfg.formation && !cfg.lesson,
+      practiceBonus: cfg.practiceBonus || null,
       pitCalls: cfg.pitCalls,
       compound: cfg.compound,
       setup: cfg.spectator ? { frontWing: null, rearWing: null, brakeBias: 0.58, pressure: 0 } : { frontWing: cfg.frontWing, rearWing: cfg.rearWing, brakeBias: cfg.brakeBias, pressure: cfg.pressure },
@@ -665,6 +680,11 @@ class Game {
       rec: new ReplayBuffer(race.cars.length, 60, 30), marks: [], lastPos: null, replayCars: makeReplayCars(race.cars),
       school: cfg.lesson && lessonById(cfg.lesson) ? new SchoolTracker(lessonById(cfg.lesson)) : null,
     };
+    if (cfg.practice) {
+      this.session.practice = Career.practicePlan(rivalLap(track.id, cfg.level));
+      const tg = this.session.practice.target;
+      setTimeout(() => this.hud.radio(`Practice. Run plan: one qualifying-sim lap${tg ? ' under ' + formatTime(tg) : ''}, then four clean laps within 1.5 % of each other. Quit from the pause menu to go back.`, 9), 2500);
+    }
     if (cfg.spectator) {
       this.session.spectator = true;
       this.toggleAutopilot();
@@ -1096,7 +1116,7 @@ class Game {
       else if (s.fin.t > 14) { s.podiumOk = true; this.skipToResults(s); } // left to run out on its own: the podium plays before the results
     } else if (player.rs.dnf && race.phase === 'racing' && pin.confirm) this.skipToResults(s); // retired: no point watching the rest
     if (pin.autoToggle) this.toggleAutopilot();
-    const autoDrive = () => s.auto && (race.phase === 'racing' || (s.fin && race.phase === 'finished'));
+    const autoDrive = () => s.auto && (race.phase === 'racing' || race.phase === 'formation' || (s.fin && race.phase === 'finished'));
     if (autoDrive()) pin.aiDriven = true;
 
     // intro orbit, then lights
@@ -1327,6 +1347,13 @@ class Game {
           if (race.opt.mode === 'race') hud.message('Go go go!', 'good', '', 1.6);
           break;
         case 'lap':
+          if (e.car === player && s.practice) {
+            for (const item of Career.practiceLap(s.practice, e.time, e.valid)) {
+              hud.radio(item === 'quali' ? 'Good qualifying simulation. We have a sharper setup for the weekend.' : 'That long run tells us what we need: the tyres will last better this weekend.', 6);
+              this.audio.ui('good');
+            }
+            if (s.practice.quali && s.practice.long && !s.practiceDoneSaid) { s.practiceDoneSaid = true; hud.message('Run plan complete', 'good', 'Esc, then Quit, to go back to the hub', 5); }
+          }
           if (e.car === player) {
             const fast = race.fastest.car === player && race.fastest.time === e.time;
             const pb = player.rs.best === e.time && e.valid;
@@ -1448,6 +1475,14 @@ class Game {
           }
           break;
         }
+        case 'formation':
+          hud.flag('Formation lap', '#3bd16f', 4);
+          hud.radio('Formation lap. Weave to keep the tyres in, a few hard stops for the brakes, no overtaking.', 6);
+          break;
+        case 'formationEnd':
+          hud.message('Into the grid boxes', '', 'Lights next', 2.5);
+          camRig.init = false;
+          break;
         case 'chequered':
           hud.flag('Chequered flag', '#fff', 4, 'chequered');
           break;
@@ -1728,8 +1763,17 @@ class Game {
     const box = ui.querySelector('#r-marks');
     const rec = s.rec, dur = rec.duration;
     if (!dur) { box.innerHTML = ''; return; }
-    const t0 = rec.times[rec.idx(0)];
-    box.innerHTML = s.marks.filter((m) => m.t >= t0 && m.t <= t0 + dur).map((m) => `<button class="rmark ${m.kind}" style="left:${(((m.t - t0) / dur) * 100).toFixed(2)}%" data-mt="${(m.t - t0).toFixed(2)}" data-mc="${m.car}" title="${m.label.replace(/[&<>"']/g, '')}"></button>`).join('');
+    // place each marker at the recorded frame nearest its race time (the frames carry their own timestamps)
+    const n = rec.count, tFirst = rec.times[rec.idx(0)], tLast = rec.times[rec.idx(n - 1)];
+    const frameAt = (t) => {
+      let lo = 0, hi = n - 1;
+      while (lo < hi) { const mid = (lo + hi) >> 1; if (rec.times[rec.idx(mid)] < t) lo = mid + 1; else hi = mid; }
+      return lo;
+    };
+    box.innerHTML = s.marks.filter((m) => m.t >= tFirst && m.t <= tLast).map((m) => {
+      const k = frameAt(m.t), rt = k / rec.hz;
+      return `<button class="rmark ${m.kind}" style="left:${((rt / dur) * 100).toFixed(2)}%" data-mt="${rt.toFixed(2)}" data-mc="${m.car}" title="${m.label.replace(/[&<>"']/g, '')}"></button>`;
+    }).join('');
   }
 
   startReplay(from) {
@@ -1937,7 +1981,7 @@ class Game {
 
   saveGhost(s) {
     const g = s.race.ghostBest;
-    if (!g || s.cfg.lesson) return; // a school lesson (rain, a fixed car) never sets your records
+    if (!g || s.cfg.lesson || s.cfg.practice) return; // a school lesson (rain, a fixed car) or a career practice never sets your records
     this.save.ghosts[s.track.id] = { time: g.time, data: b64FromFloats(g.frames) };
     const rec = this.save.records[s.track.id];
     if (!rec || g.time < rec.best) {

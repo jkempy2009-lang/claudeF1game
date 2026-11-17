@@ -177,6 +177,28 @@ ok('a new season: fresh head-to-head, developed teams, record kept', career.h2h.
   const saved = C.sanitizeCareer(JSON.parse(JSON.stringify(k)));
   ok('the market survives a save and load', !!saved && saved.lineup.join() === k.lineup.join() && saved.drivers.length === k.drivers.length && saved.contract.years === k.contract.years);
 }
+// practice run plan (SPEC 9)
+{
+  const plan = C.practicePlan(80);
+  ok('practice: a lap within 2 % of the rivals is the qualifying sim', C.practiceLap(plan, 81.5, true).join() === 'quali' && plan.quali);
+  C.practiceLap(plan, 84, true); C.practiceLap(plan, 84.2, false); // an invalid lap breaks the run
+  ok('practice: an invalid lap restarts the long run', plan.run.length === 0 && !plan.long);
+  const got = [84, 84.5, 83.8, 84.9].map((t) => C.practiceLap(plan, t, true)).flat();
+  ok('practice: four steady clean laps are the long run', got.join() === 'long' && plan.long);
+  const p2 = C.practicePlan(80);
+  [84, 90, 84, 84].forEach((t) => C.practiceLap(p2, t, true));
+  ok('practice: an uneven run does not count', !p2.long);
+  const k = C.newCareer({ team: 4, rounds: 4 });
+  ok('practice: no bonus without a practice', C.practiceBonus(k.season) === null);
+  k.season.practice = { round: 0, quali: true, long: false };
+  const b = C.practiceBonus(k.season);
+  ok('practice: the bonus is for this round only', b && b.grip > 1 && b.wear === 1);
+  const back = C.sanitizeCareer(JSON.parse(JSON.stringify(k)));
+  ok('practice: a save keeps it', back.season.practice.quali === true && back.season.practice.long === false);
+  k.season.round = 1;
+  ok('practice: next round, gone', C.practiceBonus(k.season) === null);
+}
+
 // sprint weekends (SPEC 9): which rounds, points to the top eight, the order becomes Sunday's grid, saves keep it
 {
   const k = C.newCareer({ team: 4, rounds: 7 });

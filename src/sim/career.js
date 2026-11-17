@@ -117,6 +117,38 @@ export function recordRound(season, cls) {
   return row;
 }
 
+/**
+ * Practice (SPEC 9: career weekend formats): a session alone on the circuit with a run plan of two items. A qualifying
+ * simulation (one clean lap within 2 % of the rivals' pace at this difficulty) is worth a sharper setup for the weekend
+ * (+0.6 % grip); a long run (four clean laps in a row within 1.5 % of their average) a kinder one (-10 % tyre wear).
+ */
+export const PRACTICE_BONUS = { grip: 1.006, wear: 0.9 };
+
+export function practicePlan(rivalLapTime) {
+  return { target: rivalLapTime ? rivalLapTime * 1.02 : null, quali: false, long: false, run: [] };
+}
+
+/** Feeds one completed practice lap to the plan; returns the items it has just completed ('quali', 'long'). */
+export function practiceLap(plan, time, valid) {
+  const done = [];
+  if (!valid || !Number.isFinite(time)) { plan.run = []; return done; }
+  if (!plan.quali && plan.target && time <= plan.target) { plan.quali = true; done.push('quali'); }
+  plan.run.push(time);
+  if (plan.run.length > 4) plan.run.shift();
+  if (!plan.long && plan.run.length === 4) {
+    const avg = plan.run.reduce((a, b) => a + b, 0) / 4;
+    if (plan.run.every((t) => Math.abs(t - avg) <= avg * 0.015)) { plan.long = true; done.push('long'); }
+  }
+  return done;
+}
+
+/** The weekend's bonus from this round's practice, or null. */
+export function practiceBonus(season) {
+  const p = season.practice;
+  if (!p || p.round !== season.round || (!p.quali && !p.long)) return null;
+  return { grip: p.quali ? PRACTICE_BONUS.grip : 1, wear: p.long ? PRACTICE_BONUS.wear : 1 };
+}
+
 /** Sprint points, P1 to P8 (SPEC 9: career weekend formats). */
 export const SPRINT_POINTS = [8, 7, 6, 5, 4, 3, 2, 1];
 
@@ -734,6 +766,8 @@ export function sanitizeCareer(raw) {
     if (season.sprint && typeof season.sprint === 'object' && Number.isFinite(+season.sprint.round)) {
       season.sprint = { round: Math.round(+season.sprint.round), order: cleanResults([{ round: 0, trackId: season.calendar[0], order: season.sprint.order }])[0]?.order || [], grid: cleanNumMap(season.sprint.grid) };
     } else delete season.sprint;
+    if (season.practice && typeof season.practice === 'object' && Number.isFinite(+season.practice.round)) season.practice = { round: Math.round(+season.practice.round), quali: season.practice.quali === true, long: season.practice.long === true };
+    else delete season.practice;
     if (!Array.isArray(season.weather) || season.weather.length < season.calendar.length) season.weather = rollWeather(season.calendar.length);
     season.weather = season.weather.map((w) => (WEATHER_IDS.includes(w) ? w : 'dry'));
     const up = raw.upgrades || {};

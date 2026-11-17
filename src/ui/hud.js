@@ -545,7 +545,7 @@ export class HUD {
     // top bar
     const total = race.totalLaps;
     const lap = Math.min(total, Math.max(1, rs.laps + 1));
-    const lapHtml = race.isQuali ? `<small>${race.chequered ? 'Final lap' : 'Time left'}</small>${race.chequered ? '' : mmss(race.qualiLeft())}` : race.opt.mode === 'timetrial' ? `<small>Lap</small>${Math.max(1, rs.laps + 1)}` : `<small>${race.opt.sprint ? 'Sprint · lap' : 'Lap'}</small>${rs.finished ? total : lap}/${total}`;
+    const lapHtml = race.phase === 'formation' ? '<small>Formation</small>lap' : race.isQuali ? `<small>${race.chequered ? 'Final lap' : 'Time left'}</small>${race.chequered ? '' : mmss(race.qualiLeft())}` : race.opt.mode === 'timetrial' ? `<small>Lap</small>${Math.max(1, rs.laps + 1)}` : `<small>${race.opt.sprint ? 'Sprint · lap' : 'Lap'}</small>${rs.finished ? total : lap}/${total}`;
     if (this._lapHtml !== lapHtml) {
       this._lapHtml = lapHtml;
       el.tbLap.innerHTML = lapHtml;

@@ -228,6 +228,17 @@ export class AIDriver {
     if (car.onGrass || (!inPitArea && (car.d > tr.wl[car.i] + 1.5 || -car.d > tr.wr[car.i] + 1.5))) vt = Math.min(vt, 28);
     // traffic cap
     vt = Math.min(vt, this.trafficCap(vt, race));
+    // formation lap (SPEC 9): the front car at about 110 km/h, the rest closing up to ten metres behind the car ahead
+    if (race.phase === 'formation') {
+      const ahead = car.ahead;
+      const gapM = ahead ? loopDelta(ahead.s, car.s, tr.length) : 999;
+      // each car now and then drops back, then sprints to close the gap and brakes hard: that is what heats the brakes
+      // and the tyres' carcass (the weave on the straights works the surface)
+      const cyc = (this.t + this.react * 37) % 13;
+      const dropBack = cyc < 2.6;
+      const follow = ahead && gapM > 0 && gapM < 400 ? Math.max(6, 28 + 0.32 * (gapM - 12)) : cyc < 6 ? 52 : 28;
+      vt = Math.min(vt, dropBack ? 14 : Math.min(58, follow));
+    }
     // virtual safety car (SPEC 3.3): everyone holds 60 % of the reference speed, wherever they are
     if (race.sc && race.sc.state === 'vsc' && this.pitState === 'none') vt = Math.min(vt, prof.v[idx] * 0.6);
     if (race.sc && (race.sc.state === 'deployed' || race.sc.state === 'ending') && (this.pitState === 'none' || !tr.inPitRange(car.s))) {
@@ -360,7 +371,7 @@ export class AIDriver {
     // --- DRS / ERS
     const straight = Math.abs(kt) < 0.0025 && Math.abs(kPath) < 0.006;
     inp.drs = !!car.drsAllowed && thr > 0.95 && brk < 0.05 && straight;
-    const underSc = race.sc && race.sc.state !== 'none';
+    const underSc = (race.sc && race.sc.state !== 'none') || race.phase === 'formation';
     const gapAhead = car.gapAhead ?? 99;
     inp.boost = !underSc && thr > 0.95 && straight && car.soc > 0.12 && (gapAhead < 1.8 || car.soc > 0.55 || race.lapsLeft(car) <= 1 || (this.intent.ers === 2 && car.soc > 0.1));
     // the energy plan overrides the reflex: no boost while saving, everything on the surge
@@ -452,6 +463,12 @@ export class AIDriver {
       // behind the pace car: no racing, stay on the line
       this.rcMode = 'free';
       target = 0;
+    }
+    if (race.phase === 'formation') {
+      // no racing; on the straights a gentle weave puts heat into the tyres
+      this.rcMode = 'free';
+      const straightHere = Math.abs(tr.curv ? tr.curv[car.i] : 0) < 0.003;
+      target = straightHere && V > 12 ? 1.2 * Math.sin(this.t * 3.4) : 0;
     }
     this.offTarget = clamp(target, -wr - base, wl - base);
   }

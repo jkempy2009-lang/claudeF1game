@@ -9,7 +9,7 @@ import { setupStats } from '../sim/setupstats.js';
 import { ACHIEVEMENTS, DEFAULT_STATS } from '../sim/achievements.js';
 import { LESSONS, sanitizeSchool } from '../sim/school.js';
 import { KEY_ACTIONS, keyLabel, mergeKeys, sanitizeKeys } from './input.js';
-import { CHAMP_CAL, DEFAULT_RULES, MAX_ROUNDS, careerLaps, sanitizeRules, sanitizeCareer, UPGRADE_KEYS, UPGRADE_INFO, UPGRADE_MAX, upgradeCost, objectiveFor, DISTANCES, driverStandings, constructorStandings, lapsFor, weatherFor, WEATHER_NAMES, WEATHER_IDS, cleanNumMap, cleanStrMap, cleanResults, teamMate, isSprintRound, sprintDone, sprintLaps, SPRINT_POINTS, sponsorOffers, SPONSOR_GOALS, repLabel, repNeeded, retainerFor, teamStrength, teamRank, raceObjective, careerMate, contractRetainer, contractTerms } from '../sim/career.js';
+import { CHAMP_CAL, DEFAULT_RULES, MAX_ROUNDS, careerLaps, sanitizeRules, sanitizeCareer, UPGRADE_KEYS, UPGRADE_INFO, UPGRADE_MAX, upgradeCost, objectiveFor, DISTANCES, driverStandings, constructorStandings, lapsFor, weatherFor, WEATHER_NAMES, WEATHER_IDS, cleanNumMap, cleanStrMap, cleanResults, teamMate, isSprintRound, sprintDone, sprintLaps, SPRINT_POINTS, practiceBonus, PRACTICE_BONUS, sponsorOffers, SPONSOR_GOALS, repLabel, repNeeded, retainerFor, teamStrength, teamRank, raceObjective, careerMate, contractRetainer, contractTerms } from '../sim/career.js';
 
 export const SAVE_KEY = 'apex-grand-prix.v1';
 
@@ -27,6 +27,7 @@ export const DEFAULT_CONFIG = {
   damage: true,
   collisions: true,
   mandatoryStop: false,
+  formation: false,
   pitCalls: 'radio',
   adaptive: false,
   qualify: false,
@@ -78,6 +79,7 @@ export function sanitizeConfig(raw) {
     damage: bool(r.damage, D.damage),
     collisions: bool(r.collisions, D.collisions),
     mandatoryStop: bool(r.mandatoryStop, D.mandatoryStop),
+    formation: bool(r.formation, D.formation),
     pitCalls: ['off', 'radio', 'auto'].includes(r.pitCalls) ? r.pitCalls : D.pitCalls,
     adaptive: bool(r.adaptive, D.adaptive),
     qualify: bool(r.qualify, D.qualify),
@@ -458,6 +460,7 @@ export class Menu {
         ${timetrial ? '' : this.toggle('equalCars', 'Identical cars', 'Every team has exactly your car; only the drivers differ (off: stronger teams have faster cars)', c.equalCars)}
         ${timetrial ? '' : this.toggle('qualify', 'Qualifying session first', '3 minutes, all 20 cars: your best lap sets your grid slot (overrides the start position)', c.qualify)}
         ${timetrial ? '' : this.toggle('mandatoryStop', 'Mandatory pit stop', 'Use two compounds or take +15 s', c.mandatoryStop)}
+        ${timetrial ? '' : this.toggle('formation', 'Formation lap', 'One slow lap behind the field before the lights: weave to keep the tyres warm, brake hard to heat the brakes (about two minutes)', c.formation)}
         ${timetrial ? '' : `<div class="field"><label>Pit wall</label>${this.chips('pitCalls', [{ value: 'off', label: 'Silent' }, { value: 'radio', label: 'Radio advice' }, { value: 'auto', label: 'Calls you in' }], c.pitCalls)}<div class="hint">Advice reads your real tyre wear and tells you when to box and what to fit; Calls you in presses the pit button for you (B cancels).</div></div>`}
         ${timetrial ? '' : this.toggle('adaptive', 'Adaptive AI pace', 'Cars far ahead ease off, cars far behind push (±3-5%)', c.adaptive)}
       </div></div>`;
@@ -626,7 +629,7 @@ export class Menu {
         <button class="btn" data-act="restart">Restart session</button>
         <button class="btn" data-act="pausecam">Camera: <span id="camname"></span></button>
         <button class="btn" data-act="pausesettings">Settings</button>
-        <button class="btn" data-act="quit">Quit to menu</button>
+        <button class="btn" data-act="quit">${this.hooks.isPractice && this.hooks.isPractice() ? 'End practice<small>Back to the career hub with what the run plan earned</small>' : 'Quit to menu'}</button>
         <div class="hint" style="margin-top:.8rem">Racing line guide: <kbd>L</kbd> · Camera: <kbd>C</kbd> · Reset to track: <kbd>R</kbd> · Autopilot: <kbd>G</kbd></div></div></section>`;
   }
 
@@ -686,6 +689,23 @@ export class Menu {
   /** What a career race did for the driver: money (prize, retainer, sponsor), the target, the team-mate, reputation. */
   /** The race buttons of the hub: a normal weekend, or a sprint weekend before and after its sprint. */
   weekendButtons(c, laps) {
+    return this.practiceLine(c) + this.raceButtons(c, laps);
+  }
+
+  /** Practice: offered until the weekend's first session has run; afterwards what its run plan earned. */
+  practiceLine(c) {
+    const s = c.season;
+    const p = s.practice && s.practice.round === s.round ? s.practice : null;
+    const started = sprintDone(s);
+    if (p) {
+      const b = practiceBonus(s);
+      return `<div class="hint" style="margin-top:.9rem">Practice: qualifying sim ${p.quali ? '✓' : '✗'} · long run ${p.long ? '✓' : '✗'}${b ? ` → this weekend${b.grip > 1 ? ` +${((b.grip - 1) * 100).toFixed(1)} % grip` : ''}${b.wear < 1 ? ` −${Math.round((1 - b.wear) * 100)} % tyre wear` : ''}` : ' · no setup gain'}</div>`;
+    }
+    if (started) return '';
+    return `<div class="row" style="margin-top:.9rem"><button class="btn grow" data-act="careerrace" data-q="p">Practice<small>Alone on the circuit. A qualifying-sim lap earns +${((PRACTICE_BONUS.grip - 1) * 100).toFixed(1)} % grip for the weekend, a steady long run −${Math.round((1 - PRACTICE_BONUS.wear) * 100)} % tyre wear</small></button></div>`;
+  }
+
+  raceButtons(c, laps) {
     const s = c.season;
     if (sprintDone(s)) {
       const me = s.sprint.order.find((o) => o.name === 'You');
@@ -1063,7 +1083,7 @@ export class Menu {
         return H.openSeason();
       case 'career': return H.openCareer();
       case 'careerstart': return H.careerStart({ ...this.cnew });
-      case 'careerrace': return H.careerRace(t.dataset.q === 's' ? 'sprint' : t.dataset.q === '1');
+      case 'careerrace': return H.careerRace(t.dataset.q === 's' ? 'sprint' : t.dataset.q === 'p' ? 'practice' : t.dataset.q === '1');
       case 'careercontinue': return H.openCareer();
       case 'careerrules': return this.show('career_rules');
       case 'careerhub': return this.show('career_hub');
