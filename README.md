@@ -2,7 +2,7 @@
 
 A 3D Formula-style racing game that runs in the browser. Twenty cars, twelve original circuits, a physics model built from first principles (not a canned arcade handling model), and an AI field with adjustable difficulty.
 
-**Play:** open `dist/apex-grand-prix.html` (single self-contained file), or serve `docs/` with any static server (GitHub Pages works: set the source to the `docs` folder).
+**Play:** open `dist/apex-grand-prix.html` (one self-contained file: download it and double-click it, no server or install needed; saves are kept in that browser), or serve `docs/` with any static server (GitHub Pages works: set the source to the `docs` folder).
 
 ```bash
 npm install

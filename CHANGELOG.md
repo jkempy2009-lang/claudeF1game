@@ -4,6 +4,9 @@
 
 Everything below was added or fixed in this release, grouped by area.
 
+### Latest: the single-file game works again
+`dist/apex-grand-prix.html`, the one file that is meant to open straight from disk, did not work: the menu stuck on its loading screen. The build inlined the game code with a text replacement, and a text replacement in JavaScript reads `` $` ``, `$'` and `$&` in the replacement as patterns. The minified game contains one of them, so a piece of the page was pasted into the middle of the code and the code was cut short. The hosted version and `docs/` were unaffected, which is why it went unnoticed. The build now inlines with a function (no patterns), refuses to write the file if the script did not arrive intact, and leaves out the web-app manifest link, which only failed when opened from disk. Checked by opening the file from disk in a browser and running a race: no errors, saving works.
+
 ### Latest: the career, rebuilt around the driver
 The career was a list of races with a budget attached: finish well, buy one of three upgrades, and at the end of the season the standings alone decided whether a better team called. It now has a driver in it.
 

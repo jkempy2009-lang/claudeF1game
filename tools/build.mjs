@@ -30,9 +30,12 @@ if (watch) {
   const html = fs.readFileSync(path.join(root, 'docs/index.html'), 'utf8');
   const css = fs.readFileSync(path.join(root, 'docs/style.css'), 'utf8');
   const js = fs.readFileSync(path.join(root, 'docs/game.js'), 'utf8').replace(/<\/script>/g, '<\\/script>');
+  // function replacers: a string replacement would read "$`", "$'" and "$&" in the minified code as patterns and corrupt it
   const single = html
-    .replace('<link rel="stylesheet" href="style.css">', `<style>\n${css}\n</style>`)
-    .replace('<script src="game.js"></script>', `<script>\n${js}\n</script>`);
+    .replace('<link rel="manifest" href="manifest.webmanifest">\n', () => '') // nothing to install from a single file, and opened from disk the request only fails
+    .replace('<link rel="stylesheet" href="style.css">', () => `<style>\n${css}\n</style>`)
+    .replace('<script src="game.js"></script>', () => `<script>\n${js}\n</script>`);
+  if (single.includes('src="game.js"') || !single.includes(js.slice(-200))) throw new Error('single-file build: the game script was not inlined intact');
   fs.mkdirSync(path.join(root, 'dist'), { recursive: true });
   fs.writeFileSync(path.join(root, 'dist/apex-grand-prix.html'), single);
   // artifact variant: body-only fragment (the host wraps it in its own document skeleton)
