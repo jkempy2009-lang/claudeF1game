@@ -199,3 +199,19 @@ Status: **not started**. Each item is ticked off in `CHANGELOG.md` as it lands.
 ### 8.3 Replay & photo mode enhancements (`src/game.js`, `src/render/replay.js`)
 - **Extended replay buffer & key events (`replay.js`):** increase the buffer to `60 s` (`20 Hz`, about `1.2 MB`) and store event timestamps (overtakes, impacts, fastest laps) as clickable markers on `#r-scrub` so players can jump straight to incidents.
 - **Photo mode camera controls (`game.js`):** roll tilt (`Z` / `X`), a depth-of-field / exposure slider (`+` / `-`), and a motion-blur shutter speed toggle (`0` = crisp freeze-frame, `0.4` = panning blur on the wheels and background while the target car stays sharp).
+
+---
+
+## 9. Additions (proposed during implementation)
+
+Items not in the original list that would lift the game noticeably. Same status rules as above.
+
+- **Team radio with a voice:** the race engineer's messages spoken through the browser's speech synthesis (filtered through the radio band-pass of 8.1), with a mute option.
+- **Formation lap and grid procedure:** an optional formation lap behind the leader (weaving to warm tyres, brakes held hot), then the cars line up in their boxes for the lights.
+- **Podium and parc fermé:** after the flag, a short camera sequence of the top three in parc fermé and on the podium, before the results screen.
+- **Broadcast graphics:** TV-style overlays in TV / helicopter camera: battle-for-position banners with the gap, pit-stop timer, fastest-lap banner, tyre-age chips on the tower.
+- **Visible tyre wear and graining:** the 3D tyre's tread darkens and shows a grained band as wear and graining rise; marbles stick to the tyre shoulder.
+- **Weather radar:** a small HUD forecast strip (dry / rain in N laps / drying) driven by the existing weather timeline.
+- **Spectator mode:** watch a full AI race with the broadcast cameras and graphics, any circuit, any weather.
+- **Career weekend formats:** sprint weekends (short Saturday race setting the Sunday grid) and practice sessions with a long-run / qualifying-sim run plan that earns small setup bonuses.
+- **Colour-blind HUD option:** alternative palette for sector colours, tyre-temperature bars and flags.
