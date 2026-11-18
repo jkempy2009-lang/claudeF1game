@@ -113,7 +113,7 @@ function skidpad(R, vStart, vEnd, setup, wetness = 0) {
   const dryM = skidpad(100, 15, 90, { compound: 'medium' }), wetM = skidpad(100, 15, 90, { compound: 'medium' }, 1);
   const dryW = skidpad(100, 15, 90, { compound: 'wet' }), wetW = skidpad(100, 15, 90, { compound: 'wet' }, 1);
   // the tyre loses 30 %; the car then corners slower, so it also has less downforce: the peak-g ratio falls further
-  check('rain cuts slick cornering g (tyre grip -30 %)', wetM.best / dryM.best, 0.5, 0.8, ' ratio');
+  check('rain cuts slick cornering g (tyre grip -30 %, cold and with less downforce)', wetM.best / dryM.best, 0.4, 0.8, ' ratio');
   check('wet tyres restore grip in the rain', wetW.best / wetM.best, 1.2, 1.8, ' ratio');
   check('wet tyres give up some grip on a dry track', dryW.best / dryM.best, 0.7, 0.97, ' ratio');
 }

@@ -57,8 +57,10 @@ export class Car {
 
     this.omega = new Float64Array(4);
     this.alphaLag = new Float64Array(4);
-    this.temp = new Float64Array(4).fill(85); // carcass (core): slow, sets the grip window and the degradation
-    this.tempS = new Float64Array(4).fill(85); // surface skin: flashes in a slide or lock-up, cooled by the airflow
+    // on the grid the tyres sit about 15 C under their window (blankets, then the lap to the grid)
+    const tStart = clamp((spec.compound ? spec.compound.tOpt : 100) - 15, 60, 95);
+    this.temp = new Float64Array(4).fill(tStart); // carcass (core): slow, sets the grip window and the degradation
+    this.tempS = new Float64Array(4).fill(tStart); // surface skin: flashes in a slide or lock-up, cooled by the airflow
     this.grain = new Float64Array(4); // graining 0..1: torn surface from pushing on cold rubber, cleans up with running
     this.gLoad = 1; // vertical load factor from the road's vertical curvature
     this.brakeTemp = new Float64Array(4).fill(260); // carbon discs, deg C: glow when hot, fade when cooked, weak when cold

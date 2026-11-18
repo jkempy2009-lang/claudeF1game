@@ -125,7 +125,7 @@ ok('a new season: fresh head-to-head, developed teams, record kept', career.h2h.
   const u = new Race(track, { mode: 'race', laps: 2, level: 0.5, fieldSize: 8, playerTeam: 6, seed: 4, tyreWear: 3, upgrades: { power: 0, aero: 0, grip: 0, ers: 4, tyres: 5, pit: 0 } });
   const n = new Race(track, { mode: 'race', laps: 2, level: 0.5, fieldSize: 8, playerTeam: 6, seed: 4, tyreWear: 3, upgrades: { power: 0, aero: 0, grip: 0, ers: 0, tyres: 0, pit: 0 } });
   ok('hybrid upgrade: a bigger battery on the player car only', u.player.spec.ersCapacity > n.player.spec.ersCapacity * 1.15 && u.cars.find((c) => !c.info.isPlayer).spec.ersCapacity === n.cars.find((c) => !c.info.isPlayer).spec.ersCapacity);
-  ok('tyre upgrade: the player car wears its tyres more slowly', Math.abs(u.player.wearMult - 3 * 0.8) < 1e-9 && n.player.wearMult === 3 && u.cars.find((c) => !c.info.isPlayer).wearMult === 3);
+  ok('tyre upgrade: the player car wears its tyres more slowly', Math.abs(u.player.wearMult - n.player.wearMult * 0.8) < 1e-9 && u.cars.find((c) => !c.info.isPlayer).wearMult === n.player.wearMult);
 }
 // ---- the driver market, contracts and goals over many seasons (standings faked: the market only reads them)
 {

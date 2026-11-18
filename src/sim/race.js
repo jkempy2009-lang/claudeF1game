@@ -208,7 +208,7 @@ export class Race {
       const { seat, player } = g;
       const team = seat.team;
       // AI strategy: a first stint of at least ~half the race, with a margin (the softest tyre that lasts, with some variety)
-      const stintNeed = Math.max(1.5, this.totalLaps * 0.5) * 1.15;
+      const stintNeed = Math.max(1.2, this.totalLaps * 0.42);
       const okTyres = aiCompounds.filter((id) => this.tyreLife(id) >= stintNeed);
       const pick = rng();
       let compound = player ? opt.compound : okTyres.length ? okTyres[pick < 0.5 ? 0 : pick < 0.85 ? Math.min(1, okTyres.length - 1) : okTyres.length - 1] : 'hard';
@@ -1146,7 +1146,7 @@ export class Race {
   }
 
   // ---- weather -----------------------------------------------------------------------------------------------
-  /** Laps a set of this compound is good for at the chosen wear setting (about 0.45 of its nominal life: racing wears tyres faster than a clean lap). */
+  /** Laps a set of this compound is good for at the chosen wear setting: to about 60 % wear, where the grip starts to fall away, with traffic (0.55 of its nominal life). */
   /**
    * The stint solver (SPEC 7.1): no-stop, one-stop and two-stop plans over the dry compounds, each stint within the tyre's
    * life, costed as its laps times the compound's pace deficit plus the degradation that builds through the stint, plus
@@ -1186,7 +1186,7 @@ export class Race {
   }
 
   tyreLife(id) {
-    return (COMPOUNDS[id].wearLaps / Math.max(0.05, this.wearScale())) * 0.45;
+    return (COMPOUNDS[id].wearLaps / Math.max(0.05, this.wearScale())) * 0.55; // to about 60 % wear, where the grip starts to fall away, with traffic
   }
 
   /**
