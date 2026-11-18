@@ -21,6 +21,9 @@ const LANDMARKS = {
   sakura: [{ type: 'ferris', at: 0.5, side: 1, extra: 70, scale: 1.1 }, { type: 'tower', at: 0.03, side: -1, extra: 18 }],
   bastide: [{ type: 'tower', at: 0.03, side: -1, extra: 16 }],
   caldera: [{ type: 'arch', at: 'straight' }, { type: 'tower', at: 0.03, side: -1, extra: 18 }],
+  serpent: [{ type: 'tower', at: 0.03, side: -1, extra: 14 }],
+  vortex: [{ type: 'arch', at: 'straight' }, { type: 'ferris', at: 0.62, side: 1, extra: 40 }, { type: 'tower', at: 0.03, side: -1, extra: 18 }],
+  kasbah: [{ type: 'tower', at: 0.03, side: -1, extra: 12 }],
 };
 
 const steel = () => new THREE.MeshStandardMaterial({ color: 0xd9dde3, roughness: 0.4, metalness: 0.7 });

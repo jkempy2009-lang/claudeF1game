@@ -10,7 +10,7 @@ const level = +(process.argv[2] || 0.8), tid = process.argv[3] || 'northfield', 
 const track = new Track(TRACK_DEFS.find((d) => d.id === tid));
 const cause = {}, where = {}, examples = [], pitZones = {}, pitEx = [], origins = {}, originEx = [], hurtCars = new Set();
 for (const seed of seeds) {
-  const race = new Race(track, { mode: 'race', laps, level, fieldSize: 20, playerGrid: 12, seed, tyreWear: 3, collisions: true, damage: true, weather: process.env.WEATHER || 'dry', compound: process.env.WEATHER === 'light' || process.env.WEATHER === 'heavy' ? 'wet' : 'medium' });
+  const race = new Race(track, { mode: 'race', laps, level, fieldSize: 20, playerGrid: 12, seed, tyreWear: +(process.env.WEARSET || 3), collisions: true, damage: true, weather: process.env.WEATHER || 'dry', compound: process.env.WEATHER === 'light' || process.env.WEATHER === 'heavy' ? 'wet' : 'medium' });
   const p = race.player;
   const bot = new AIDriver({ car: p, track, profile: race.getProfile(p.spec, 'bot'), level, seed: 5 + seed });
   race.start();

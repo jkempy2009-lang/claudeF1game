@@ -26,6 +26,7 @@ const suites = [
   ['rival pace table', 'tests/pacetable.mjs'],
   ['car model geometry', 'tests/carshape.mjs'],
   ['formation lap', 'tests/formation.mjs'],
+  ['barriers and circuits', 'tests/walls.mjs'],
   ['rival decision matrix', 'tests/brain.mjs'],
   ['career rules', 'tests/careerrules.mjs'],
   ['tyre model', 'tests/tyres.mjs'],

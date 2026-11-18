@@ -1008,7 +1008,7 @@ export class Race {
           const adv = this.strategyAdvice(car);
           if (adv && adv.thisLap && adv.reason !== 'rules') { drv.wantsPit = true; if (!rs.nextCompound) rs.nextCompound = adv.compound; }
         }
-        if (ts.wear > 0.8) drv.wantsPit = true;
+        if (ts.wear > 0.68) drv.wantsPit = true; // just into the cliff (it starts at 0.62): a team does not leave a car out on finished tyres
         if (car.damageSummary().severity > 0.4 && lapsLeft > 2) drv.wantsPit = true;
         // weather: wets once the track is properly wet, slicks once it dries out
         if (this.track.pit && lapsLeft > 1) {

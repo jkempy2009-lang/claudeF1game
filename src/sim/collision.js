@@ -138,8 +138,22 @@ export function collideCars(a, b, restitution = 0.12) {
  * Returns the strongest impact {energy, lx, ly, speed}, PUSHED when the car was only moved off a wall, or null.
  */
 const tmp = { i: 0, t: 0, s: 0, d: 0, dist: 0 };
+/** Wall probe points: the four corners plus the middle of each side, so a barrier that bulges towards the car (the inside
+ * of a corner) cannot slip between the corners. */
+const WALL_PTS = [...CORNERS, [0, CORNERS[0][1]], [0, CORNERS[2][1]], [CORNERS[0][0], 0], [CORNERS[2][0], 0]];
+const wp = new Float64Array(WALL_PTS.length * 2);
+function wallPoints(c, out) {
+  const co = Math.cos(c.theta), si = Math.sin(c.theta);
+  for (let k = 0; k < WALL_PTS.length; k++) {
+    const [lx, ly] = WALL_PTS[k];
+    out[k * 2] = c.x + lx * co - ly * si;
+    out[k * 2 + 1] = c.y + lx * si + ly * co;
+  }
+}
+
 export function collideWalls(car, track, restitution = 0.2, friction = 0.35) {
-  worldCorners(car, ca);
+  const ca = wp;
+  wallPoints(car, ca);
   let worst = null;
   const co = Math.cos(car.theta), si = Math.sin(car.theta);
   let moved = false;
@@ -150,7 +164,7 @@ export function collideWalls(car, track, restitution = 0.2, friction = 0.35) {
     const sx = nx * (pen + 0.01), sy = ny * (pen + 0.01);
     car.x += sx;
     car.y += sy;
-    for (let m = 0; m < 4; m++) { ca[m * 2] += sx; ca[m * 2 + 1] += sy; }
+    for (let m = 0; m < WALL_PTS.length; m++) { ca[m * 2] += sx; ca[m * 2 + 1] += sy; }
     moved = true;
     const v = velAt(car, rx, ry);
     const vn = v[0] * nx + v[1] * ny;
@@ -179,7 +193,7 @@ export function collideWalls(car, track, restitution = 0.2, friction = 0.35) {
     pitWp = track.pitWallLat(car.s);
     pitSide = car.d > pitWp ? 1 : -1;
   }
-  for (let k = 0; k < 4; k++) {
+  for (let k = 0; k < WALL_PTS.length; k++) {
     const wx = ca[k * 2], wy = ca[k * 2 + 1];
     const p = track.project(wx, wy, car.i, tmp);
     const side = p.d >= 0 ? 1 : -1;

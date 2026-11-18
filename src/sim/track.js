@@ -271,6 +271,9 @@ function solvePenta(d0, d1, d2, b) {
 export const LINE_TUNE = { exitW: 0, entryW: 0 };
 const WALL_CLEAR = 3.2; // metres from the car's centre line to a barrier, for the racing line
 export function computeRacingLine(track, margin = 1.9, lengthWeight = 0.001, smoothLen = 10) {
+  // between walls (a street circuit) drivers run much closer to the barrier than they would to a gravel trap's edge
+  const street = track.def.runoff && track.def.runoff.mode === 'street';
+  const wallClear = track.def.wallClear ?? (street ? 1.8 : WALL_CLEAR);
   const N = track.N;
   const M = N * 3;
   const cx = new Float64Array(M), cy = new Float64Array(M), nx = new Float64Array(M), ny = new Float64Array(M);
@@ -282,8 +285,8 @@ export function computeRacingLine(track, margin = 1.9, lengthWeight = 0.001, smo
     nx[k] = track.nx[i];
     ny[k] = track.ny[i];
     // inside the edge by `margin`, and never closer than WALL_CLEAR to a barrier (street circuits put the wall right beside the asphalt)
-    lo[k] = -Math.min(track.wr[i] - margin, track.wallDist(i, -1) - WALL_CLEAR);
-    hi[k] = Math.min(track.wl[i] - margin, track.wallDist(i, 1) - WALL_CLEAR);
+    lo[k] = -Math.min(track.wr[i] - margin, track.wallDist(i, -1) - wallClear);
+    hi[k] = Math.min(track.wl[i] - margin, track.wallDist(i, 1) - wallClear);
   }
   // Second-difference of the centre line (the d = 0 part of the residuals).
   const a0x = new Float64Array(M), a0y = new Float64Array(M);
@@ -498,6 +501,11 @@ export class Track {
     for (let i = 0; i < N; i++) {
       let h = 0;
       for (const [k, amp, ph] of def.elevation || []) h += amp * Math.sin((TAU * k * i * this.ds) / L + ph);
+      // local features: def.hills = [[s0, length, height]] adds a smooth crest (height > 0) or dip (< 0) starting at s0
+      for (const [s0, len, hh] of def.hills || []) {
+        const rel = mod(i * this.ds - s0, L);
+        if (rel < len) h += hh * 0.5 * (1 - Math.cos((TAU * rel) / len));
+      }
       this.z[i] = h;
     }
     this.slope = new Float64Array(N);
@@ -510,6 +518,7 @@ export class Track {
     this._buildCorners();
     this._buildEdges();
     this._buildPit();
+    this._buildWalls();
     this._buildMarkers();
 
     this.lineD = computeRacingLine(this, def.lineMargin ?? 1.9);
@@ -525,6 +534,12 @@ export class Track {
   _buildBanking() {
     const N = this.N, raw = new Float64Array(N);
     for (let i = 0; i < N; i++) raw[i] = clamp(this.curv[i] * 6, -0.05, 0.05);
+    // bowls: corners of a given radius range banked steeply into the turn (def.bankCorners = [rMin, rMax, rad])
+    const bc = this.def.bankCorners;
+    if (bc) for (let i = 0; i < N; i++) {
+      const k = Math.abs(this.curv[i]);
+      if (k > 0 && 1 / k >= bc[0] && 1 / k <= bc[1]) raw[i] = Math.sign(this.curv[i]) * bc[2];
+    }
     for (const [s0, s1, rad] of this.def.banking || []) {
       for (let i = 0; i < N; i++) {
         const sv = i * this.ds;
@@ -532,7 +547,7 @@ export class Track {
       }
     }
     this.bank = new Float64Array(N);
-    const H = 10;
+    const H = this.def.bankSmooth ?? 10;
     for (let i = 0; i < N; i++) {
       let a = 0;
       for (let k = -H; k <= H; k++) a += raw[(i + k + N) % N];
@@ -792,7 +807,33 @@ export class Track {
     }
   }
 
+  /**
+   * The barrier lines, one per side, made continuous: the raw design (track + kerb + run-off + gap, the pit lane) steps
+   * where a kerb or a run-off area starts and ends, and a car sliding along the wall used to catch on those steps. The
+   * barrier may step outward at once but comes back in at no more than 1 m in 6 (about 9 degrees), so there are no ledges
+   * to catch on whichever way a car is travelling, and it never stands closer than designed.
+   */
+  _buildWalls() {
+    const N = this.N, ds = this.ds, slope = 1 / 6;
+    this.wallL = new Float64Array(N);
+    this.wallR = new Float64Array(N);
+    for (const [arr, side] of [[this.wallL, 1], [this.wallR, -1]]) {
+      const raw = new Float64Array(N);
+      for (let i = 0; i < N; i++) raw[i] = this._wallRaw(i, side);
+      arr.set(raw);
+      for (let pass = 0; pass < 2; pass++) {
+        for (let i = 0; i < N; i++) arr[i] = Math.max(arr[i], arr[(i + N - 1) % N] - slope * ds);
+        for (let i = N - 1; i >= 0; i--) arr[i] = Math.max(arr[i], arr[(i + 1) % N] - slope * ds);
+      }
+    }
+  }
+
   wallDist(i, side) {
+    if (this.wallL) return side > 0 ? this.wallL[i] : this.wallR[i];
+    return this._wallRaw(i, side);
+  }
+
+  _wallRaw(i, side) {
     // distance from the centreline to the barrier on the given side (+1 left, -1 right)
     if (side > 0) return this.wl[i] + this.kl[i] + this.r1l[i] + this.r2l[i];
     let w = this.wr[i] + this.kr[i] + this.r1r[i] + this.r2r[i];

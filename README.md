@@ -18,7 +18,7 @@ npm run test:leak    # browser: GPU resources across repeated sessions
 
 **Modes** – *Driving school* (nine guided lessons: launch, braking, clean laps, DRS, slipstream, pit stop, hybrid power, smooth driving, wet weather), Race (1-30 laps, 2-20 cars), *Qualify & race* (a 3-minute session with all 20 cars sets the grid), Time Trial with a persistent ghost of your best lap (copy it as text to challenge a friend), a 4-round Championship with driver and constructor standings, **Watch a race** (every car on AI, a TV director cutting to the closest battles, nothing saved), and a **Career** (with editable rules: laps per race down to a single lap, field size, weather, tyre wear, damage, a mandatory stop, season length, difficulty and a prize-money multiplier, changeable any time from the career hub): pick a team and build a name. Every race is judged against the team's target and against your team-mate in the same car, which moves your **reputation**; reputation is what earns offers from better teams, and a driver who falls far below what a team expects loses the seat. Money comes from prizes, a retainer from the team (bigger teams pay more) and an optional **sponsor challenge** you pick before each race. It buys six areas of car development (power unit, aerodynamics, chassis, hybrid system, tyre management, pit crew). Every team's car develops over the winter, so the order changes from season to season. Contracts run one to three seasons with pay set by how much the team wants you, and the rest of the grid lives too: drivers age, improve, decline, retire and change teams, rookies come up, and the team sets three goals every season. Each weekend can start with **practice** (a qualifying simulation and a long run earn small setup gains for that weekend). Every third round from the second is a **sprint weekend** (a short sprint with points for the top eight sets the Grand Prix grid; a career rule turns them off). The career hub has six tabs: race weekend, calendar, development, standings, driver (reputation, contract, the seats it could earn, career record, past seasons) and the driver market.
 
-**Circuits** (generated procedurally from corner data, with elevation, kerbs, run-off, pit lane, DRS zones, brake boards)
+**Circuits** (generated procedurally from corner data, with elevation, kerbs, run-off, pit lane, DRS zones, brake boards; the street circuits have their barriers within a metre of the track)
 
 | Circuit | Length | Character |
 |---|---|---|
@@ -34,6 +34,9 @@ npm run test:leak    # browser: GPU resources across repeated sessions
 | Sakura Ridge Circuit | 5.5 km | Wooded ridge, flowing esses, 36 m of elevation change |
 | Circuit de la Bastide | 3.6 km | Medieval harbour town: short, tight, walls on both sides, high downforce |
 | Caldera Speedway | 5.2 km | Fast open bowl around a dormant volcano, long sweepers, 34 m of elevation change |
+| Serpentine Pass | 5.6 km | A mountain road: a 73 m climb through switchback esses, a blind crest and a plunging descent, guard rails on both sides |
+| Vortex Ring | 4.9 km | Rollercoaster: 12° banked bowls, crests down both straights and a corkscrew that drops off a crest |
+| Kasbah Streets | 4.3 km | The narrowest circuit: 10 m wide, walls a quarter of a metre from the track, right-angle corners, 10 % grades |
 
 **Racing** – standing start with lights, 10 fictional teams x 2 drivers, live timing tower with real time gaps, sector timing (purple/green), best-lap delta, DRS (detection line + <1 s rule, painted lines and signs), ERS deploy/harvest with a boost button and three ERS modes, fuel mix, live brake bias, slipstream and dirty air, damage (wings, bendable and crumpling sidepods, floor, punctures), tyre compounds (including **Wet**) with a temperature window, wear and lock-up flat spots, mandatory-stop option, pit lane with speed limiter and an **interactive pit stop** (time your presses on the four wheel nuts: 2.5 s if perfect), track-limits warnings, collision penalties, pit speeding penalties, **safety car**, marshal recovery, fast-forward to the final classification.
 
@@ -51,18 +54,21 @@ Reference clean-lap pace of the best car at each level (medium tyres; `node tool
 
 | | Rookie | Amateur | Pro | Elite | Legend | F1 |
 |---|---|---|---|---|---|---|
-| Autodromo del Vettore | 1:19.696 | 1:14.404 | 1:10.083 | 1:07.062 | 1:05.554 | 1:04.808 |
-| Circuit de la Rade | 1:13.162 | 1:08.646 | 1:04.354 | 1:01.108 | 0:59.333 | 0:58.258 |
-| Northfield Grand Prix Circuit | 1:28.133 | 1:22.062 | 1:17.521 | 1:14.262 | 1:12.833 | 1:12.004 |
-| Circuit des Hautes-Fagnes | 1:26.058 | 1:20.062 | 1:15.537 | 1:12.325 | 1:10.862 | 1:10.150 |
-| Autódromo Costa Azul | 1:28.958 | 1:22.854 | 1:17.883 | 1:14.483 | 1:12.908 | 1:11.971 |
-| Monte Aurora Ring | 1:16.267 | 1:11.021 | 1:06.617 | 1:03.571 | 1:01.996 | 1:01.187 |
-| Mirage International Circuit | 1:31.467 | 1:24.987 | 1:19.725 | 1:16.129 | 1:14.479 | 1:13.533 |
-| Parc Lumière | 1:34.900 | 1:28.221 | 1:22.529 | 1:18.442 | 1:16.162 | 1:14.887 |
-| Porto Vecchio Harbour Circuit | 1:32.346 | 1:25.871 | 1:20.500 | 1:16.671 | 1:14.454 | 1:13.404 |
-| Sakura Ridge Circuit | 1:49.129 | 1:41.412 | 1:35.383 | 1:31.433 | 1:29.650 | 1:28.679 |
-| Circuit de la Bastide | 1:21.796 | 1:16.254 | 1:11.729 | 1:08.762 | 1:07.229 | 1:06.375 |
-| Caldera Speedway | 1:19.642 | 1:14.221 | 1:09.833 | 1:06.967 | 1:05.608 | 1:05.017 |
+| Autodromo del Vettore | 1:21.633 | 1:15.829 | 1:11.129 | 1:07.337 | 1:05.417 | 1:04.671 |
+| Circuit de la Rade | 1:14.533 | 1:09.742 | 1:05.246 | 1:01.467 | 0:59.146 | 0:58.042 |
+| Northfield Grand Prix Circuit | 1:30.442 | 1:23.912 | 1:18.592 | 1:14.308 | 1:12.662 | 1:11.800 |
+| Circuit des Hautes-Fagnes | 1:28.092 | 1:21.600 | 1:16.321 | 1:12.221 | 1:10.683 | 1:09.975 |
+| Autódromo Costa Azul | 1:30.983 | 1:24.275 | 1:18.600 | 1:14.346 | 1:12.679 | 1:11.758 |
+| Monte Aurora Ring | 1:17.892 | 1:12.175 | 1:07.296 | 1:03.546 | 1:01.779 | 1:00.942 |
+| Mirage International Circuit | 1:33.821 | 1:26.887 | 1:20.892 | 1:16.383 | 1:14.308 | 1:13.362 |
+| Parc Lumière | 1:37.129 | 1:29.833 | 1:23.742 | 1:18.742 | 1:15.833 | 1:14.604 |
+| Porto Vecchio Harbour Circuit | 1:34.446 | 1:27.667 | 1:21.796 | 1:17.012 | 1:14.254 | 1:13.162 |
+| Sakura Ridge Circuit | 1:51.962 | 1:43.596 | 1:36.342 | 1:31.175 | 1:29.371 | 1:28.312 |
+| Circuit de la Bastide | 1:23.325 | 1:17.492 | 1:12.267 | 1:08.521 | 1:07.025 | 1:06.158 |
+| Caldera Speedway | 1:21.687 | 1:15.854 | 1:10.896 | 1:07.237 | 1:05.550 | 1:04.917 |
+| Serpentine Pass | 2:03.775 | 1:54.067 | 1:45.908 | 1:40.625 | 1:38.750 | 1:37.612 |
+| Vortex Ring | 1:26.042 | 1:19.567 | 1:14.400 | 1:10.379 | 1:08.587 | 1:07.767 |
+| Kasbah Streets | 1:45.937 | 1:38.171 | 1:31.075 | 1:27.129 | 1:25.296 | 1:24.183 |
 
 **Formation lap** – an optional slow lap before the lights: the field weaves and brakes to keep tyres and brakes hot, then lines up in its grid boxes.
 

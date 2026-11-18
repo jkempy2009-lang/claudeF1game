@@ -103,6 +103,13 @@ export class AIDriver {
   pathD(s, withOffset = true) {
     const tr = this.track;
     let d = this.basePath(s) + (withOffset ? this.offset : 0);
+    if (withOffset && RC_TUNE.pathWalls && this.pitState === 'none') {
+      // the offset rides on the racing line; where the line swings across the road a car holding a big offset is carried
+      // with it, so the path itself is kept off the barriers here (car half-width plus 0.7 m), wherever it is sampled
+      const i = tr.idx(s);
+      const lim = 1.7;
+      d = clamp(d, -(tr.wallDist(i, -1) - lim), tr.wallDist(i, 1) - lim);
+    }
     if (this.pitState === 'in' || this.pitState === 'stopped' || this.pitState === 'out') {
       const b = tr._pitBlend(s);
       if (b > 0.001) {
@@ -218,6 +225,16 @@ export class AIDriver {
     let delta = Math.atan(L * kPath);
     delta += 0.0016 * V * V * kPath; // understeer gradient
     delta -= 1.15 * psi + Math.atan((1.9 * e) / (V + 3));
+    // a driver's eyes on the barrier: where will the car be in 0.6 s? Closer than 1.3 m (centre to wall) and it steers
+    // away, however the path is swinging (between close walls the path-following alone let cars drift into them)
+    if (RC_TUNE.wallEyes && this.pitState === 'none') {
+      const ahead = s + V * 0.6, ia = tr.idx(ahead);
+      const drift = Math.sin(wrapAngle(car.theta + beta - tr.hdgAt(s)));
+      const dPred = car.d + V * drift * 0.6;
+      const roomL = tr.wallDist(ia, 1) - 1.3 - dPred, roomR = tr.wallDist(ia, -1) - 1.3 + dPred;
+      if (roomL < 0) delta -= clamp(-roomL * 0.09, 0, 0.16);
+      if (roomR < 0) delta += clamp(-roomR * 0.09, 0, 0.16);
+    }
     const maxSteer = car.spec.maxSteer / (1 + (V / 46) ** 2);
     inp.steer = clamp(delta / maxSteer, -1, 1);
 
@@ -400,9 +417,9 @@ export class AIDriver {
     else this.stuckT = 0;
     // spun and facing the wrong way at low speed: the car is turned round and sent off again within a couple of seconds,
     // instead of crawling the wrong way at full throttle into the next wall
-    if (RC_TUNE.wrongWay && race.phase === 'racing' && this.pitState === 'none' && V < 15 && Math.abs(wrapAngle(car.theta - this.track.hdg[car.i])) > 1.75) {
+    if (RC_TUNE.wrongWay && race.phase === 'racing' && this.pitState === 'none' && V < 8 && Math.abs(wrapAngle(car.theta - this.track.hdg[car.i])) > 1.75) {
       this.wrongT = (this.wrongT || 0) + dt;
-      if (this.wrongT > 1.8) { this.wrongT = 0; this.stuckT = 6; }
+      if (this.wrongT > 3) { this.wrongT = 0; this.stuckT = 6; } // only a car that is really stuck: a spin on open run-off sorts itself out
     } else this.wrongT = 0;
     return inp;
   }
