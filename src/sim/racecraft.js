@@ -24,7 +24,7 @@ import { clamp, smoothstep } from '../util/math.js';
 // `offLine` (brake for the corner speed of the path you are on, not the racing line's) roughly halved contact and cut marshal
 // recoveries by two thirds at Elite and Legend; `weakAxle` (pace yourself to the weaker axle, not the average tyre) halved the
 // recoveries left at F1 level. Numbers and method in CHANGELOG.md; tools/quality-seeds.sh and tools/incident-causes.mjs repeat them.
-export const RC_TUNE = { switchback: true, surge: true, saving: true, undercut: true, pitTight: false, pitTeam: true, offLine: true, weakAxle: true, wetLine: false, wetOffLine: true, exitCare: true, planner: true, towBreak: true, wetGrip: true, wetMargin: true };
+export const RC_TUNE = { switchback: true, surge: true, saving: true, undercut: true, pitTight: false, pitTeam: true, offLine: true, weakAxle: true, wetLine: false, wetOffLine: true, exitCare: true, planner: true, towBreak: true, wetGrip: true, wetMargin: true, wrongWay: true };
 
 export const ACTIONS = ['LINE', 'FOLLOW', 'DRAFT', 'ATTACK', 'COVER', 'BLOCK', 'YIELD', 'SWITCHBACK'];
 export const FEATURES = ['close', 'edge', 'brake', 'corner', 'straight', 'room', 'drs', 'threat', 'lapped', 'risk'];

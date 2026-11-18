@@ -145,7 +145,8 @@ const drive = (c, secs, inp) => { for (let t = 0; t < secs; t += DT) c.step(DT, 
 // ---- race control: virtual safety car, and skipping to the results
 {
   const track = new Track(TRACK_DEFS.find((d) => d.id === 'vettore'));
-  const race = new Race(track, { mode: 'race', laps: 4, level: 0.7, fieldSize: 12, playerGrid: 6, seed: 9, tyreWear: 1 });
+  // collisions off: the test is about race control, not about who runs into the stopped car
+  const race = new Race(track, { mode: 'race', laps: 4, level: 0.7, fieldSize: 12, playerGrid: 6, seed: 9, tyreWear: 1, collisions: false });
   const p = race.player, bot = new AIDriver({ car: p, track, profile: race.getProfile(p.spec, 'bot'), level: 0.7, seed: 7 });
   race.start();
   const victim = race.cars.find((c) => c !== p && c.info.gridPos === 2);
@@ -233,7 +234,9 @@ const drive = (c, secs, inp) => { for (let t = 0; t < secs; t += DT) c.step(DT, 
   ok('off the track and 0.2 s quicker: one warning and the lap deleted, no penalty', !tl.pens.length && tl.warns.length === 1 && rs.warnings === 1 && rs.invalidLap);
   excursion(1, 3.8);
   tl = excursion(1, 3.8);
-  ok('...the third such warning is a penalty', tl.pens.length === 1 && /three warnings/.test(tl.pens[0].reason) && rs.warnings === 3);
+  ok('...the third strike is the black-and-white flag, not yet a penalty', !tl.pens.length && tl.warns.length === 1 && tl.warns[0].flag && rs.warnings === 3);
+  tl = excursion(1, 3.8);
+  ok('...the fourth strike is 5 s (the F1 ladder)', tl.pens.length === 1 && tl.pens[0].secs === 5 && /strike 4/.test(tl.pens[0].reason));
   rs.warnings = 0; rs.invalidLap = false;
   const other = c.cars.find((x) => x !== p);
   other.rs.pos = 1; rs.pos = 2;
@@ -244,6 +247,36 @@ const drive = (c, secs, inp) => { for (let t = 0; t < secs; t += DT) c.step(DT, 
   q2.player.surf.fill(SURF.GRAVEL);
   for (let t = 0; t < 0.5; t += 0.01) q2.updateRules(q2.player, 0.01);
   ok('in qualifying any lap that leaves the track is still deleted', q2.player.rs.invalidLap && q2.events.some((e) => e.type === 'lapInvalid'));
+  // F1 penalty tiers: pit-lane speeding by the excess, a safety-car pass that is (not) given back, the size of a jump start
+  {
+    const r2 = new Race(track, { mode: 'race', laps: 5, level: 0.7, fieldSize: 3, seed: 4 });
+    r2.start(); r2.phase = 'racing'; r2.t0 = r2.time;
+    const pp = r2.player, prs = pp.rs;
+    const speeding = (over) => { r2.events.length = 0; prs.inPitLane = true; prs.pitOverMax = over; r2.updatePit(pp, 0.01); return r2.events.filter((e) => e.type === 'penalty').map((e) => e.secs); };
+    ok('pit-lane speeding: 4 km/h over is 5 s, 10 over a drive-through (20 s), 20 over a stop-go (30 s), 1 over nothing', speeding(4).join() === '5' && speeding(10).join() === '20' && speeding(20).join() === '30' && speeding(1).join() === '');
+    const [x, y] = r2.cars.filter((c) => c !== pp);
+    r2.sc.state = 'deployed';
+    r2.sc.ahead = x; pp.ahead = y; pp.behind = x; x.u = 20;
+    r2.events.length = 0;
+    r2.policeSafetyCar();
+    r2.time += 16; r2.policeSafetyCar();
+    const scPen = r2.events.find((e) => e.type === 'penalty');
+    ok('passing under the safety car and keeping the place: 10 s after 15 s', r2.events.some((e) => e.type === 'giveBack') && !!scPen && scPen.secs === 10);
+    r2.sc.giveBack = null; r2.sc.ahead = x; pp.ahead = y; pp.behind = x; r2.events.length = 0;
+    r2.policeSafetyCar();
+    pp.ahead = x; r2.time += 5; r2.policeSafetyCar(); r2.time += 16; r2.policeSafetyCar();
+    ok('...giving it back: no further action', !r2.events.some((e) => e.type === 'penalty'));
+    const jump = (metres) => {
+      const r3 = new Race(track, { mode: 'race', laps: 3, level: 0.7, fieldSize: 2, seed: 4, assists: { abs: true, tc: 2, steer: 1, stability: 1, autoGear: true, launchControl: false } });
+      r3.start();
+      const q = r3.player;
+      q.rs.falseStart = true; q.gridAt = { x: q.x - metres, y: q.y };
+      for (let n = 0; n < 240 * 12 && r3.phase !== 'racing'; n++) r3.step(RDT, { throttle: 0, brake: 1, steer: 0 });
+      const e = r3.events.find((v) => v.type === 'penalty');
+      return e ? e.secs : 0;
+    };
+    ok('a small jump start is 5 s, a big one 10 s', jump(1) === 5 && jump(4) === 10);
+  }
   // retiring from the race (pause menu): a DNF with no points, refused outside a race
   const rr = new Race(track, { mode: 'race', laps: 3, level: 0.7, fieldSize: 4, seed: 4 });
   rr.start(); rr.phase = 'racing'; rr.t0 = rr.time;

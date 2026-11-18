@@ -1,5 +1,5 @@
 import { Car } from './car.js';
-import { makeSpec, COMPOUNDS, COMPOUND_IDS, DRY_COMPOUND_IDS, wetGripFactor } from './carspec.js';
+import { makeSpec, COMPOUNDS, COMPOUND_IDS, DRY_COMPOUND_IDS, wetGripFactor, F1_RACE_LAPS } from './carspec.js';
 import { buildSpeedProfile, lineGeometry } from './speedprofile.js';
 import { AIDriver } from './ai.js';
 import { collideCars, collideWalls } from './collision.js';
@@ -48,7 +48,7 @@ export const DEFAULT_OPTIONS = {
   playerGrid: 12,
   collisions: true,
   damage: true,
-  tyreWear: 3, // multiplier on wear rate
+  tyreWear: 3, // wear setting: 0 off, 1.5 low, 3 realistic (F1 stint lengths scaled to the race distance), 6 high
   mandatoryStop: false,
   pitCalls: 'radio', // pit wall: 'off' | 'radio' (advice) | 'auto' (calls you in)
   compound: 'medium',
@@ -219,7 +219,7 @@ export class Race {
       const spec = this.makeCarSpec(team, compound, player);
       const car = new Car(spec, track);
       if (timeTrial) car.fuelRate = 0; // a time trial runs at one constant, light weight: lap times say nothing about the fuel load
-      car.wearMult = opt.tyreWear * (player && opt.upgrades ? upgradeEffects(opt.upgrades).tyres : 1);
+      car.wearMult = this.wearScale() * (player && opt.upgrades ? upgradeEffects(opt.upgrades).tyres : 1);
       if (player && opt.practiceBonus) {
         car.wearMult *= opt.practiceBonus.wear || 1;
         car.spec.frontGrip *= opt.practiceBonus.grip || 1;
@@ -262,7 +262,7 @@ export class Race {
         }
         // pit strategy: stop once somewhere in the middle of the race if the race is long enough / wear is high
         const stopLap = Math.round(this.totalLaps * (0.35 + 0.35 * rng()));
-        car.rs.plannedStop = !this.isQuali && this.totalLaps >= 4 && (opt.mandatoryStop || opt.tyreWear >= 2.5 || rng() < 0.3) ? Math.max(1, stopLap) : null;
+        car.rs.plannedStop = !this.isQuali && this.totalLaps >= 4 && (opt.mandatoryStop || this.tyreLife('hard') < this.totalLaps * 0.95 || rng() < 0.3) ? Math.max(1, stopLap) : null;
         if (plan) {
           car.rs.plan = plan;
           car.rs.plannedStop = plan.stops.length ? plan.stops[0] : null;
@@ -422,6 +422,11 @@ export class Race {
         this.t0 = this.time;
         this.lights = 0;
         this.pushEvent({ type: 'lightsOut' });
+        const fp = this.player;
+        if (fp && fp.rs.falseStart && fp.gridAt) {
+          const moved = Math.hypot(fp.x - fp.gridAt.x, fp.y - fp.gridAt.y);
+          this.addPenalty(fp, moved > 2 ? 10 : 5, `Jump start (moved ${moved.toFixed(1)} m)`);
+        }
         for (const c of this.cars) {
           c.rs.lapStart = this.t0;
           c.rs.sectorStart = this.t0;
@@ -553,8 +558,7 @@ export class Race {
     const p = this.player;
     if (!p || p.rs.falseStart || this.opt.assists.launchControl !== false || !p.gridAt) return;
     if (Math.hypot(p.x - p.gridAt.x, p.y - p.gridAt.y) > 0.6) {
-      p.rs.falseStart = true;
-      this.addPenalty(p, 10, 'False start');
+      p.rs.falseStart = true; // judged at lights out, by how far the car had crept (F1 guidelines: 5 s, 10 s for a bigger one)
       this.pushEvent({ type: 'falseStart', car: p });
     }
   }
@@ -697,8 +701,9 @@ export class Race {
     if (this.time - (rs.lastFault || -99) < 8) return;
     rs.lastFault = this.time;
     rs.faults = (rs.faults || 0) + 1;
-    const secs = car.info.isPlayer ? (rs.faults === 1 ? 5 : rs.faults === 2 ? 10 : 20) : 5;
-    this.addPenalty(car, secs, rs.faults >= 3 && car.info.isPlayer ? 'Repeated collisions' : 'Causing a collision');
+    // F1 guidelines: 10 s is the baseline for causing a collision, 5 s with mitigation (the opening lap, a light touch)
+    const mitigated = car.rs.laps < 1 || speed < 6;
+    this.addPenalty(car, mitigated ? 5 : 10, mitigated ? 'Causing a collision (mitigated: opening lap or light contact)' : 'Causing a collision');
   }
 
   // ---- timing ---------------------------------------------------------------------------------------
@@ -941,18 +946,27 @@ export class Race {
     if (inRange !== rs.inPitLane) {
       rs.inPitLane = inRange;
       this.pushEvent({ type: inRange ? 'pitEntry' : 'pitExit', car });
-      if (!inRange) rs.pitPenalised = false;
+      if (!inRange) {
+        // pit-lane speeding, judged on the way out by the worst excess (F1 guidelines): up to 6 km/h over, 5 s; 6 to 15,
+        // a drive-through; more, a 10 s stop-go. Neither can be served here, so they are added to the race time as F1 does
+        // when there are too few laps left: 20 s and 30 s.
+        const over = rs.pitOverMax || 0;
+        if (over > 1.8 && this.opt.mode === 'race' && !car.driver) {
+          if (over <= 6) this.addPenalty(car, 5, `Speeding in the pit lane (+${over.toFixed(0)} km/h)`);
+          else if (over <= 15) this.addPenalty(car, 20, `Speeding in the pit lane (+${over.toFixed(0)} km/h): drive-through, added as 20 s`);
+          else this.addPenalty(car, 30, `Speeding in the pit lane (+${over.toFixed(0)} km/h): 10 s stop-go, added as 30 s`);
+        }
+        rs.pitOverMax = 0;
+        rs.pitPenalised = false;
+      }
     }
     // speeding in the pit lane
     if (rs.inPitLane && tr.inPitLimiter(car.s)) {
       rs.pitZoneT = (rs.pitZoneT || 0) + dt;
       // a short grace period to get down to the limit after the entry line
-      if (rs.pitZoneT > 1.6 && car.speed > tr.pit.limit + 2.5 && !car.driver) {
+      if (rs.pitZoneT > 1.6 && car.speed > tr.pit.limit + 0.5 && !car.driver) {
         rs.pitSpeedT += dt;
-        if (rs.pitSpeedT > 0.35 && !rs.pitPenalised) {
-          rs.pitPenalised = true;
-          this.addPenalty(car, 5, 'Speeding in the pit lane');
-        }
+        rs.pitOverMax = Math.max(rs.pitOverMax || 0, (car.speed - tr.pit.limit) * 3.6);
       } else rs.pitSpeedT = 0;
     } else rs.pitZoneT = 0;
     // AI pit planning
@@ -1172,7 +1186,21 @@ export class Race {
   }
 
   tyreLife(id) {
-    return (COMPOUNDS[id].wearLaps / Math.max(0.3, this.opt.tyreWear || 1)) * 0.45;
+    return (COMPOUNDS[id].wearLaps / Math.max(0.05, this.wearScale())) * 0.45;
+  }
+
+  /**
+   * How much faster than real life the tyres wear. 'Realistic' (3) makes each compound last the same share of this race as
+   * it does of a full Grand Prix (F1_RACE_LAPS): a Soft about a third, a Medium about a half, a Hard about three quarters,
+   * so a one-stop is the usual race, whatever the number of laps. Low is half that, High double. Qualifying and time
+   * trials, which have no race distance, wear at three times the real rate.
+   */
+  wearScale() {
+    const set = this.opt.tyreWear ?? 3;
+    if (!set) return 0;
+    const timed = this.isQuali || this.opt.mode === 'timetrial' || this.opt.mode === 'practice';
+    const toDistance = timed ? 3 : Math.max(1, F1_RACE_LAPS / Math.max(1, this.totalLaps));
+    return (set / 3) * toDistance;
   }
 
   /**
@@ -1395,8 +1423,9 @@ export class Race {
   endVsc(green) {
     const sc = this.sc, p = this.player;
     // ending over the delta is an infringement (unless it was already penalised)
-    if (p && this.opt.mode === 'race' && (p.rs.vscDelta || 0) > 1.5 && !p.rs.vscPenalised) this.addPenalty(p, 5, 'VSC delta infringement');
-    if (p) p.rs.vscPenalised = false;
+    const dEnd = p ? p.rs.vscDelta || 0 : 0;
+    if (p && this.opt.mode === 'race' && dEnd > 0.5 && !p.rs.vscPenalised) this.addPenalty(p, dEnd > 3 ? 10 : 5, `VSC delta infringement (${dEnd.toFixed(1)} s under the minimum time)`);
+    if (p) { p.rs.vscPenalised = false; p.rs.vscGive = null; p.rs.vscAhead = null; }
     sc.state = 'none';
     sc.yellowT = 0;
     if (green) this.pushEvent({ type: 'vscEnd' });
@@ -1411,6 +1440,21 @@ export class Race {
     if (!p || p.rs.finished || this.opt.mode !== 'race') return;
     const rs = p.rs;
     if (rs.inPitLane || rs.service) return;
+    // overtaking under the VSC: 10 s, no further action if the place is given back (F1 guidelines)
+    const prev = rs.vscAhead, now = p.ahead;
+    if (prev && prev !== now && p.behind === prev && prev.speed > 8 && !prev.rs.inPitLane && !prev.rs.dnf && !rs.vscGive) {
+      rs.vscGive = { car: prev, until: this.time + 15 };
+      this.pushEvent({ type: 'giveBack', car: p, other: prev, why: 'VSC' });
+    }
+    rs.vscAhead = now;
+    if (rs.vscGive) {
+      const g = rs.vscGive;
+      if (p.ahead === g.car || g.car.rs.dnf || g.car.rs.inPitLane) rs.vscGive = null;
+      else if (this.time > g.until) {
+        rs.vscGive = null;
+        this.addPenalty(p, 10, `Overtaking under the VSC (${g.car.info.code}), place not given back`);
+      }
+    }
     const prof = this.vscRef || (this.vscRef = this.getProfile(p.spec, 'vsc-ref'));
     const vref = Math.max(8, prof.v[p.i] * 0.62);
     rs.vscDelta = clamp((rs.vscDelta || 0) + (dt * (p.speed - vref)) / vref, -15, 15);
@@ -1419,7 +1463,7 @@ export class Race {
       rs.vscOverT = (rs.vscOverT || 0) + dt;
       if (rs.vscOverT > 5 && !rs.vscPenalised) {
         rs.vscPenalised = true;
-        this.addPenalty(p, 5, 'VSC delta infringement');
+        this.addPenalty(p, rs.vscDelta > 3 ? 10 : 5, `VSC delta infringement (${rs.vscDelta.toFixed(1)} s under the minimum time)`);
       }
     } else rs.vscOverT = 0;
   }
@@ -1451,9 +1495,17 @@ export class Race {
     if (sc.state !== 'deployed') return;
     const prev = sc.ahead;
     const now = p.ahead;
-    if (prev && prev !== now && p.behind === prev && prev.speed > 8 && !prev.rs.inPitLane && this.time - (sc.lastPen || -99) > 15) {
-      sc.lastPen = this.time;
-      this.addPenalty(p, 5, 'Overtaking under the safety car');
+    if (prev && prev !== now && p.behind === prev && prev.speed > 8 && !prev.rs.inPitLane && !sc.giveBack) {
+      sc.giveBack = { car: prev, until: this.time + 15 }; // F1: no further action if the place is given back
+      this.pushEvent({ type: 'giveBack', car: p, other: prev, why: 'safety car' });
+    }
+    if (sc.giveBack) {
+      const g = sc.giveBack;
+      if (p.ahead === g.car || g.car.rs.dnf || g.car.rs.inPitLane) sc.giveBack = null;
+      else if (this.time > g.until) {
+        sc.giveBack = null;
+        this.addPenalty(p, 10, `Overtaking under the safety car (${g.car.info.code}), place not given back`);
+      }
     }
     sc.ahead = now;
   }
@@ -1501,10 +1553,12 @@ export class Race {
       if (passed.length) this.addPenalty(car, 5, `Leaving the track and gaining a position (${passed.map((c) => c.info.code).join(', ')})`);
       else if (gained != null && gained > 0.4) this.addPenalty(car, 5, `Leaving the track and gaining an advantage (${gained.toFixed(2)} s)`);
       else if (gained != null && gained > 0.1) {
+        // a track-limits strike (the F1 ladder): the lap time is deleted; the third strike brings the black-and-white flag,
+        // the fourth and every one after it 5 s
         rs.invalidLap = true;
         rs.warnings++;
-        if (rs.warnings % 3 === 0) this.addPenalty(car, 5, 'Track limits (three warnings)');
-        else this.pushEvent({ type: 'warning', car, n: rs.warnings % 3, gained });
+        if (rs.warnings >= 4) this.addPenalty(car, 5, `Track limits (strike ${rs.warnings})`);
+        else this.pushEvent({ type: 'warning', car, n: rs.warnings, flag: rs.warnings === 3, gained });
       }
       // no advantage: no warning, no penalty, the lap stands
     }

@@ -398,6 +398,12 @@ export class AIDriver {
     // --- stuck recovery handled by Race using stuckT
     if (V < 1.2 && race.phase === 'racing' && race.time > this.goTime + 6 && this.pitState !== 'stopped' && !(car.rs && car.rs.service) && !(this.pitState !== 'none' && this.neigh.some((n) => n.ds > 0 && n.ds < 14 && Math.abs(n.dd) < 3.2))) this.stuckT += dt;
     else this.stuckT = 0;
+    // spun and facing the wrong way at low speed: the car is turned round and sent off again within a couple of seconds,
+    // instead of crawling the wrong way at full throttle into the next wall
+    if (RC_TUNE.wrongWay && race.phase === 'racing' && this.pitState === 'none' && V < 15 && Math.abs(wrapAngle(car.theta - this.track.hdg[car.i])) > 1.75) {
+      this.wrongT = (this.wrongT || 0) + dt;
+      if (this.wrongT > 1.8) { this.wrongT = 0; this.stuckT = 6; }
+    } else this.wrongT = 0;
     return inp;
   }
 

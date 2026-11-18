@@ -3,14 +3,24 @@ import { SURF } from './track.js';
 
 export const AIR_DENSITY = 1.2;
 
-/** Tyre compounds. `mu` scales peak grip, `wearLaps` is how many reference laps to 100 % wear. */
+/**
+ * Tyre compounds. `mu` scales peak grip, `wearLaps` is how many reference laps to 100 % wear.
+ * Calibrated against F1 (tools/tyre-stints.mjs, one car at the limit, realistic wear): a Soft is used up in about 18 laps,
+ * a Medium about 31 and a Hard about 46 (F1: 15-25, 25-35, 40-50), and each step is about 0.45 s a lap on a 72 s lap
+ * (F1: 0.3-0.6 s). The working windows sit around the 105 C a car's tyres settle at in a race (the same on a street,
+ * a fast and a flowing circuit), harder compounds hotter as Pirelli's do: the Soft runs a little over its window at full
+ * push, the Hard a little under.
+ */
 export const COMPOUNDS = {
-  soft: { id: 'soft', name: 'Soft', letter: 'S', color: '#ee3340', mu: 1.0, wearLaps: 14, tOpt: 100, tRange: 24 },
-  medium: { id: 'medium', name: 'Medium', letter: 'M', color: '#f6d13a', mu: 0.965, wearLaps: 24, tOpt: 98, tRange: 28 },
-  hard: { id: 'hard', name: 'Hard', letter: 'H', color: '#f2f2f2', mu: 0.93, wearLaps: 38, tOpt: 96, tRange: 32 },
+  soft: { id: 'soft', name: 'Soft', letter: 'S', color: '#ee3340', mu: 1.0, wearLaps: 28, tOpt: 103, tRange: 30 },
+  medium: { id: 'medium', name: 'Medium', letter: 'M', color: '#f6d13a', mu: 0.975, wearLaps: 48, tOpt: 105, tRange: 28 },
+  hard: { id: 'hard', name: 'Hard', letter: 'H', color: '#f2f2f2', mu: 0.95, wearLaps: 72, tOpt: 110, tRange: 32 },
   // full wets: deep tread that clears water, soft and cool-running, but they overheat and wear quickly on a dry track
-  wet: { id: 'wet', name: 'Wet', letter: 'W', color: '#3a8bff', mu: 0.88, wearLaps: 22, tOpt: 80, tRange: 50, wetTyre: true },
+  wet: { id: 'wet', name: 'Wet', letter: 'W', color: '#3a8bff', mu: 0.88, wearLaps: 44, tOpt: 80, tRange: 50, wetTyre: true },
 };
+
+/** The race distance of a real Grand Prix in laps of a typical circuit: the wear setting is scaled from it. */
+export const F1_RACE_LAPS = 56;
 export const COMPOUND_IDS = ['soft', 'medium', 'hard', 'wet'];
 export const DRY_COMPOUND_IDS = ['soft', 'medium', 'hard'];
 

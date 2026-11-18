@@ -17,7 +17,7 @@ export const TUNE = { heat: 0.1, coolBase: 0.0011, coolSpeed: 0.00007 };
  * marbles: off-line rubber pick-up; banking: road camber; brakes2: surface/core brake temperatures and glazing
  * fuelCg: CG shift with fuel burn and fuel slosh; reliability: component stress and failures; clutch: launch clutch
  */
-export const PHYS = { suspension: true, marbles: true, banking: true, brakes2: true, fuelCg: true, reliability: true, clutch: true, flatHop: true };
+export const PHYS = { suspension: true, marbles: true, banking: true, brakes2: true, fuelCg: true, reliability: true, clutch: true, flatHop: true, ebControl: true };
 // suspension (per corner): spring rate N/m, damper Ns/m, static ride height m
 const K_SPRING = [180000, 180000, 160000, 160000];
 const C_DAMPER = 12000;
@@ -434,7 +434,13 @@ export class Car {
       const misfire = this.engStress > 0.75 ? 0.85 + 0.15 * Math.sin((this.engT = (this.engT || 0) + dt) * 40) : 1;
       const tPos = engineTorque(this.rpm) * sp.powerScale * thr * FUEL_MODE_TORQUE[this.fuelMode] * misfire;
       const ersT = (ersP * sp.powerScale * thr) / Math.max((this.rpm * Math.PI) / 30, 300);
-      const tBrake = (30 + 0.0075 * this.rpm) * (1 - thr);
+      let tBrake = (30 + 0.0075 * this.rpm) * (1 - thr);
+      // engine-braking control: the ECU's overrun maps back the engine braking off when the rears start to lock (a car feature,
+      // not a driver aid). Without it a downshift to first on a wet track locked the rears and spun the car.
+      if (PHYS.ebControl) {
+        const kMin = Math.min(this.kappa[RL], this.kappa[RR]);
+        if (kMin < -0.06) tBrake *= clamp(1 - (-kMin - 0.06) * 14, 0.1, 1);
+      }
       Te = tPos + ersT - tBrake;
       if (this.fuel <= 0) Te = Math.min(Te, 0);
     }

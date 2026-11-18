@@ -1444,7 +1444,10 @@ class Game {
           break;
         case 'warning':
           if (e.car === player) {
-            hud.message(`Track limits · warning ${e.n}/3`, 'bad', `Off the track and ${e.gained != null ? e.gained.toFixed(2) + ' s ' : ''}quicker: lap time deleted`, 3);
+            if (e.flag) {
+              hud.flag('Black and white flag', '#fff', 4);
+              hud.radio('Black and white flag for track limits. One more and it is a five-second penalty.', 5);
+            } else hud.message(`Track limits · strike ${e.n}`, 'bad', `Off the track and ${e.gained != null ? e.gained.toFixed(2) + ' s ' : ''}quicker: lap time deleted`, 3);
             this.audio.ui('bad');
           }
           break;
@@ -1489,6 +1492,12 @@ class Game {
           break;
         case 'chequered':
           hud.flag('Chequered flag', '#fff', 4, 'chequered');
+          break;
+        case 'giveBack':
+          if (e.car === player) {
+            hud.message('Give the place back', 'bad', `You passed ${e.other.info.code} under the ${e.why}: let them by within 15 s or take 10 s`, 5);
+            hud.radio(`You overtook ${e.other.info.name} under the ${e.why}. Give the place back.`, 5);
+          }
           break;
         case 'retired':
           if (e.car === player && e.reason === 'Retired by the driver') hud.message('Retired', 'bad', 'You retired from the race', 3);
