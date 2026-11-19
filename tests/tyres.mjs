@@ -87,4 +87,22 @@ function run(id, laps, hook = () => {}, opt = {}) {
   run('mirage', 2, (c) => { b2 = Math.max(b2, c.bottoming); vmax = Math.max(vmax, c.speed); });
   ok('the floor can touch down at speed, never when slow', bott + b2 > 0 , `Sakura ${bott.toFixed(2)}, Mirage ${b2.toFixed(2)} at up to ${(vmax * 3.6).toFixed(0)} km/h`);
 }
+// tyre wear is a set number of laps, whatever the race length (it used to be scaled to the race distance, which wore a
+// tyre out in a third of a lap in a 1-lap race)
+{
+  const tr = new Track(TRACK_DEFS.find((d) => d.id === 'northfield'));
+  const ws = (laps, tyreWear = 3) => new Race(tr, { mode: 'race', laps, fieldSize: 2, tyreWear }).wearScale();
+  ok('the wear rate does not depend on the race length', ws(1) === 1 && ws(5) === 1 && ws(56) === 1 && ws(1, 6) === 2 && ws(1, 1.5) === 0.5 && ws(1, 0) === 0);
+  const race = new Race(tr, { mode: 'race', laps: 1, fieldSize: 1, seed: 2, tyreWear: 3, compound: 'soft', collisions: false });
+  const p = race.player;
+  const bot = new AIDriver({ car: p, track: tr, profile: race.getProfile(p.spec, 'bot'), level: 1, seed: 5 });
+  race.start();
+  for (let i = 0; i < 240 * 200 && !p.rs.finished; i++) {
+    const inp = race.phase === 'racing' ? bot.update(DT, race) : { throttle: 0, brake: 1, steer: 0 };
+    race.step(DT, { throttle: inp.throttle, brake: inp.brake, steer: inp.steer });
+    race.events.length = 0;
+  }
+  const w = p.tyreSummary().wear;
+  ok('a 1-lap race on Softs at the limit uses a few percent of the tyre (a Soft lasts about 17 laps)', p.rs.finished && w > 0.01 && w < 0.08, `${(w * 100).toFixed(0)} % worn`);
+}
 process.exit(bad ? 1 : 0);

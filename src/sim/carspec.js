@@ -20,7 +20,7 @@ export const COMPOUNDS = {
 };
 
 /** The race distance of a real Grand Prix in laps of a typical circuit: the wear setting is scaled from it. */
-export const F1_RACE_LAPS = 56;
+export const F1_RACE_LAPS = 56; // a typical Grand Prix (reference only: tyre wear is per lap, not scaled to the race)
 export const COMPOUND_IDS = ['soft', 'medium', 'hard', 'wet'];
 export const DRY_COMPOUND_IDS = ['soft', 'medium', 'hard'];
 

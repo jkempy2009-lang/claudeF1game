@@ -8,7 +8,8 @@ const ok = (n, c, x = '') => { console.log(`${c ? 'PASS' : 'FAIL'}  ${n} ${x}`);
 const track = new Track(TRACK_DEFS.find((d) => d.id === 'rade'));
 
 function run(pitCalls, extra = {}) {
-  const race = new Race(track, { mode: 'race', laps: 10, level: 0.6, fieldSize: 6, playerGrid: 3, seed: 3, tyreWear: 3.5, compound: 'soft', pitCalls, ...extra });
+  // High wear: a Soft lasts about 8 laps to the cliff (a set number of laps whatever the race), so a 14-lap race needs a stop
+  const race = new Race(track, { mode: 'race', laps: 14, level: 0.6, fieldSize: 6, playerGrid: 3, seed: 3, tyreWear: 6, compound: 'soft', pitCalls, ...extra });
   const p = race.player;
   const bot = new AIDriver({ car: p, track, profile: race.getProfile(p.spec, 'bot'), level: 0.7, seed: 5 });
   race.start();

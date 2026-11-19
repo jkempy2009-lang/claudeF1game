@@ -1,5 +1,5 @@
 import { Car } from './car.js';
-import { makeSpec, COMPOUNDS, COMPOUND_IDS, DRY_COMPOUND_IDS, wetGripFactor, F1_RACE_LAPS } from './carspec.js';
+import { makeSpec, COMPOUNDS, COMPOUND_IDS, DRY_COMPOUND_IDS, wetGripFactor } from './carspec.js';
 import { buildSpeedProfile, lineGeometry } from './speedprofile.js';
 import { AIDriver } from './ai.js';
 import { collideCars, collideWalls } from './collision.js';
@@ -48,7 +48,7 @@ export const DEFAULT_OPTIONS = {
   playerGrid: 12,
   collisions: true,
   damage: true,
-  tyreWear: 3, // wear setting: 0 off, 1.5 low, 3 realistic (F1 stint lengths scaled to the race distance), 6 high
+  tyreWear: 3, // wear setting: 0 off, 1.5 low, 3 realistic (F1 stint lengths in laps: Soft ~17, Medium ~30, Hard ~45), 6 high
   mandatoryStop: false,
   pitCalls: 'radio', // pit wall: 'off' | 'radio' (advice) | 'auto' (calls you in)
   compound: 'medium',
@@ -1190,17 +1190,13 @@ export class Race {
   }
 
   /**
-   * How much faster than real life the tyres wear. 'Realistic' (3) makes each compound last the same share of this race as
-   * it does of a full Grand Prix (F1_RACE_LAPS): a Soft about a third, a Medium about a half, a Hard about three quarters,
-   * so a one-stop is the usual race, whatever the number of laps. Low is half that, High double. Qualifying and time
-   * trials, which have no race distance, wear at three times the real rate.
+   * How fast the tyres wear. Each compound lasts a set number of laps, whatever the length of the race or session:
+   * on Realistic (3) about what it does in F1 (see TYRE_LAPS), Low (1.5) twice as long, High (6) half as long.
+   * (It used to be scaled to the race distance, which in a 1-lap race wore a tyre out in a third of a lap.)
    */
   wearScale() {
     const set = this.opt.tyreWear ?? 3;
-    if (!set) return 0;
-    const timed = this.isQuali || this.opt.mode === 'timetrial' || this.opt.mode === 'practice';
-    const toDistance = timed ? 3 : Math.max(1, F1_RACE_LAPS / Math.max(1, this.totalLaps));
-    return (set / 3) * toDistance;
+    return set ? set / 3 : 0;
   }
 
   /**
