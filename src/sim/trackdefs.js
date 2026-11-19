@@ -644,7 +644,7 @@ export const TRACK_DEFS = [
     runoff: { mode: 'modern', cornerRoom: 17, grass: 12, kerbs: true }, kerbWidth: 0.9, lineMargin: 2.4,
     points: [[0,0,38],[780,0,34],[960,240,24],[860,540,55],[560,700,110],[200,750,55],[-80,600,55],[-330,640,55],[-600,480,110],[-720,220,55],[-600,-40,55],[-320,-190,110],[0,-220,22]],
     start: [0, 270], pit: { in: -170, out: 240, rampIn: 60, rampOut: 70, boxStart: 12, boxSpacing: 14 },
-    theme: { sky: { top: '#263f72', horizon: '#d8d6dc', sun: [0.35, 0.65, 0.2], sunColor: '#d8e8ff' }, fog: '#d6e0e8', fogFar: 1600, grass: ['#e4ebef', '#d3dde3'], trees: { density: 0.05, kind: 'pine' }, buildings: true, water: true, stands: 3, hills: 0.55 } },
+    theme: { sky: { top: '#263f72', horizon: '#d8d6dc', sun: [0.35, 0.65, 0.2], sunColor: '#d8e8ff' }, fog: '#d6e0e8', fogFar: 1600, grass: ['#e4ebef', '#d3dde3'], trees: { density: 0.05, kind: 'pine' }, buildings: false, water: true, stands: 3, hills: 0.55 } },
 ];
 
 export const TRACK_BY_ID = Object.fromEntries(TRACK_DEFS.map((t) => [t.id, t]));

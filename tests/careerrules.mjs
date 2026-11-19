@@ -18,7 +18,7 @@ ok('laps 0 follows the distance preset', C.careerLaps({ rules: { laps: 0 }, dist
 const c = C.newCareer({ team: 3, level: 1.15, rounds: 6, rules: { laps: 1, fieldSize: 8, prize: 2, creep: false } });
 ok('a 6-round season', c.season.calendar.length === 6 && c.rounds === 6);
 ok('rules are kept', c.rules.laps === 1 && c.rules.fieldSize === 8 && c.rules.prize === 2 && c.rules.creep === false);
-ok('a season longer than the circuits goes round again', C.makeCalendar(20).length === 20 && C.makeCalendar(20)[TRACK_DEFS.length] === TRACK_DEFS[0].id && C.makeCalendar(99).length === C.MAX_ROUNDS && C.makeCalendar(0).length === 1);
+ok('a season longer than the circuits goes round again', C.makeCalendar(C.MAX_ROUNDS).length === C.MAX_ROUNDS && TRACK_DEFS.length < C.MAX_ROUNDS && C.makeCalendar(C.MAX_ROUNDS)[TRACK_DEFS.length] === TRACK_DEFS[0].id && C.makeCalendar(99).length === C.MAX_ROUNDS && C.makeCalendar(0).length === 1);
 // prize money multiplier
 {
   const base = C.newCareer({ team: 6 }), rich = C.newCareer({ team: 6, rules: { prize: 5 } });

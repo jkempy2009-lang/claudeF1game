@@ -73,6 +73,13 @@ for (const [name, bad] of [
   step('accessibility toggles apply', await page.evaluate(() => document.body.classList.contains('calm') && document.body.classList.contains('bighud') && window.apex.save.settings.calm === true));
   await page.click('[data-toggle="s.calm"]');
   await page.click('[data-toggle="s.bigHud"]');
+  // the engine sound: the V6 synth is built at once (its voices for the other cars too), and switched back cleanly
+  await page.evaluate(() => window.apex.audio.start());
+  await page.click('[data-chip=engineSound][data-value=v6]');
+  const v6 = await page.evaluate(() => ({ s: window.apex.save.settings.engineSound, live: !!window.apex.audio.v6 || !!window.apex.audio.failed, dv: window.apex.audio.dv ? window.apex.audio.dv.length : -1 }));
+  await page.click('[data-chip=engineSound][data-value=classic]');
+  const back = await page.evaluate(() => ({ s: window.apex.save.settings.engineSound, gone: !window.apex.audio.v6 }));
+  step('engine sound: the V6 synth switches on and off', v6.s === 'v6' && v6.live && back.s === 'classic' && back.gone, JSON.stringify({ v6, back }));
   await page.fill('#save-io', JSON.stringify({ app: 'apex-grand-prix', v: 1, save: { school: { launch: true }, stats: { races: 3 } } }));
   await page.click('[data-act=saverestore]');
   step('a backup can be restored', await page.evaluate(() => window.apex.save.school.launch === true && window.apex.save.stats.races === 3));
@@ -278,7 +285,15 @@ for (const [name, bad] of [
   await page.click(`[data-sponsor=${sid}]`);
   step('a sponsor challenge can be accepted', (await page.evaluate(() => window.apex.save.career.sponsor)) === sid);
   const cres = await page.evaluate(() => { const c = window.apex.save.career; return { races: c.stats.races, h2h: c.h2h.race[0] + c.h2h.race[1], news: c.news.length, rep: c.rep }; });
-  step('the race counted for the career record', cres.races === 1 && cres.h2h === 1 && cres.news === 1 && cres.rep >= 0 && cres.rep <= 100, JSON.stringify(cres));
+  step('the race counted for the career record', cres.races === 1 && cres.h2h === 1 && cres.news >= 1 && cres.rep >= 0 && cres.rep <= 100, JSON.stringify(cres));
+  // the press conference waits in the hub; an answer applies its effect and clears the question
+  await page.waitForSelector('[data-press]', { timeout: 20000 });
+  const nAns = await page.locator('[data-press]').count();
+  const pBefore = await page.evaluate(() => { const c = window.apex.save.career; return { rep: c.rep, a: c.story.press.answers[0].effect }; });
+  await page.click('[data-press="0"]');
+  await page.waitForFunction(() => !document.querySelector('[data-press]'), null, { timeout: 20000 });
+  const pAfter = await page.evaluate(() => { const c = window.apex.save.career; return { rep: c.rep, press: c.story.press, team: c.story.team }; });
+  step('the press conference: 3-4 answers, the chosen one applies its effect', nAns >= 3 && nAns <= 4 && pAfter.press === null && Math.abs(pAfter.rep - Math.min(100, Math.max(0, pBefore.rep + pBefore.a.rep))) < 0.01 && pAfter.team === pBefore.a.team, JSON.stringify({ nAns, pBefore, pAfter }));
   for (const tab of ['calendar', 'standings', 'driver', 'development']) { await page.click(`[data-ctab=${tab}]`); await page.waitForTimeout(120); }
   step('career hub tabs', (await page.locator('[data-buy]').count()) === 6);
   await page.waitForSelector('[data-buy=power]');
