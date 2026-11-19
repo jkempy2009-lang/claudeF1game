@@ -24,6 +24,11 @@ const LANDMARKS = {
   serpent: [{ type: 'tower', at: 0.03, side: -1, extra: 14 }],
   vortex: [{ type: 'arch', at: 'straight' }, { type: 'ferris', at: 0.62, side: 1, extra: 40 }, { type: 'tower', at: 0.03, side: -1, extra: 18 }],
   kasbah: [{ type: 'tower', at: 0.03, side: -1, extra: 12 }],
+  neon: [{ type: 'arch', at: 'straight' }, { type: 'ferris', at: 0.52, side: -1, extra: 45 }, { type: 'tower', at: 0.03, side: -1, extra: 16 }],
+  meridian: [{ type: 'arch', at: 'straight' }, { type: 'tower', at: 0.03, side: -1, extra: 24, scale: 1.2 }],
+  scarp: [{ type: 'yachts' }, { type: 'tower', at: 0.03, side: -1, extra: 16 }],
+  ironwood: [{ type: 'tower', at: 0.03, side: -1, extra: 16 }],
+  frost: [{ type: 'tower', at: 0.03, side: -1, extra: 18 }],
 };
 
 const steel = () => new THREE.MeshStandardMaterial({ color: 0xd9dde3, roughness: 0.4, metalness: 0.7 });

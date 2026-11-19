@@ -1,5 +1,5 @@
 // Barriers and circuits: no ledges in any barrier, street circuits really tight, the new circuits really steep, banked and
-// drivable.
+// drivable (including the five circuits designed by an outside model and repaired here).
 import { Track } from '../src/sim/track.js';
 import { TRACK_DEFS } from '../src/sim/trackdefs.js';
 import { Race, DT } from '../src/sim/race.js';
@@ -27,7 +27,7 @@ const by = (id) => tracks.find((t) => t.id === id);
 ok('Serpentine Pass climbs and drops more than any other circuit (70 m+)', shape(by('serpent')).h > 70 && tracks.every((t) => t.id === 'serpent' || shape(t).h < shape(by('serpent')).h), shape(by('serpent')).h.toFixed(0) + ' m');
 ok('Vortex Ring has bowls banked at 10 degrees or more', shape(by('vortex')).bank > 0.17, ((shape(by('vortex')).bank * 180) / Math.PI).toFixed(1) + ' deg');
 ok('Kasbah Streets is the narrowest, with grades of 8 % or more', by('kasbah').wl[0] + by('kasbah').wr[0] <= Math.min(...tracks.map((t) => t.wl[0] + t.wr[0])) && shape(by('kasbah')).grade > 0.08);
-for (const id of ['serpent', 'vortex', 'kasbah']) {
+for (const id of ['serpent', 'vortex', 'kasbah', 'neon', 'meridian', 'scarp', 'ironwood', 'frost']) {
   const track = by(id);
   const race = new Race(track, { mode: 'timetrial', laps: 99, level: 1, fieldSize: 1, seed: 2, tyreWear: 1 });
   const p = race.player;
