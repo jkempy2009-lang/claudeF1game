@@ -250,7 +250,7 @@ export const teamMate = (teamIdx) => DRIVERS[teamIdx * 2 + 1] || DRIVERS[1];
 export const REP_LEVELS = [[85, 'Legend'], [70, 'Title contender'], [55, 'Podium contender'], [40, 'Midfield regular'], [25, 'Prospect'], [0, 'Rookie']];
 export const repLabel = (rep) => REP_LEVELS.find(([m]) => rep >= m)[1];
 /** The reputation a team wants before it offers a seat (rank 0 = the best car; the last team takes anybody). */
-export const repNeeded = (rank) => (rank >= TEAMS.length - 1 ? 0 : Math.max(0, 85 - 8 * rank));
+export const repNeeded = (rank) => (rank >= TEAMS.length - 1 ? 0 : Math.max(0, 78 - 7 * rank));
 /** A new signing has just enough of a name to have been hired. */
 export const startingRep = (teamIdx) => Math.min(95, repNeeded(teamRank(teamIdx)) + 6);
 /** Paid by the team after every race, whatever the result: bigger teams pay more. */
@@ -354,7 +354,8 @@ const ROOKIES = [
 
 /** The career's own copy of the drivers (they age, improve, decline, retire and move) and who sits in which seat. */
 export function initMarket(career) {
-  career.drivers = DRIVERS.map((d, i) => ({ id: i, name: d.name, code: d.code, number: d.number, talent: d.talent, age: 20 + ((i * 7) % 15), seasons: 0, form: 0 }));
+  // every driver has a contract with a season or three to run (so the grid does not all come up for renewal at once)
+  career.drivers = DRIVERS.map((d, i) => ({ id: i, name: d.name, code: d.code, number: d.number, talent: d.talent, age: 20 + ((i * 7) % 15), seasons: 0, form: 0, contract: 1 + ((i * 5) % 3) }));
   // seat ti*2 of the player's team is the player's: its driver starts as the reserve
   career.lineup = DRIVERS.map((d, i) => i);
   career.lineup[career.team * 2] = -1;
@@ -416,44 +417,126 @@ export function runMarket(career) {
     if (seat >= 0) career.lineup[seat] = -2; // empty, filled below
     if (career.reserve === d.id) career.reserve = null;
   }
-  // the transfer window: the best performer of a weaker team takes the seat of a disappointing driver at a stronger one
-  const order = [...TEAMS.keys()].sort((a, b) => teamStrength(career, b) - teamStrength(career, a));
+  // ---- the transfer window ----
+  // Contracts run down a year. A driver out of contract is kept only if he still meets what his team expects; one in poor
+  // form can be dropped even under contract; one in good form can be bought out by a better team. Teams then fill their
+  // seats from the best car down, each taking the best driver it can get: every driver who moves up leaves a seat behind,
+  // so the moves cascade down the grid, and rookies take what is left at the bottom.
+  const order = [...TEAMS.keys()].sort((a, b) => teamStrength(career, b) - teamStrength(career, a)); // best car first
+  const carRank = (ti) => order.indexOf(ti);
   const value = (d) => d.talent + 0.3 * d.form;
-  let moves = 0;
-  for (let k = 0; k < order.length && moves < 3; k++) {
-    const ti = order[k];
-    for (let s = 0; s < 2 && moves < 3; s++) {
-      const seat = ti * 2 + s, id = career.lineup[seat];
-      if (id === -1) continue; // the player's seat
-      const holder = id >= 0 ? driverById(career, id) : null;
-      // the best driver in a weaker team who would be an upgrade here
-      let best = null, bestSeat = -1;
-      for (let j = k + 1; j < order.length; j++) for (let t = 0; t < 2; t++) {
-        const st = order[j] * 2 + t, cid = career.lineup[st];
-        if (cid < 0) continue;
-        const c = driverById(career, cid);
-        if (c && (!best || value(c) > value(best))) { best = c; bestSeat = st; }
-      }
-      if (!best) continue;
-      if (holder && value(best) < value(holder) + 0.12) continue;
-      career.lineup[seat] = best.id;
-      career.lineup[bestSeat] = holder ? holder.id : -2;
-      moves++;
-      news.push(holder ? `${best.name} moves up to ${TEAMS[ti].short}; ${holder.name} goes the other way to ${TEAMS[Math.floor(bestSeat / 2)].short}.` : `${best.name} joins ${TEAMS[ti].short}.`);
+  const bar = (ti) => 0.8 - 0.035 * carRank(ti); // the standard a team expects: 0.80 for the best car, 0.49 for the last
+  const L = career.lineup;
+  const free = new Map(); // id -> why he is available
+  for (const d of career.drivers) d.contract = Math.max(0, (d.contract ?? 1) - 1);
+  for (let seat = 0; seat < L.length; seat++) {
+    const id = L[seat];
+    if (id < 0) continue;
+    const d = driverById(career, id), ti = Math.floor(seat / 2);
+    if (!d) continue;
+    if (d.contract <= 0) {
+      // the deal is up: kept if he is still worth the seat (and does not fancy a change himself)
+      if (value(d) >= bar(ti) - 0.04 && rnd() < 0.55) { d.contract = 1 + Math.floor(rnd() * 2); continue; }
+      L[seat] = -2; free.set(id, ti); news.push(`${d.name}'s contract at ${TEAMS[ti].short} is not renewed.`);
+    } else if (d.form < -0.15 && rnd() < 0.55) {
+      L[seat] = -2; free.set(id, ti); news.push(`${TEAMS[ti].short} drop ${d.name} after a poor season.`);
     }
   }
-  // rookies fill what is left
-  for (let seat = 0; seat < career.lineup.length; seat++) {
-    if (career.lineup[seat] !== -2) continue;
+  // drivers without a seat last year are on the market too
+  for (const d of career.drivers) if (!L.includes(d.id) && d.id !== career.reserve && !free.has(d.id)) free.set(d.id, -1);
+  // the rookies coming up from the junior series this winter
+  const used = new Set(career.drivers.map((d) => d.name));
+  const rookiePool = ROOKIES.filter(([nm]) => !used.has(nm)).sort(() => rnd() - 0.5).slice(0, 4).map(([name, code]) => ({ name, code, talent: Math.round((0.42 + rnd() * 0.36) * 100) / 100 }));
+  const fromTeam = new Map(); // id -> team he left this winter (for the headline)
+  for (let pass = 0; pass < 60; pass++) {
+    // the best car with an empty seat chooses first
+    let seat = -1;
+    for (const ti of order) { for (const s2 of [ti * 2, ti * 2 + 1]) if (L[s2] === -2) { seat = s2; break; } if (seat >= 0) break; }
+    if (seat < 0) break;
+    const ti = Math.floor(seat / 2);
+    // candidates: free agents, and drivers at weaker teams whose form (or an ending contract) lets them be bought out
+    let best = null, bestSeat = -1, bestV = -1;
+    for (const [id, left] of free) { const d = driverById(career, id); if (d && left !== ti && value(d) > bestV) { best = d; bestSeat = -1; bestV = value(d); } } // not back to the team that let him go
+    for (let s2 = 0; s2 < L.length; s2++) {
+      const id = L[s2];
+      if (id < 0 || carRank(Math.floor(s2 / 2)) <= carRank(ti)) continue; // only from a weaker car: nobody moves down by choice
+      const d = driverById(career, id);
+      if (!d || fromTeam.has(d.id) || d.age >= 35) continue;
+      const buyable = d.contract <= 1 || d.form > 0.05 || (d.buyout ??= rnd() < 0.45);
+      if (buyable && value(d) > bestV + 0.03) { best = d; bestSeat = s2; bestV = value(d) - 0.03; }
+    }
+    // a rookie instead, if the team thinks he is the better bet (potential counts a little)
+    const rk = rookiePool.length ? rookiePool.reduce((a, b) => (b.talent > a.talent ? b : a)) : null;
+    // (the front-running teams rarely gamble on one)
+    if (rk && (!best || (rk.talent + 0.08 > bestV && (carRank(ti) >= 4 || rnd() < 0.15)) || (bestV < bar(ti) - 0.25 && rnd() < 0.5))) {
+      rookiePool.splice(rookiePool.indexOf(rk), 1);
+      const d = { id: career.nextDriverId++, name: rk.name, code: rk.code, number: 30 + (career.nextDriverId % 60), talent: rk.talent, age: 19 + Math.floor(rnd() * 3), seasons: 0, form: 0, contract: 2 };
+      career.drivers.push(d);
+      L[seat] = d.id;
+      news.push(`Rookie ${d.name} gets the ${TEAMS[ti].short} seat.`);
+      continue;
+    }
+    if (!best) {
+      // nobody at all: a junior driver
+      const d = { id: career.nextDriverId++, name: `Junior ${career.nextDriverId}`, code: 'JNR', number: 30 + (career.nextDriverId % 60), talent: 0.45, age: 20, seasons: 0, form: 0, contract: 1 };
+      career.drivers.push(d);
+      L[seat] = d.id;
+      continue;
+    }
+    if (bestSeat >= 0) { L[bestSeat] = -2; fromTeam.set(best.id, Math.floor(bestSeat / 2)); }
+    else free.delete(best.id);
+    L[seat] = best.id;
+    best.contract = 1 + Math.floor(rnd() * 2) + (value(best) > bar(ti) + 0.08 ? 1 : 0); // a team ties a driver it rates down for longer
+    best.buyout = undefined;
+    const was = fromTeam.get(best.id);
+    news.push(was != null ? `${best.name} leaves ${TEAMS[was].short} for ${TEAMS[ti].short}.` : `${best.name} signs for ${TEAMS[ti].short}.`);
+  }
+  // whoever is left without a seat waits a year; two years out and he retires
+  for (const [id] of free) {
+    const d = driverById(career, id);
+    if (!d) continue;
+    d.out = (d.out || 0) + 1;
+    if (d.out >= 2 || d.age >= 34) { career.drivers = career.drivers.filter((x) => x !== d); news.push(`${d.name} finds no seat and retires.`); }
+  }
+  for (const d of career.drivers) if (L.includes(d.id)) d.out = 0;
+  return news;
+}
+
+/**
+ * Halfway through a season a team that is having a bad year may drop a driver: the one furthest behind his team-mate
+ * on points, replaced by the best driver without a seat (or a rookie). About one change in two seasons, as in F1.
+ */
+export function midSeasonMarket(career) {
+  if (!career.lineup || !career.drivers) return [];
+  const s = career.season;
+  const rnd = mulberry32(Math.imul(career.seasonNo * 31 + s.round, 2654435761) ^ 0x5bd1e995);
+  if (rnd() > 0.5) return [];
+  const pts = (d) => (s.points && s.points[d.name]) || 0;
+  let worst = null, worstSeat = -1, gap = 0;
+  for (let ti = 0; ti < TEAMS.length; ti++) {
+    const a = driverById(career, career.lineup[ti * 2]), b = driverById(career, career.lineup[ti * 2 + 1]);
+    for (const [d, mate, seat] of [[a, b, ti * 2], [b, a, ti * 2 + 1]]) {
+      if (!d || !mate || career.lineup[seat] < 0) continue;
+      const g = pts(mate) - pts(d);
+      if (g > gap && g >= 8) { gap = g; worst = d; worstSeat = seat; }
+    }
+  }
+  if (!worst) return [];
+  const ti = Math.floor(worstSeat / 2);
+  const seated = new Set(career.lineup);
+  const freeAgents = career.drivers.filter((d) => !seated.has(d.id) && d.id !== career.reserve && d.age < 35).sort((x, y) => y.talent - x.talent);
+  let inn = freeAgents[0];
+  if (!inn || inn.talent < worst.talent - 0.05) {
     const used = new Set(career.drivers.map((d) => d.name));
     const pick = ROOKIES.filter(([nm]) => !used.has(nm));
-    const [name, code] = pick.length ? pick[Math.floor(rnd() * pick.length)] : [`Rookie ${career.nextDriverId}`, 'RKE'];
-    const d = { id: career.nextDriverId++, name, code, number: 30 + (career.nextDriverId % 60), talent: Math.round((0.35 + rnd() * 0.35) * 100) / 100, age: 19 + Math.floor(rnd() * 3), seasons: 0, form: 0 };
-    career.drivers.push(d);
-    career.lineup[seat] = d.id;
-    news.push(`Rookie ${name} gets the ${TEAMS[Math.floor(seat / 2)].short} seat.`);
+    const [name, code] = pick.length ? pick[Math.floor(rnd() * pick.length)] : [`Junior ${career.nextDriverId}`, 'JNR'];
+    inn = { id: career.nextDriverId++, name, code, number: 30 + (career.nextDriverId % 60), talent: Math.round((0.45 + rnd() * 0.3) * 100) / 100, age: 19 + Math.floor(rnd() * 3), seasons: 0, form: 0, contract: 2 };
+    career.drivers.push(inn);
   }
-  return news;
+  career.lineup[worstSeat] = inn.id;
+  worst.contract = 0;
+  worst.form = Math.min(worst.form, -0.2);
+  return [`Mid-season change at ${TEAMS[ti].short}: ${inn.name} replaces ${worst.name}, ${gap} points behind his team-mate.`];
 }
 
 /** The player changes team: the driver in the new team's first seat takes the player's old one. */
@@ -610,7 +693,9 @@ export function settleRace(career, row, cls, opts = {}) {
   const half = Math.ceil(career.season.calendar.length / 2);
   if (career.season.round === half && career.season.calendar.length >= 2) {
     const cur = teamRank(career.team);
-    career.interest = [...TEAMS.keys()].filter((i) => i !== career.team && teamRank(i) < cur && career.rep >= repNeeded(teamRank(i)) - 5).sort((a, b) => teamRank(a) - teamRank(b)).slice(0, 3);
+    career.interest = [...TEAMS.keys()].filter((i) => i !== career.team && career.rep >= repNeeded(teamRank(i)) - 6 && Math.abs(teamRank(i) - cur) <= 4).sort((a, b) => teamRank(a) - teamRank(b)).slice(0, 4);
+    const sacked = midSeasonMarket(career);
+    if (sacked.length) career.news = [...sacked, ...career.news].slice(0, 6);
     if (career.interest.length) career.news = [`Paddock rumours: ${career.interest.map((i) => TEAMS[i].short).join(', ')} ${career.interest.length === 1 ? 'is' : 'are'} keeping an eye on you.`, ...career.news].slice(0, 6);
   }
   return {
@@ -651,11 +736,17 @@ export function endSeason(career) {
   // a better seat is earned by reputation, or by a season that speaks for itself
   // (a team that was interested at mid-season is a little less strict)
   const interested = new Set(career.interest || []);
+  // Every team whose standard the driver meets makes an offer: better cars when the reputation (or a standout season)
+  // earns them, and teams further down too, who want a driver above their level badly and pay for him. The four on the
+  // table: the best cars that want you, and at least one team below (so even the driver of the best car has a choice).
+  const up = [], down = [];
   for (const { i, r } of sorted) {
     if (i === career.team) continue;
-    if (r < cur && (career.rep >= repNeeded(r) - (interested.has(i) ? 5 : 0) || dPos <= 2 * r + 3)) recap.offers.push(i);
+    const wants = career.rep >= repNeeded(r) - (interested.has(i) ? 6 : 0) || dPos <= 2 * r + 4;
+    if (!wants) continue;
+    (r < cur ? up : down).push(i);
   }
-  recap.offers = recap.offers.slice(0, 3); // the best three cars on offer
+  recap.offers = [...up.slice(0, 3), ...down.slice(0, Math.max(1, 4 - Math.min(3, up.length)))].slice(0, 4);
   // and a seat can be lost: a driver far below what the team expects is not kept on
   recap.dropped = cur < TEAMS.length - 1 && career.rep < repNeeded(cur) - 18 && !recap.metConstructor;
   if (recap.dropped) recap.offers = sorted.filter(({ i, r }) => i !== career.team && r > cur && career.rep >= repNeeded(r)).slice(0, 3).map((o) => o.i);
@@ -745,7 +836,7 @@ export function cleanRecap(r) {
   for (const [k, v] of Object.entries((r.terms && typeof r.terms === 'object' && r.terms) || {})) { const t = term(v); if (t && TEAMS[+k]) terms[+k] = t; }
   return {
     ...base,
-    offers: (Array.isArray(r.offers) ? r.offers : []).map((i) => cleanInt(i, 0, TEAMS.length - 1)).slice(0, 3),
+    offers: (Array.isArray(r.offers) ? r.offers : []).map((i) => cleanInt(i, 0, TEAMS.length - 1)).slice(0, 4),
     dropped: !!r.dropped,
     rep: Number.isFinite(+r.rep) ? Math.max(0, Math.min(100, +r.rep)) : undefined,
     terms,
@@ -806,11 +897,11 @@ export function sanitizeCareer(raw) {
     // the market, contracts and goals (a career from before them gets the original grid and a two-year deal)
     const ct = raw.contract || {};
     out.contract = { years: Math.round(n(ct.years, 0, 3, 2)), pay: Math.round(n(ct.pay, 0.5, 2, 1) * 100) / 100 };
-    out.interest = (Array.isArray(raw.interest) ? raw.interest : []).map((i) => cleanInt(i, 0, TEAMS.length - 1)).slice(0, 3);
+    out.interest = (Array.isArray(raw.interest) ? raw.interest : []).map((i) => cleanInt(i, 0, TEAMS.length - 1)).slice(0, 4);
     out.lastMarket = (Array.isArray(raw.lastMarket) ? raw.lastMarket : []).slice(0, 20).map((x) => cleanStr(x, 160));
     const okDrivers = Array.isArray(raw.drivers) && raw.drivers.length >= 19 && Array.isArray(raw.lineup) && raw.lineup.length === TEAMS.length * 2;
     if (okDrivers) {
-      out.drivers = raw.drivers.slice(0, 80).filter((d) => d && typeof d === 'object').map((d) => ({ id: cleanInt(d.id, 0, 99999), name: cleanStr(d.name, 28), code: cleanStr(d.code, 3).toUpperCase(), number: cleanInt(d.number, 0, 99), talent: n(d.talent, 0.2, 1, 0.5), age: cleanInt(d.age, 16, 50), seasons: cleanInt(d.seasons, 0, 99), form: n(d.form, -0.5, 0.5, 0) }));
+      out.drivers = raw.drivers.slice(0, 80).filter((d) => d && typeof d === 'object').map((d) => ({ id: cleanInt(d.id, 0, 99999), name: cleanStr(d.name, 28), code: cleanStr(d.code, 3).toUpperCase(), number: cleanInt(d.number, 0, 99), talent: n(d.talent, 0.2, 1, 0.5), age: cleanInt(d.age, 16, 50), seasons: cleanInt(d.seasons, 0, 99), form: n(d.form, -0.5, 0.5, 0), contract: cleanInt(d.contract ?? 1 + (cleanInt(d.id, 0, 99999) % 3), 0, 3), out: cleanInt(d.out, 0, 9) }));
       const ids = new Set(out.drivers.map((d) => d.id));
       out.lineup = raw.lineup.map((id) => (id === -1 ? -1 : ids.has(+id) ? +id : -3));
       out.reserve = ids.has(raw.reserve) ? raw.reserve : null;

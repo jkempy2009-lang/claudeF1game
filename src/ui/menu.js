@@ -904,14 +904,15 @@ export class Menu {
       const d = ds.get(id);
       if (!d) return '<td class="hint">—</td><td></td><td></td>';
       const stars = '●'.repeat(Math.max(1, Math.round(d.talent * 5))).padEnd(5, '○');
-      return `<td>${esc(d.name)}</td><td class="hint">${d.age}</td><td class="hint" title="talent ${Math.round(d.talent * 100)}">${stars}</td>`;
+      const ct = d.contract != null ? `<small class="hint" title="seasons left on the contract"> · ${d.contract > 0 ? d.contract + 'y' : 'out of contract'}</small>` : '';
+      return `<td>${esc(d.name)}${ct}</td><td class="hint">${d.age}</td><td class="hint" title="talent ${Math.round(d.talent * 100)}">${stars}</td>`;
     };
     const rows = order.map((ti) => `<tr class="${ti === c.team ? 'me' : ''}"><td><span class="tc" style="--c:${TEAMS[ti].color}"></span>${esc(TEAMS[ti].short)}</td>${cell(c.lineup ? c.lineup[ti * 2] : -3)}${cell(c.lineup ? c.lineup[ti * 2 + 1] : -3)}</tr>`).join('');
     const reserve = c.reserve != null && ds.get(c.reserve) ? ds.get(c.reserve).name : null;
     return `<div class="grid2" style="grid-template-columns:1.6fr 1fr">
         <div class="panel" style="overflow:auto"><h3>The grid, season ${c.seasonNo}</h3><table class="results"><tr><th>Team</th><th>Driver</th><th>Age</th><th>Talent</th><th>Driver</th><th>Age</th><th>Talent</th></tr>${rows}</table>
           ${reserve ? `<div class="hint" style="margin-top:.5rem">Without a seat: ${esc(reserve)}.</div>` : ''}</div>
-        <div class="panel"><h3>Last winter</h3>${(c.lastMarket || []).length ? c.lastMarket.map((n) => `<div class="news">${esc(n)}</div>`).join('') : '<div class="hint">The first season: the market opens when it ends. Drivers age a year every winter (the young improve, the old decline), some retire and rookies take their seats, and the ones who outperform their car move up.</div>'}</div>
+        <div class="panel"><h3>Last winter</h3>${(c.lastMarket || []).length ? c.lastMarket.map((n) => `<div class="news">${esc(n)}</div>`).join('') : '<div class="hint">The first season: the market opens when it ends. Every driver is on a contract (the seasons left are next to his name). When it runs out his team may let him go; a driver in poor form can be dropped, one in good form bought out by a faster team, and every seat that opens is filled from the best car down, so one move sets off the next. Rookies take what is left. Halfway through a season a team having a bad year may change a driver.</div>'}</div>
       </div>`;
   }
 
@@ -920,7 +921,8 @@ export class Menu {
     const r = c.seasonRecap;
     const team = TEAMS[c.team];
     const terms = (t) => (t ? `${t.years} season${t.years === 1 ? '' : 's'} · pay ×${t.pay.toFixed(2)}` : '');
-    const offers = (r.offers || []).map((i) => `<button class="team" data-coffer="${i}" style="--c:${TEAMS[i].color};--c2:${TEAMS[i].accent}"><i></i><div><b>${esc(TEAMS[i].name)}</b><div class="hint">${esc(terms((r.terms || {})[i] || contractTerms(c, i)))} · car ${Math.round(55 + teamStrength(c, i) * 45)}% · ${retainerFor(i)} a race at ×1</div><div class="bar"><span style="width:${Math.round(55 + teamStrength(c, i) * 45)}%"></span></div></div></button>`).join('');
+    const step = (i) => { const d = teamRank(c.team) - teamRank(i); return d > 0 ? `<span style="color:#31d17a">▲ a faster car</span> · ` : d < 0 ? `<span style="color:#ffb400">▼ a slower car, they want you badly</span> · ` : ''; };
+    const offers = (r.offers || []).map((i) => `<button class="team" data-coffer="${i}" style="--c:${TEAMS[i].color};--c2:${TEAMS[i].accent}"><i></i><div><b>${esc(TEAMS[i].name)}</b><div class="hint">${step(i)}${esc(terms((r.terms || {})[i] || contractTerms(c, i)))} · car ${Math.round(55 + teamStrength(c, i) * 45)}% · ${retainerFor(i)} a race at ×1</div><div class="bar"><span style="width:${Math.round(55 + teamStrength(c, i) * 45)}%"></span></div></div></button>`).join('');
     // staying: under contract, renewed, or (dropped with nobody else interested) kept on for a year
     let stay = '';
     if (!r.dropped && (c.contract.years > 0 || r.renewal)) {

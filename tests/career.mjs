@@ -141,7 +141,7 @@ ok('a new season: fresh head-to-head, developed teams, record kept', career.h2h.
     const rc = C.endSeason(k);
     retired += rc.market.filter((n) => /retires/.test(n)).length;
     rookies += rc.market.filter((n) => /^Rookie/.test(n)).length;
-    moved += rc.market.filter((n) => /moves up|joins/.test(n)).length;
+    moved += rc.market.filter((n) => /leaves .* for |signs for /.test(n)).length;
     const to = rc.offers.length ? rc.offers[0] : k.team;
     const termsTo = rc.terms[to];
     C.nextSeason(k, to);
@@ -177,6 +177,40 @@ ok('a new season: fresh head-to-head, developed teams, record kept', career.h2h.
   const saved = C.sanitizeCareer(JSON.parse(JSON.stringify(k)));
   ok('the market survives a save and load', !!saved && saved.lineup.join() === k.lineup.join() && saved.drivers.length === k.drivers.length && saved.contract.years === k.contract.years);
 }
+// a lively market: contracts, offers from teams below, many moves, mid-season changes
+{
+  const top = TEAMS.map((t, i) => i).sort((a, b) => C.teamRank(a) - C.teamRank(b))[0];
+  const k = C.newCareer({ team: top, rounds: 4 });
+  k.rep = 80;
+  const s = k.season; s.round = s.calendar.length; s.points = { You: 60 }; s.teamOf = { You: TEAMS[top].short }; s.teamPoints = {};
+  const rc = C.endSeason(k);
+  ok('the driver of the best car still gets offers: from teams below, who pay more', rc.offers.length >= 3 && rc.offers.every((i) => C.teamRank(i) > C.teamRank(top)) && rc.offers.every((i) => rc.terms[i].pay >= 1), JSON.stringify(rc.offers.map((i) => rc.terms[i])));
+  const m = C.newCareer({ team: 5, rounds: 4 });
+  ok('every driver of the career starts on a contract of 1 to 3 seasons', m.drivers.every((d) => d.contract >= 1 && d.contract <= 3));
+  let changed = 0, winters = 0;
+  for (let y = 0; y < 6; y++) {
+    const ss = m.season; ss.round = ss.calendar.length; ss.points = { You: 10 }; ss.teamOf = { You: TEAMS[m.team].short }; ss.teamPoints = {};
+    for (const id of m.lineup) if (id >= 0) { const d = m.drivers.find((x) => x.id === id); ss.points[d.name] = Math.round(d.talent * 40); }
+    const before = new Map(m.lineup.map((id, seat) => [id, seat >> 1]));
+    C.endSeason(m);
+    for (const [seat, id] of m.lineup.entries()) if (id >= 0 && before.has(id) && before.get(id) !== seat >> 1) changed++;
+    winters++;
+    C.nextSeason(m, m.team);
+  }
+  ok('a busy market: several drivers change team every winter', changed / winters >= 3, (changed / winters).toFixed(1) + ' a winter');
+  // halfway through, a driver far behind his team-mate can be replaced (one change at most, not every season)
+  const h = C.newCareer({ team: 5, rounds: 4 });
+  let changes = 0;
+  for (let n = 0; n < 12; n++) {
+    h.seasonNo = n + 1; h.season.round = 2; h.season.points = {};
+    for (let ti = 0; ti < TEAMS.length; ti++) { const a = h.drivers.find((d) => d.id === h.lineup[ti * 2 + 1]); if (a) h.season.points[a.name] = 30; }
+    changes += C.midSeasonMarket(h).length;
+  }
+  ok('mid-season: a struggling team sometimes changes a driver (in about half the seasons)', changes >= 3 && changes <= 10, `${changes} in 12 seasons`);
+  const back = C.sanitizeCareer(JSON.parse(JSON.stringify(h)));
+  ok('contracts survive a save, and an old save without them gets some', back.drivers.every((d) => d.contract >= 0 && d.contract <= 3) && C.sanitizeCareer(JSON.parse(JSON.stringify({ ...h, drivers: h.drivers.map(({ contract, ...d }) => d) }))).drivers.every((d) => d.contract >= 1));
+}
+
 // practice run plan (SPEC 9)
 {
   const plan = C.practicePlan(80);
