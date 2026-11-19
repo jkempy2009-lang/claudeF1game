@@ -237,6 +237,7 @@ class Game {
     clearTimeout(this._saveT); // a slider fires this dozens of times: the save is written once it settles
     this._saveT = setTimeout(() => persist(this.save), 250);
     this.audio.setVolume(this.save.settings.volume);
+    this.audio.setEngineSound(this.save.settings.engineSound);
     Object.assign(this.input.opts, { steerSpeed: this.save.settings.steerSpeed, padDead: this.save.settings.padDead, rumble: this.save.settings.rumble !== false });
     this.input.keys = mergeKeys(this.save.settings.keys);
     const pgk = this.hud.el.pitgame && this.hud.el.pitgame.querySelector('.pgt kbd');
@@ -1328,6 +1329,7 @@ class Game {
     const lst = this.listener();
     const pg = views.get(player).group.position;
     lst.vel.set(player.u * Math.cos(player.theta), 0, -player.u * Math.sin(player.theta));
+    this.audio.onboard = camRig.mode === 'cockpit' || camRig.mode === 'tcam';
     this.audio.weather.rain = race.rain;
     this.audio.weather.wet = race.wet;
     this.audio.update(player, others, lst, dt, false);
@@ -1398,6 +1400,7 @@ class Game {
           }
           break;
         case 'pitStopStart':
+          if (e.car === player) this.audio.pitStop(e.dur || 2.5, !e.game);
           if (e.car === player && e.game && !s._pgTip) {
             s._pgTip = true;
             hud.radio(`Pit stop: press ${this.kn('drs')} as each marker enters the green. Perfect timing on all four wheels is a 2.5 second stop.`, 7);
@@ -1426,7 +1429,10 @@ class Game {
           }
           break;
         case 'pitWheel':
-          if (e.car === player) this.audio.ui(e.res === 'perfect' ? 'good' : e.res === 'good' ? 'click' : 'bad');
+          if (e.car === player) {
+            this.audio.wheelGun();
+            this.audio.ui(e.res === 'perfect' ? 'good' : e.res === 'good' ? 'click' : 'bad');
+          }
           break;
         case 'pitGameDone':
           if (e.car === player) hud.message(e.misses ? 'Cross-threaded wheel nut' : e.perfects === 4 ? 'Perfect pit stop' : 'Clean pit stop', e.misses ? 'bad' : '', `${e.dur.toFixed(1)} seconds` + (e.repair > 0.05 ? ` + ${e.repair.toFixed(1)} s repairs` : ''), 3);
@@ -1496,6 +1502,7 @@ class Game {
           if (d < 200) {
             effects.burst(e.x, 0.5, -e.y, Math.min(60, 10 + e.speed * 3), Math.min(18, 4 + e.speed));
             if (d < 90) this.audio.thud(clamp(e.speed / 20, 0.15, 1) * (1 - d / 100));
+            if (d < 90 && e.other && e.speed > 8) this.audio.debris(clamp(e.speed / 25, 0.3, 1) * (1 - d / 100));
           }
           if (e.other && (e.car === player || e.other === player) && s.story) s.story.contacts.add((e.car === player ? e.other : e.car).info.name);
           if (e.car === player || e.other === player) {

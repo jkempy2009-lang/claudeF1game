@@ -1,4 +1,6 @@
 import { clamp } from '../util/math.js';
+import { EngineVoice, DistantEngineVoice } from './audio/engineVoice.js';
+import { Ambience } from './audio/ambience.js';
 
 /** Procedural audio: a V6-hybrid-ish engine synth for the player, simple voices for nearby cars, wind, tyres, kerbs, UI. */
 export class AudioEngine {
@@ -11,6 +13,30 @@ export class AudioEngine {
     this.lastGear = 1;
     this.prevThr = 0;
     this.weather = { rain: 0, wet: 0 };
+    this.engineSound = 'classic'; // 'v6': the newer synth in audio/engineVoice.js (player and the cars nearby)
+    this.onboard = false;
+    this.v6 = null;
+    this.v6state = { rpm: 5000, throttle: 0, load: 0, gear: 1, speed: 0, ersDeploy: 0, ersHarvest: 0, limiter: false, pitLimiter: false, onboard: false, volume: 1 };
+    this.dvState = { rpm: 8000, throttle: 0, distance: 50, closingSpeed: 0, pan: 0, volume: 1 };
+  }
+
+  /** Which engine synth to use: 'classic' (the original) or 'v6' (audio/engineVoice.js). Takes effect at once. */
+  setEngineSound(mode) {
+    this.engineSound = mode === 'v6' ? 'v6' : 'classic';
+    if (this.started) this._applyEngineSound();
+  }
+
+  _applyEngineSound() {
+    const want = this.engineSound === 'v6';
+    if (want && !this.v6) {
+      this.v6 = new EngineVoice(this.ctx, this.master);
+      this.dv = this.voices.map(() => new DistantEngineVoice(this.ctx, this.master));
+    } else if (!want && this.v6) {
+      this.v6.dispose();
+      for (const d of this.dv) d.dispose();
+      this.v6 = null;
+      this.dv = null;
+    }
   }
 
   start() {
@@ -361,6 +387,10 @@ export class AudioEngine {
       this.voices.push({ o1, o2, g, f, pan, car: null, d2: 0 });
     }
     this.started = true;
+    this._applyEngineSound();
+    this.amb = new Ambience(ctx, this.master);
+    this.ambState = { speed: 0, slip: [0, 0, 0, 0], lockup: [0, 0, 0, 0], spin: [0, 0, 0, 0], surface: [0, 0, 0, 0], wet: 0, inPitLane: false, onboard: false };
+    this.nGravel = 0;
   }
 
   resume() {
@@ -395,6 +425,11 @@ export class AudioEngine {
       set(this.scrapeGain.gain, 0, 0.1);
       for (const g of [this.squealGain, this.buffetGain, this.kerbGain, this.gravelGain, this.grassGain, this.overGain, this.staticGain]) set(g.gain, 0, 0.1);
       for (const v of this.voices) { set(v.g.gain, 0, 0.1); v.car = null; }
+      if (this.amb) { this.ambState.speed = 0; this.ambState.inPitLane = false; this.amb.update(this.ambState, dt); }
+      if (this.v6) {
+        this.v6.update({ ...this.v6state, rpm: player.rpm, throttle: 0, volume: 0 }, dt);
+        for (const d of this.dv) d.update({ ...this.dvState, volume: 0 }, dt);
+      }
       this.lastGear = player.gear;
       this.prevThr = player.throttle;
       return;
@@ -403,14 +438,15 @@ export class AudioEngine {
     const fc = rpm / 60;
     const thr = player.throttle;
     const load = 0.25 + 0.75 * thr;
+    const cl = this.v6 ? 0 : 1; // the classic engine layers are silent when the V6 synth plays
     for (const v of this.oscs) set(v.o.frequency, fc * v.mult, 0.02);
     set(this.engFilter.frequency, 240 + rpm * 0.13 + thr * 320, 0.08);
-    set(this.eng.gain, (0.12 + 0.2 * load) * (0.65 + rpm / 40000), 0.08);
-    set(this.nzGain.gain, 0.015 + thr * 0.03 * (rpm / 15000), 0.08);
+    set(this.eng.gain, cl * (0.12 + 0.2 * load) * (0.65 + rpm / 40000), 0.08);
+    set(this.nzGain.gain, cl * (0.015 + thr * 0.03 * (rpm / 15000)), 0.08);
     set(this.fire.frequency, fc * 3, 0.02);
     set(this.fireDepth.gain, 0.42 - 0.3 * clamp((rpm - 4000) / 10000, 0, 1), 0.1);
     const over = thr < 0.12 && rpm > 6000 ? clamp((rpm - 6000) / 7000, 0, 1) : 0;
-    set(this.overGain.gain, over * 0.22, 0.06);
+    set(this.overGain.gain, cl * over * 0.22, 0.06);
     set(this.overF.frequency, 180 + 140 * clamp((rpm - 6000) / 8000, 0, 1), 0.05);
     set(this.nzf.frequency, 900 + rpm * 0.08, 0.1);
     const V = player.speed;
@@ -418,7 +454,20 @@ export class AudioEngine {
     set(this.windFilter.frequency, 250 + V * 5, 0.15);
     let slip = 0;
     for (let w = 0; w < 4; w++) slip = Math.max(slip, player.slipVis[w]);
-    set(this.tyreGain.gain, clamp(slip * 0.16, 0, 0.14), 0.08);
+    // the per-wheel tyre voices (audio/ambience.js) carry the squeal; this mono layer is the fallback
+    set(this.tyreGain.gain, this.amb ? 0 : clamp(slip * 0.16, 0, 0.14), 0.08);
+    if (this.amb) {
+      const a = this.ambState;
+      a.speed = V; a.wet = this.weather.wet; a.onboard = !!this.onboard; a.inPitLane = !!(player.rs && player.rs.inPitLane);
+      for (let w = 0; w < 4; w++) {
+        const k = player.kappa ? player.kappa[w] : 0;
+        a.slip[w] = player.slipVis[w] || 0;
+        a.lockup[w] = k < -0.25 ? clamp((-k - 0.25) / 0.5, 0, 1) : 0;
+        a.spin[w] = k > 0.2 ? clamp((k - 0.2) / 0.6, 0, 1) : 0;
+        a.surface[w] = player.surf ? player.surf[w] : 0;
+      }
+      this.amb.update(a, dt);
+    }
     set(this.tyreFilter.frequency, 800 + 300 * clamp(V / 60, 0, 1) + slip * 200, 0.1);
     const rumble = player.kerbShake * 0.13 + (player.onGrass ? clamp(V / 60, 0, 1) * 0.12 : 0); // (the surface layers below carry the rest)
     set(this.rumbleGain.gain, rumble, 0.04);
@@ -429,7 +478,7 @@ export class AudioEngine {
     set(this.sprayFilter.frequency, 1200 + V * 12, 0.2);
     // exhaust pops and crackles when the throttle is lifted at high revs; a burble on downshifts
     const lift = this.prevThr > 0.6 && thr < 0.1 && rpm > 8500 && V > 25;
-    if (lift) this.pops(3 + Math.floor(Math.random() * 5), clamp((rpm - 7000) / 8000, 0.2, 1));
+    if (this.v6) { /* the V6 synth makes its own pops */ } else if (lift) this.pops(3 + Math.floor(Math.random() * 5), clamp((rpm - 7000) / 8000, 0.2, 1));
     else if (thr < 0.05 && rpm > 9500 && V > 40 && Math.random() < dt * 3.2) this.pops(1 + Math.floor(Math.random() * 2), clamp((rpm - 8000) / 7000, 0.15, 0.8));
     // gearbox whine (pitched by the shaft speed), turbo spool and wastegate flutter, floor scrape
     const gf = (rpm / 60) * 8.5;
@@ -441,8 +490,8 @@ export class AudioEngine {
     const wasSpool = this.spool;
     this.spool += (spoolT - this.spool) * Math.min(1, dt * (spoolT > this.spool ? 2.4 : 5));
     set(this.turbo.frequency, 2600 + 6200 * this.spool, 0.05);
-    set(this.turboGain.gain, 0.011 * this.spool * this.spool, 0.05);
-    if (this.prevThr > 0.7 && thr < 0.25 && wasSpool > 0.55 && V > 20) this.flutter(wasSpool);
+    set(this.turboGain.gain, cl * 0.011 * this.spool * this.spool, 0.05);
+    if (!this.v6 && this.prevThr > 0.7 && thr < 0.25 && wasSpool > 0.55 && V > 20) this.flutter(wasSpool);
     set(this.scrapeGain.gain, clamp((player.bottoming || 0) * 0.09 * clamp(V / 70, 0, 1), 0, 0.09), 0.03);
     // brake squeal: light braking at walking pace on cold carbon
     const bt = player.brakeTemp ? (player.brakeTemp[0] + player.brakeTemp[1] + player.brakeTemp[2] + player.brakeTemp[3]) / 4 : 500;
@@ -453,15 +502,26 @@ export class AudioEngine {
     // surfaces under the tyres
     let nK = 0, nG = 0, nGr = 0;
     if (player.surf) for (let w = 0; w < 4; w++) { const sf = player.surf[w]; if (sf === 1) nK++; else if (sf === 3) nG++; else if (sf === 2) nGr++; }
+    if (this.amb && nG && !this.nGravel && V > 15) this.amb.trigger('gravelSpray', { intensity: clamp(V / 60, 0.3, 1) });
+    this.nGravel = nG;
     set(this.kerbOsc.frequency, 35 + 40 * clamp(V / 70, 0, 1), 0.05);
     set(this.kerbGain.gain, nK ? 0.05 * (nK / 2) * clamp(V / 25, 0, 1) : 0, 0.03);
     set(this.gravelGain.gain, nG ? 0.05 * (nG / 4) * clamp(V / 30, 0.2, 1) : 0, 0.05);
     set(this.grassGain.gain, nGr ? 0.09 * (nGr / 4) * clamp(V / 30, 0.2, 1) : 0, 0.05);
     set(this.staticGain.gain, t < this.staticUntil ? 0.012 : 0, 0.05);
+    if (this.v6) {
+      const st = this.v6state;
+      st.rpm = rpm; st.throttle = thr; st.load = thr < 0.08 ? -1 : thr; st.gear = player.gear; st.speed = V;
+      st.ersDeploy = player.boostOn ? 1 : 0; st.ersHarvest = player.harvesting ? 1 : 0;
+      st.limiter = thr > 0.8 && rpm > (player.spec ? player.spec.maxRpm : 15000) - 200;
+      st.pitLimiter = !!(player.rs && player.rs.inPitLane) && thr > 0.3 && V > 3;
+      st.onboard = !!this.onboard; st.volume = 1;
+      this.v6.update(st, dt);
+    }
     this.prevThr = thr;
     // gear change thump
     if (player.gear !== this.lastGear) {
-      if (player.gear < this.lastGear && thr < 0.3 && rpm > 8000) this.pops(2, 0.7); // downshift burble
+      if (!this.v6 && player.gear < this.lastGear && thr < 0.3 && rpm > 8000) this.pops(2, 0.7); // downshift burble
       this.lastGear = player.gear;
       this.blip(110, 0.08, 0.035, 'sine');
     }
@@ -488,11 +548,13 @@ export class AudioEngine {
       const free = this.voices.find((v) => !v.car);
       if (free) free.car = c.car;
     }
-    for (const v of this.voices) {
+    for (let k = 0; k < this.voices.length; k++) {
+      const v = this.voices[k];
       const e = v.car ? sel.find((c) => c.car === v.car) : null;
       if (!e) {
         v.car = null;
         set(v.g.gain, 0, 0.1);
+        if (this.dv) { this.dvState.volume = 0; this.dv[k].update(this.dvState, dt); }
         continue;
       }
       const car = e.car;
@@ -506,6 +568,14 @@ export class AudioEngine {
       set(v.o1.frequency, f, 0.04);
       set(v.o2.frequency, f * 0.5, 0.04);
       set(v.f.frequency, 220 + car.rpm * 0.09, 0.1);
+      if (this.dv) {
+        const ds = this.dvState;
+        ds.rpm = car.rpm; ds.throttle = car.throttle; ds.distance = d; ds.closingSpeed = -radial; ds.volume = 1;
+        ds.pan = clamp((dx * lr.x + dz * lr.z) / d, -1, 1);
+        this.dv[k].update(ds, dt);
+        set(v.g.gain, 0, 0.05);
+        continue;
+      }
       const att = 1 / (1 + (d / 18) ** 1.6);
       set(v.g.gain, 0.07 * att * (0.4 + 0.6 * car.throttle), 0.08);
       set(v.pan.pan, clamp((dx * lr.x + dz * lr.z) / d, -1, 1), 0.05);
@@ -605,6 +675,24 @@ export class AudioEngine {
     s.start(t, Math.random());
     s.stop(t + 0.8);
     this.blip(90, 0.25, 0.3 * strength, 'sine', -50);
+  }
+
+  /** The pit stop: the car drops off the jacks after `dur` s; four wheel guns unless the player times them (pit game). */
+  pitStop(dur, guns = true) {
+    if (!this.amb) return;
+    this.amb.trigger('airJack', { up: true, delay: 0.1 });
+    if (guns) for (let k = 0; k < 4; k++) this.amb.trigger('pitGun', { delay: 0.35 + k * 0.08 + (k > 1 ? 0.9 : 0) });
+    this.amb.trigger('airJack', { up: false, delay: Math.max(0.6, dur - 0.3) });
+  }
+
+  /** One wheel gun (the interactive pit stop's button presses). */
+  wheelGun() {
+    if (this.amb) this.amb.trigger('pitGun');
+  }
+
+  /** Carbon fragments after a car-to-car hit. */
+  debris(k) {
+    if (this.amb) this.amb.trigger('debris', { intensity: k });
   }
 
   light(n) {

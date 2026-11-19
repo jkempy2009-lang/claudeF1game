@@ -13,7 +13,7 @@ import { CHAMP_CAL, DEFAULT_RULES, MAX_ROUNDS, careerLaps, sanitizeRules, saniti
 
 export const SAVE_KEY = 'apex-grand-prix.v1';
 
-export const DEFAULT_SETTINGS = { colorblind: false, voice: true, quality: 'high', volume: 0.55, units: 'kmh', line: true, minimap: true, shake: true, camera: 'chase', tower: true, blur: true, steerSpeed: 1, padDead: 0.07, rumble: true, autoQuality: true, cbSafe: false, calm: false, bigHud: false, bloom: true, keys: {}, driverCode: 'YOU', driverNumber: 7 };
+export const DEFAULT_SETTINGS = { colorblind: false, voice: true, quality: 'high', volume: 0.55, units: 'kmh', line: true, minimap: true, shake: true, camera: 'chase', tower: true, blur: true, steerSpeed: 1, padDead: 0.07, rumble: true, autoQuality: true, cbSafe: false, calm: false, bigHud: false, bloom: true, keys: {}, driverCode: 'YOU', driverNumber: 7, engineSound: 'classic' };
 export const DEFAULT_CONFIG = {
   mode: 'race',
   trackId: 'northfield',
@@ -110,6 +110,7 @@ export function sanitizeSettings(raw) {
   return {
     quality: oneOf(r.quality, ['low', 'medium', 'high'], D.quality),
     volume: num(r.volume, 0, 1, D.volume),
+    engineSound: oneOf(r.engineSound, ['classic', 'v6'], D.engineSound),
     units: oneOf(r.units, ['kmh', 'mph'], D.units),
     line: bool(r.line, D.line),
     minimap: bool(r.minimap, D.minimap),
@@ -601,6 +602,7 @@ export class Menu {
         ${this.toggle('s.tower', 'Show timing tower', '', s.tower)}
       </div><div class="panel"><h3>Audio &amp; units</h3>
         ${this.slider('s.volume', 'Master volume', Math.round(s.volume * 100), 0, 100, 1, Math.round(s.volume * 100) + '%')}
+        <div class="field"><label>Engine sound</label>${this.chips('engineSound', [{ value: 'classic', label: 'Classic' }, { value: 'v6', label: 'V6 hybrid (new)' }], s.engineSound)}<div class="hint">The new synth: firing-order rasp, turbo whistle and wastegate chatter, MGU-K whine, upshift cut, overrun crackle, rev and pit limiters, and a booming cockpit. Still being tuned: tell us which you prefer.</div></div>
         <div class="field"><label>Speed units</label>${this.chips('units', [{ value: 'kmh', label: 'km/h' }, { value: 'mph', label: 'mph' }], s.units)}</div>
         <div class="field"><label>Default camera</label>${this.chips('camera', [['chase', 'Chase'], ['close', 'Low chase'], ['cockpit', 'Cockpit'], ['tcam', 'T-cam'], ['heli', 'Helicopter'], ['tv', 'TV']].map(([v, l]) => ({ value: v, label: l })), s.camera)}</div>
         <div class="field"><label>Keyboard steering speed</label>${this.chips('steerSpeed', [{ value: 0.7, label: 'Gentle' }, { value: 1, label: 'Normal' }, { value: 1.4, label: 'Quick' }], s.steerSpeed)}<div class="hint">How fast A / D turn the wheel. Gamepads and wheels are not affected.</div></div>
@@ -1064,6 +1066,7 @@ export class Menu {
       else if (k === 'stability') c.assists.stability = +v;
       else if (k === 'quality') this.save.settings.quality = v;
       else if (k === 'units') this.save.settings.units = v;
+      else if (k === 'engineSound') this.save.settings.engineSound = v === 'v6' ? 'v6' : 'classic';
       else if (k === 'camera') this.save.settings.camera = v;
       else if (k === 'steerSpeed') this.save.settings.steerSpeed = +v;
       this.persist();
