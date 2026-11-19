@@ -99,7 +99,19 @@ for (let rd = 0; rd < career.season.calendar.length; rd++) {
     ok('the budget grows by prize + retainer + sponsor', career.budget === before + res.prize + res.retainer + (res.sponsor ? res.sponsor.pay : 0) && res.retainer === C.retainerFor(career.team));
     ok('the accepted sponsor challenge is judged once and cleared', !!hadSponsor && !!res.sponsor && res.sponsor.id === hadSponsor && career.sponsor === null && typeof res.sponsor.met === 'boolean');
     ok('the team-mate is in the race and in the result', !!res.mate && res.mate.name === C.teamMate(career.team).name && res.mate.pos !== res.pos);
-  }
+    // the press conference (sim/story.js): a question with answers for this situation, answered from the hub
+    const pr = career.story && career.story.press;
+    ok('story: the press wait with a question and three or four answers', !!pr && pr.question.length > 10 && pr.answers.length >= 3 && pr.answers.length <= 4);
+    const k = pr.answers.findIndex((a) => a.promise);
+    const repB = career.rep, a = pr.answers[k >= 0 ? k : 0];
+    C.answerPress(career, k >= 0 ? k : 0);
+    ok('story: an answer moves reputation, morale and the team-mate relationship by its stated effect, and clears the question',
+      Math.abs(career.rep - Math.max(0, Math.min(100, repB + a.effect.rep))) < 1e-9 && career.story.team === a.effect.team && career.story.mate === a.effect.mate && career.story.press === null);
+    ok('story: a promise is remembered', k < 0 || (career.story.promises.length === 1 && career.story.promises[0].kind === a.promise.kind));
+    const back = C.sanitizeCareer(JSON.parse(JSON.stringify(career)));
+    ok('story: survives a save', JSON.stringify(back.story) === JSON.stringify(career.story), JSON.stringify(career.story).slice(0, 120));
+    ok('story: a broken save falls back to a clean story', JSON.stringify(C.sanitizeCareer({ ...JSON.parse(JSON.stringify(career)), story: { team: 'x', promises: [{ kind: 'nope' }], press: 7 } }).story) === JSON.stringify({ team: 0, mate: 0, promises: [], rivals: null, press: null }));
+  } else if (career.story.press) C.answerPress(career, rd % career.story.press.answers.length);
 }
 ok('the head-to-head counts every race, and qualifying only when there was one', career.h2h.race[0] + career.h2h.race[1] === 4 && career.h2h.quali[0] + career.h2h.quali[1] === 1, JSON.stringify(career.h2h));
 ok('career statistics add up', career.stats.races === 4 && career.stats.points === (career.season.points.You || 0) && career.stats.podiums >= career.stats.wins && (career.stats.best === 0 || career.stats.best >= 1), JSON.stringify(career.stats));

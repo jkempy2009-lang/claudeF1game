@@ -2,6 +2,7 @@
 import { TRACK_DEFS } from './trackdefs.js';
 import { mulberry32, clamp } from '../util/math.js';
 import { TEAMS, DRIVERS } from './teams.js';
+import { pressConference, settlePromises, rivalryUpdate, headline as storyHeadline } from './story.js';
 
 export const POINTS = [25, 18, 15, 12, 10, 8, 6, 4, 2, 1];
 export const UPGRADE_KEYS = ['power', 'aero', 'grip', 'ers', 'tyres', 'pit'];
@@ -626,6 +627,7 @@ function baseCareer({ team = 6, level = 0.55, rounds = 4, distance = 'standard',
     news: [],
     contract: { years: 2, pay: 1 },
     interest: [],
+    story: newStory(),
   };
 }
 
@@ -638,6 +640,75 @@ export function buyUpgrade(career, key) {
   career.budget -= cost;
   career.upgrades[key] = lvl + 1;
   return { ok: true, cost };
+}
+
+// ---- the story around the racing (sim/story.js): press conferences, promises, rivalries, morale ------------------------------
+
+/** team: the garage's morale, -10..10 (its retainer bonus); mate: how you get on with the team-mate, -10..10. */
+export function newStory() {
+  return { team: 0, mate: 0, promises: [], rivals: null, press: null };
+}
+
+/** Repairs a saved story (anything missing or out of range falls back to the default). */
+export function cleanStory(raw) {
+  const s = newStory();
+  if (!raw || typeof raw !== 'object') return s;
+  const n = (v, lo, hi, d) => (Number.isFinite(+v) ? Math.max(lo, Math.min(hi, +v)) : d);
+  s.team = Math.round(n(raw.team, -10, 10, 0));
+  s.mate = Math.round(n(raw.mate, -10, 10, 0));
+  s.promises = (Array.isArray(raw.promises) ? raw.promises : []).slice(0, 4).filter((p) => p && ['win', 'podium', 'points', 'beatMate'].includes(p.kind))
+    .map((p) => ({ kind: p.kind, byRound: Math.round(n(p.byRound, 1, 99, 1)), made: Math.round(n(p.made, 0, 99, 0)) }));
+  if (raw.rivals && typeof raw.rivals === 'object' && raw.rivals.rivals && typeof raw.rivals.rivals === 'object') {
+    const rv = {};
+    for (const [k, v] of Object.entries(raw.rivals.rivals).slice(0, 8)) if (v && typeof v === 'object') rv[String(k).slice(0, 28)] = { heat: n(v.heat, 0, 12, 0), meetings: Math.round(n(v.meetings, 0, 999, 0)), last: Math.round(n(v.last, 0, 99, 0)) };
+    s.rivals = { rivals: rv, active: typeof raw.rivals.active === 'string' && rv[raw.rivals.active] ? raw.rivals.active : null, round: Math.round(n(raw.rivals.round, 0, 99, 0)) };
+  }
+  const pr = raw.press;
+  if (pr && typeof pr === 'object' && typeof pr.question === 'string' && Array.isArray(pr.answers) && pr.answers.length >= 2) {
+    s.press = {
+      round: Math.round(n(pr.round, 0, 99, 0)), question: pr.question.slice(0, 200),
+      answers: pr.answers.slice(0, 4).map((a) => ({
+        tone: String(a.tone || '').slice(0, 12), text: String(a.text || '').slice(0, 220),
+        effect: { rep: n(a.effect && a.effect.rep, -3, 3, 0), mate: n(a.effect && a.effect.mate, -2, 2, 0), team: n(a.effect && a.effect.team, -2, 2, 0) },
+        promise: a.promise && ['win', 'podium', 'points', 'beatMate'].includes(a.promise.kind) ? { kind: a.promise.kind, byRound: Math.round(n(a.promise.byRound, 1, 99, 1)) } : null,
+      })),
+    };
+  }
+  return s;
+}
+
+/** Words for the morale numbers, for the hub. */
+export function moraleLabel(v) {
+  return v >= 6 ? 'excellent' : v >= 2 ? 'good' : v > -2 ? 'neutral' : v > -6 ? 'strained' : 'poor';
+}
+
+/**
+ * The answer to the waiting press-conference question: its effect on reputation, the team-mate relationship and the
+ * garage's morale, and any promise it makes (settled by the coming races). Returns what changed, or null.
+ */
+export function answerPress(career, idx) {
+  const st = career.story || (career.story = newStory());
+  const pr = st.press;
+  const a = pr && pr.answers[idx];
+  if (!a) return null;
+  career.rep = clampRep((career.rep ?? 50) + a.effect.rep);
+  st.mate = Math.max(-10, Math.min(10, st.mate + a.effect.mate));
+  st.team = Math.max(-10, Math.min(10, st.team + a.effect.team));
+  if (a.promise && st.promises.length < 4) st.promises.push({ ...a.promise, made: pr.round });
+  st.press = null;
+  return { ...a.effect, promise: a.promise };
+}
+
+/** A small seeded generator so the same race gives the same story. */
+function storyRng(career) {
+  let x = ((career.seasonNo || 1) * 7919 + (career.season ? career.season.round : 0) * 104729 + (career.team || 0) * 31) >>> 0;
+  return () => {
+    x = (x + 0x6d2b79f5) >>> 0;
+    let t = x;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
 /**
@@ -687,8 +758,39 @@ export function settleRace(career, row, cls, opts = {}) {
   st.points += me ? me.pts || 0 : 0;
   if (r.finished && (!st.best || pos < st.best)) st.best = pos;
   const def = TRACK_DEFS.find((d) => d.id === row.trackId);
-  const news = headline(r, def ? def.name : 'the circuit', TEAMS[career.team].short, mateE ? mateE.info.name : '');
-  career.news = [news, ...(career.news || [])].slice(0, 6);
+  const facts = headline(r, def ? def.name : 'the circuit', TEAMS[career.team].short, mateE ? mateE.info.name : '');
+  // the story: promises from earlier press conferences, the rivalry table, a newspaper headline and this race's question
+  const sto = career.story || (career.story = newStory());
+  const so = opts.story || {};
+  const rng = storyRng(career);
+  const round = career.season.round;
+  const dnf = r.finished ? null : so.dnf || 'Retired';
+  const pr = settlePromises(sto.promises, { round, pos, dnf, matePos: r.matePos });
+  sto.promises = pr.promises;
+  if (pr.rep) career.rep = clampRep(career.rep + pr.rep);
+  const order = cls.map((e) => ({
+    name: e.info.isPlayer ? 'You' : e.info.name, pos: e.pos,
+    contactWith: e.info.isPlayer ? (so.contacts || []) : [],
+    overtook: e.info.isPlayer ? (so.overtook || []) : (so.passedBy || []).includes(e.info.name) ? ['You'] : [],
+  }));
+  const ru = rivalryUpdate(sto.rivals, { round, player: 'You', order }, rng);
+  sto.rivals = ru.state;
+  const rival = sto.rivals.active;
+  const champ = driverStandings(career.season).findIndex((d) => d.name === 'You') + 1;
+  const ctx = {
+    driver: so.driver || `the ${TEAMS[career.team].short} driver`, team: TEAMS[career.team].short, mate: mateE ? mateE.info.name : null, track: def ? def.name : 'the circuit',
+    weather: so.weather || 'dry', pos, grid: r.grid, matePos: r.matePos, dnf, penalties: r.penalty ? [{ secs: r.penalty, reason: 'penalties' }] : [],
+    fastestLap: r.fastest, contact: so.contacts || [], rival, champPos: champ || null, round, rounds: career.season.calendar.length,
+    contractYears: career.contract ? career.contract.years : 2,
+  };
+  const head = storyHeadline(ctx, rng);
+  const press = pressConference(ctx, rng);
+  sto.press = { round, question: press.question, answers: press.answers };
+  // the garage's morale is worth a little money every race (or costs it)
+  const moraleBonus = Math.round(sto.team / 4);
+  career.budget = Math.max(0, career.budget + moraleBonus);
+  const news = head;
+  career.news = [head, ...pr.news, ...ru.news, ...(career.news || [])].slice(0, 6);
   // halfway through the season the bigger teams start asking about you (they will offer at the end if you keep it up)
   const half = Math.ceil(career.season.calendar.length / 2);
   if (career.season.round === half && career.season.calendar.length >= 2) {
@@ -701,7 +803,8 @@ export function settleRace(career, row, cls, opts = {}) {
   return {
     pos: me ? me.pos : null, met, prize, objective: obj.finish, fastest: !!fl, retainer, sponsor,
     rep: career.rep, repDelta: Math.round((career.rep - before) * 10) / 10, repLabel: repLabel(career.rep),
-    mate: mateE ? { name: mateE.info.name, pos: mateE.pos, ahead: pos < mateE.pos } : null, news,
+    mate: mateE ? { name: mateE.info.name, pos: mateE.pos, ahead: pos < mateE.pos } : null, news, facts, storyNews: [...pr.news, ...ru.news],
+    moraleBonus, press: !!sto.press,
   };
 }
 
@@ -893,6 +996,7 @@ export function sanitizeCareer(raw) {
       stats: Object.fromEntries(Object.keys(newStats()).map((k) => [k, cleanInt(raw.stats && raw.stats[k], 0, 99999)])),
       teamForm: TEAMS.map((t, i) => Math.round(n(Array.isArray(raw.teamForm) ? raw.teamForm[i] : 0, -0.18, 0.18, 0) * 1000) / 1000),
       news: (Array.isArray(raw.news) ? raw.news : []).slice(0, 6).map((x) => cleanStr(x, 160)),
+      story: cleanStory(raw.story),
     };
     // the market, contracts and goals (a career from before them gets the original grid and a two-year deal)
     const ct = raw.contract || {};

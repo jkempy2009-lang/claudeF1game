@@ -9,7 +9,7 @@ import { setupStats } from '../sim/setupstats.js';
 import { ACHIEVEMENTS, DEFAULT_STATS } from '../sim/achievements.js';
 import { LESSONS, sanitizeSchool } from '../sim/school.js';
 import { KEY_ACTIONS, keyLabel, mergeKeys, sanitizeKeys } from './input.js';
-import { CHAMP_CAL, DEFAULT_RULES, MAX_ROUNDS, careerLaps, sanitizeRules, sanitizeCareer, UPGRADE_KEYS, UPGRADE_INFO, UPGRADE_MAX, upgradeCost, objectiveFor, DISTANCES, driverStandings, constructorStandings, lapsFor, weatherFor, WEATHER_NAMES, WEATHER_IDS, cleanNumMap, cleanStrMap, cleanResults, teamMate, isSprintRound, isSprintSlot, SPRINT_MIN_RACE_LAPS, sprintDone, sprintLaps, SPRINT_POINTS, practiceBonus, PRACTICE_BONUS, sponsorOffers, SPONSOR_GOALS, repLabel, repNeeded, retainerFor, teamStrength, teamRank, raceObjective, careerMate, contractRetainer, contractTerms } from '../sim/career.js';
+import { CHAMP_CAL, DEFAULT_RULES, MAX_ROUNDS, careerLaps, sanitizeRules, sanitizeCareer, UPGRADE_KEYS, UPGRADE_INFO, UPGRADE_MAX, upgradeCost, objectiveFor, DISTANCES, driverStandings, constructorStandings, lapsFor, weatherFor, WEATHER_NAMES, WEATHER_IDS, cleanNumMap, cleanStrMap, cleanResults, teamMate, isSprintRound, isSprintSlot, SPRINT_MIN_RACE_LAPS, sprintDone, sprintLaps, SPRINT_POINTS, practiceBonus, PRACTICE_BONUS, sponsorOffers, SPONSOR_GOALS, moraleLabel, repLabel, repNeeded, retainerFor, teamStrength, teamRank, raceObjective, careerMate, contractRetainer, contractTerms } from '../sim/career.js';
 
 export const SAVE_KEY = 'apex-grand-prix.v1';
 
@@ -735,8 +735,11 @@ export class Menu {
     const d = r.repDelta || 0;
     return `<div class="panel"><h3>Career</h3>
       ${r.news ? `<div class="news top">${esc(r.news)}</div>` : ''}
+      ${r.facts ? `<div class="hint">${esc(r.facts)}</div>` : ''}
+      ${(r.storyNews || []).map((n) => `<div class="news">${esc(n)}</div>`).join('')}
       <div class="hint">Finished <b style="color:#fff">P${r.pos}</b> · team target P${r.objective} <b style="color:${r.met ? good : bad}">${r.met ? 'achieved' : 'missed'}</b>${r.mate ? ` · ${r.mate.ahead ? 'ahead of' : 'behind'} team-mate ${esc(r.mate.name)} (P${r.mate.pos})` : ''}</div>
-      <div class="hint" style="margin-top:.3rem">${money.join(' · ')} · budget now <b style="color:${gold}">${r.budget}</b></div>
+      <div class="hint" style="margin-top:.3rem">${money.join(' · ')}${r.moraleBonus ? ` · garage morale <b style="color:${r.moraleBonus > 0 ? gold : bad}">${r.moraleBonus > 0 ? '+' : ''}${r.moraleBonus}</b>` : ''} · budget now <b style="color:${gold}">${r.budget}</b></div>
+      ${r.press ? '<div class="hint" style="margin-top:.3rem">The press are waiting for you: answer their question in the career hub.</div>' : ''}
       <div class="hint" style="margin-top:.3rem">Reputation <b style="color:#fff">${(r.rep ?? 0).toFixed(0)}</b> (${esc(r.repLabel || '')}) <b style="color:${d > 0 ? good : d < 0 ? bad : '#9aa3ad'}">${d > 0 ? '▲ +' + d.toFixed(1) : d < 0 ? '▼ ' + d.toFixed(1) : 'unchanged'}</b></div></div>`;
   }
 
@@ -792,6 +795,29 @@ export class Menu {
       <div class="footer"><button class="btn sm" data-act="main">Main menu</button><div class="hint">Round ${Math.min(s.round + 1, s.calendar.length)} of ${s.calendar.length}</div><div class="row"><button class="btn sm" data-act="careerrules">Career rules</button><button class="btn sm" data-act="careerwipe" data-confirm="0">Abandon career</button></div></div></section>`;
   }
 
+  /** The question the press asked after the last race, with the answers to choose from (sim/story.js). */
+  pressPanel(c) {
+    const pr = c.story && c.story.press;
+    if (!pr) return '';
+    const TONE = { humble: 'Humble', confident: 'Confident', combative: 'Combative', diplomatic: 'Diplomatic' };
+    const fx = (e) => [e.rep ? `reputation ${e.rep > 0 ? '+' : ''}${e.rep}` : '', e.team ? `team ${e.team > 0 ? '+' : ''}${e.team}` : '', e.mate ? `team-mate ${e.mate > 0 ? '+' : ''}${e.mate}` : ''].filter(Boolean).join(' · ');
+    return `<h3 style="margin-top:1rem">Press conference</h3>
+      <div class="news top">${esc(pr.question)}</div>
+      <div class="press">${pr.answers.map((a, i) => `<button class="sponsor" data-press="${i}"><b>${esc(TONE[a.tone] || a.tone)}</b><span>${esc(a.text)}</span><i>${esc(fx(a.effect) || 'no effect')}${a.promise ? ` · a promise: ${esc({ win: 'a win', podium: 'a podium', points: 'points', beatMate: 'beat your team-mate' }[a.promise.kind])} by round ${a.promise.byRound}` : ''}</i></button>`).join('')}</div>
+      <div class="hint">Promises you make are remembered: keep one and the paddock rates you higher, break it and it costs more than it gained.</div>`;
+  }
+
+  /** Garage morale, the team-mate relationship, open promises and the current rival, for the hub. */
+  storyLine(c) {
+    const st = c.story;
+    if (!st) return '';
+    const WHAT = { win: 'a win', podium: 'a podium', points: 'points', beatMate: 'beating your team-mate' };
+    const prom = (st.promises || []).map((p) => `${WHAT[p.kind]} by round ${p.byRound}`);
+    const rival = st.rivals && st.rivals.active;
+    return `<div class="hint" style="margin-top:.5rem">Garage morale <b style="color:#fff">${esc(moraleLabel(st.team))}</b> · relationship with the team-mate <b style="color:#fff">${esc(moraleLabel(st.mate))}</b>${rival ? ` · rival <b style="color:#ff9f5a">${esc(rival)}</b>` : ''}</div>
+      ${prom.length ? `<div class="hint" style="margin-top:.3rem">You promised: <b style="color:#fff">${esc(prom.join(', '))}</b></div>` : ''}`;
+  }
+
   /** The coming race: circuit, forecast, the team's target, a sponsor's challenge to accept, and the other car of the team. */
   career_overview(c, s, team) {
     const id = s.calendar[s.round];
@@ -820,8 +846,10 @@ export class Menu {
           <div class="hint">The first driver you have to beat is the one in the same car.</div>
           <div class="h2hrow"><small>Races</small>${bar(h.race[0], h.race[1])}</div>
           <div class="h2hrow"><small>Qualifying</small>${bar(h.quali[0], h.quali[1])}</div>
+          ${this.storyLine(c)}
           <h3 style="margin-top:1rem">Season goals <small class="hint">from ${esc(team.short)}</small></h3>
           ${(c.goals || []).map((g) => `<div class="goal"><span>${esc(g.text)}</span><i>+${Math.round(g.pay * (c.rules.prize || 1))}</i></div>`).join('')}
+          ${this.pressPanel(c)}
           <h3 style="margin-top:1rem">Paddock news</h3>
           ${c.news.length ? c.news.slice(0, 4).map((n, i) => `<div class="news ${i ? '' : 'top'}">${esc(n)}</div>`).join('') : `<div class="hint">Your first race for ${esc(team.short)}. Nobody has written anything about you yet.</div>`}
         </div>
@@ -1066,6 +1094,7 @@ export class Menu {
     if (t.dataset.buy) return H.careerBuy(t.dataset.buy);
     if (t.dataset.ctab) { this.ctab = t.dataset.ctab; return this.rerender(); }
     if (t.dataset.sponsor) return H.careerSponsor(t.dataset.sponsor);
+    if (t.dataset.press != null) return H.careerPress(+t.dataset.press);
     if (t.dataset.preset) {
       this.config.assists = { ...ASSIST_PRESETS[t.dataset.preset] };
       this.persist();

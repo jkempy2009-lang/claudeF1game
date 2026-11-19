@@ -27,6 +27,7 @@ const suites = [
   ['car model geometry', 'tests/carshape.mjs'],
   ['formation lap', 'tests/formation.mjs'],
   ['barriers and circuits', 'tests/walls.mjs'],
+  ['career story text (press, headlines, rivalries, radio)', 'tools/story-samples.mjs', 'quiet'],
   ['rival decision matrix', 'tests/brain.mjs'],
   ['career rules', 'tests/careerrules.mjs'],
   ['tyre model', 'tests/tyres.mjs'],

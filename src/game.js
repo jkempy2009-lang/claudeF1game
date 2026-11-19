@@ -21,6 +21,7 @@ import { AudioEngine } from './ui/audio.js';
 import { HUD } from './ui/hud.js';
 import { Menu, loadSave, persist, sanitizeConfig } from './ui/menu.js';
 import * as Career from './sim/career.js';
+import { engineerRadio, resetRadio } from './sim/story.js';
 import { rivalLap } from './sim/pacetable.js';
 import { recordSession, ACHIEVEMENTS } from './sim/achievements.js';
 import { clamp, formatTime, lerp } from './util/math.js';
@@ -191,6 +192,7 @@ class Game {
       careerRace: (q) => this.careerRace(q),
       careerBuy: (k) => this.careerBuy(k),
       careerSponsor: (id) => this.careerSponsor(id),
+      careerPress: (i) => this.careerPress(i),
       careerNext: (t) => this.careerNext(t),
       careerAbandon: () => this.careerAbandon(),
       nextRound: () => this.nextRound(),
@@ -412,6 +414,20 @@ class Game {
     if (!c) return;
     Career.chooseSponsor(c, c.sponsor === id ? null : id);
     this.audio.ui('good');
+    persist(this.save);
+    this.menu.show('career_hub');
+  }
+
+  /** Answers the press-conference question waiting in the career hub. */
+  careerPress(i) {
+    const c = this.save.career;
+    if (!c) return;
+    const r = Career.answerPress(c, i);
+    if (r) {
+      const bits = [r.rep ? `reputation ${r.rep > 0 ? '+' : ''}${r.rep}` : '', r.team ? `garage morale ${r.team > 0 ? '+' : ''}${r.team}` : '', r.mate ? `team-mate ${r.mate > 0 ? '+' : ''}${r.mate}` : ''].filter(Boolean);
+      this.toast(bits.length ? bits.join(' · ') : 'Noted');
+      this.audio.ui('click');
+    }
     persist(this.save);
     this.menu.show('career_hub');
   }
@@ -1296,6 +1312,7 @@ class Game {
     // HUD + audio
     this.hud.update(race, player, pin, performance.now());
     this.radioTick(s, dt);
+    this.storyTick(s, dt);
     this.schoolTick(s, dt);
     // reuse the audio source records every frame (no per-frame allocation)
     const others = s._others || (s._others = []);
@@ -1348,7 +1365,10 @@ class Game {
         case 'lightsOut':
           hud.setLights(0, true);
           this.audio.go();
-          if (race.opt.mode === 'race') hud.message('Go go go!', 'good', '', 1.6);
+          if (race.opt.mode === 'race') {
+            hud.message('Go go go!', 'good', '', 1.6);
+            if (!s.cfg.spectator) { const l = engineerRadio('lightsOut', {}); if (l) setTimeout(() => this.state === 'race' && hud.radio(l, 3), 1500); }
+          }
           break;
         case 'lap':
           if (e.car === player && s.practice) {
@@ -1368,6 +1388,7 @@ class Game {
           break;
         case 'fastest':
           if (e.car !== player && race.opt.mode === 'race') hud.message(`Fastest lap · ${e.car.info.code}`, 'purple', formatTime(e.time), 2.5);
+          else if (e.car === player && race.opt.mode === 'race' && race.totalLaps > 1) { const l = engineerRadio('fastestLap', {}); if (l) hud.radio(l, 3); }
           break;
         case 'penalty':
           if (e.car === player) {
@@ -1476,6 +1497,7 @@ class Game {
             effects.burst(e.x, 0.5, -e.y, Math.min(60, 10 + e.speed * 3), Math.min(18, 4 + e.speed));
             if (d < 90) this.audio.thud(clamp(e.speed / 20, 0.15, 1) * (1 - d / 100));
           }
+          if (e.other && (e.car === player || e.other === player) && s.story) s.story.contacts.add((e.car === player ? e.other : e.car).info.name);
           if (e.car === player || e.other === player) {
             camRig.impact = Math.max(camRig.impact, clamp(e.speed / 25, 0.1, 1));
             if (race.opt.damage && e.speed > 6) hud.message('Contact', 'bad', e.wall ? 'Barrier impact' : 'Collision with ' + (e.car === player ? e.other : e.car).info.code, 2);
@@ -1517,7 +1539,11 @@ class Game {
           hud.message('False start', 'bad', '+10 s penalty', 3);
           break;
         case 'finish':
-          if (e.car === player && race.opt.mode === 'race') this.startFinishScene(s, e);
+          if (e.car === player && race.opt.mode === 'race') {
+            this.startFinishScene(s, e);
+            const l = player.rs.pos === 1 ? engineerRadio('win', {}) : engineerRadio('finish', { pos: player.rs.pos });
+            if (l && !s.cfg.spectator) hud.radio(l, 5);
+          }
           else if (e.car === player && race.isQuali) this.startQualiEnd(s);
           break;
         case 'ghost':
@@ -2039,6 +2065,35 @@ class Game {
     this.audio.ui('good');
   }
 
+  /**
+   * What the career's story needs from a race (who you touched, passed and were passed by), and the engineer's lines from
+   * sim/story.js for the moments the race radio did not cover: the start, places won and lost (sparingly), the last lap,
+   * your fastest lap and the flag.
+   */
+  storyTick(s, dt) {
+    const race = s.race;
+    if (race.opt.mode !== 'race' || s.cfg.spectator) return;
+    const st = s.story || (s.story = { contacts: new Set(), overtook: new Set(), passedBy: new Set(), lastPos: 0, radioT: 0, lastLap: false });
+    if (!s.storyReset) { s.storyReset = true; resetRadio(); }
+    st.radioT += dt;
+    if (race.phase !== 'racing') return;
+    const p = s.player, rs = p.rs;
+    const say = (ev, ctx, secs = 4) => { const line = engineerRadio(ev, ctx); if (line) this.hud.radio(line, secs); };
+    if (st.lastPos && rs.pos !== st.lastPos && !rs.finished && !rs.inPitLane) {
+      if (rs.pos < st.lastPos && p.behind) st.overtook.add(p.behind.info.name);
+      else if (rs.pos > st.lastPos && p.ahead && !p.ahead.rs.inPitLane) st.passedBy.add(p.ahead.info.name);
+      if (st.radioT > 30 && race.time - race.t0 > 20 && race.sc.state === 'none') {
+        st.radioT = 0;
+        say(rs.pos < st.lastPos ? 'positionGained' : 'positionLost', { pos: rs.pos }, 3);
+      }
+    }
+    st.lastPos = rs.pos;
+    if (!st.lastLap && race.totalLaps > 1 && rs.laps === race.totalLaps - 1) {
+      st.lastLap = true;
+      say('lastLap', {}, 4);
+    }
+  }
+
   radioTick(s, dt) {
     s.radioT += dt;
     if (s.radioT < 8 || s.race.phase !== 'racing' || s.race.opt.mode !== 'race') return;
@@ -2156,7 +2211,16 @@ class Game {
       s.careerRecorded = true;
       const c = this.save.career;
       const row = Career.recordRound(c.season, cls);
-      careerRes = Career.settleRace(c, row, cls, { qualified: !!cfg.qualiTimes });
+      const so = s.story || { contacts: new Set(), overtook: new Set(), passedBy: new Set() };
+      const code = this.save.settings.driverCode || 'YOU';
+      careerRes = Career.settleRace(c, row, cls, {
+        qualified: !!cfg.qualiTimes,
+        story: {
+          contacts: [...so.contacts].slice(0, 4), overtook: [...so.overtook].slice(0, 8), passedBy: [...so.passedBy].slice(0, 8),
+          weather: cfg.weather || 'dry', dnf: player.rs.dnf || null,
+          driver: code !== 'YOU' ? code : `the ${TEAMS[c.team].short} #${this.save.settings.driverNumber || 7}`,
+        },
+      });
       careerRes.budget = c.budget;
       if (Career.seasonDone(c.season)) {
         const rc = Career.endSeason(c);

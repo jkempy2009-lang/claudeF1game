@@ -449,3 +449,7 @@ body.spectating #dash, body.spectating #tyres, body.spectating #timing, body.spe
 #podium .pstep.p1 b { color: #ffd24a; font-size: 2rem; }
 #podium .pstep small { color: var(--dim); }
 #podium .phint { color: var(--dim); font-size: 0.8rem; }
+/* press conference answers (career hub): the effect sits under the answer, not beside it */
+.press { display: grid; gap: 0.4rem; margin: 0.4rem 0; }
+.press .sponsor { grid-template-columns: 1fr; }
+.press .sponsor i { grid-column: 1; grid-row: auto; font-size: 0.78rem; font-weight: 600; color: #9fc3ff; }
