@@ -1,4 +1,5 @@
 import { wetGripFactor } from './carspec.js';
+import { BRAKE_FADE } from './car.js';
 import { clamp, lerp, loopDelta, mod, smoothstep, wrapAngle, mulberry32 } from '../util/math.js';
 import { RaceBrain, RC_TUNE } from './racecraft.js';
 
@@ -307,7 +308,7 @@ export class AIDriver {
     {
       // cold carbon bites less and cooked carbon fades: brake for what the discs can deliver right now
       const bt = car.brakeTemp;
-      const brakeEff = bt ? (0.86 + 0.14 * smoothstep(120, 420, (bt[0] + bt[1] + bt[2] + bt[3]) / 4)) * (1 - 0.3 * smoothstep(880, 1150, Math.max(bt[0], bt[1], bt[2], bt[3]))) : 1;
+      const brakeEff = bt ? (0.86 + 0.14 * smoothstep(120, 420, (bt[0] + bt[1] + bt[2] + bt[3]) / 4)) * (1 - 0.3 * smoothstep(BRAKE_FADE[0], BRAKE_FADE[1], Math.max(bt[0], bt[1], bt[2], bt[3]))) : 1;
       // over a crest the car is light and stops less well, in a compression better; gravity along the slope adds or takes away
       const gzK = 1 + ((car.gLoad || 1) - 1) / (1 + (V / 46) * (V / 46));
       const capBrake = Math.max(8, prof.env.brakeDecel(Math.max(V, 5), 0.92) * this.gripAdapt * this.gripAdapt * brakeEff * gzK + 0.8 * 9.81 * (car.trackSlope || 0));

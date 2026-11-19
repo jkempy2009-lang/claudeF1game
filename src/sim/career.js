@@ -886,6 +886,11 @@ export function nextSeason(career, teamIdx = career.team) {
   } else if (!career.contract || career.contract.years <= 0) {
     career.contract = rc.renewal || { years: 1, pay: 0.9 }; // kept on (or nobody else wanted you): a one-year deal
   }
+  // a new season: promises and the last question are history; a new garage starts neutral, a new team-mate a stranger
+  const sto = career.story || (career.story = newStory());
+  sto.promises = [];
+  sto.press = null;
+  if (teamIdx !== rc.team && rc.team != null) { sto.team = 0; sto.mate = 0; }
   career.interest = [];
   career.seasonNo++;
   career.h2h = newH2H();

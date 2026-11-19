@@ -44,7 +44,7 @@ void main() {
 }`;
 const SKY_FRAG = /* glsl */ `
 varying vec3 vDir;
-uniform vec3 top; uniform vec3 horizon; uniform vec3 ground; uniform vec3 sunDir; uniform vec3 sunColor; uniform float time; uniform float cloud; uniform float night;
+uniform vec3 top; uniform vec3 horizon; uniform vec3 ground; uniform vec3 sunDir; uniform vec3 sunColor; uniform float time; uniform float cloud; uniform float night; uniform float flash;
 float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float noise(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);
   return mix(mix(hash(i), hash(i+vec2(1,0)), f.x), mix(hash(i+vec2(0,1)), hash(i+vec2(1,1)), f.x), f.y); }
@@ -78,6 +78,10 @@ void main() {
     cc = mix(cc, col, 0.5 * exp(-h * 7.0)); // clouds fade into the haze far away
     col = mix(col, cc, m * (0.92 - 0.25 * (1.0 - smoothstep(0.0, 0.3, h))));
   }
+  // lightning in a storm: the cloud deck lights up from inside (idea from an outside model's sky draft)
+  col += vec3(0.82, 0.86, 1.0) * flash * (0.25 + 0.75 * smoothstep(-0.02, 0.35, h));
+  // dither: a dusk gradient across a few 8-bit steps bands without it
+  col += (hash(gl_FragCoord.xy + fract(time)) - 0.5) / 255.0;
   gl_FragColor = vec4(col, 1.0);
 }`;
 
@@ -97,6 +101,7 @@ function makeSky(theme) {
       time: { value: 0 },
       cloud: { value: theme.cloud ?? 0.3 },
       night: { value: 0 },
+      flash: { value: 0 },
     },
   });
   const mesh = new THREE.Mesh(new THREE.SphereGeometry(6000, 32, 16), mat);
@@ -270,6 +275,7 @@ export class World {
     this.sunDir.set(hx * k, elev, hz * k).normalize();
     u.sunDir.value.copy(this.sunDir);
     u.cloud.value = clamp(b.cloud + 0.8 * rain, 0, 1.2);
+    this.stormRain = rain;
     // night: deep blue sky with stars, a pale moon, and the track lit by floodlights
     const nTop = this._tmpF || (this._tmpF = new THREE.Color('#050a1e')), nHor = this._tmpG || (this._tmpG = new THREE.Color('#1b2a4e')), nMoon = this._tmpH || (this._tmpH = new THREE.Color('#9db8ff'));
     u.top.value.lerp(nTop, night);
@@ -280,6 +286,7 @@ export class World {
     this.sun.color.copy(u.sunColor.value);
     this.sun.intensity = b.sunInt * (1 - 0.72 * dusk) * (1 - 0.78 * rain) * (1 - 0.88 * night);
     this.hemi.intensity = b.hemiInt * (1 - 0.5 * dusk) * (1 - 0.25 * rain) * (1 - 0.52 * night);
+    if (this.lightning) this.lightning.hemi = 0; // the flash adds on top of this new base (World.update)
     this.hemi.color.copy(this._hemiSky || (this._hemiSky = this.hemi.color.clone())).lerp(nHor, night * 0.8);
     if (this.nightMats) {
       this.nightMats.glow.opacity = clamp(night * 1.15, 0, 1);
@@ -1637,6 +1644,20 @@ export class World {
 
   update(dt, time) {
     this.sky.material.uniforms.time.value = time;
+    // lightning in heavy rain: now and then a flash, often a second one just after; the hemisphere light flickers with it
+    const L = this.lightning || (this.lightning = { t: 0, next: 0, k: 0, hemi: 0 });
+    L.t += dt;
+    if ((this.stormRain || 0) > 0.65 && L.t > L.next) {
+      L.k = 1;
+      L.next = L.t + (Math.random() < 0.3 ? 0.18 : 6 + Math.random() * 14);
+    }
+    L.k = Math.max(0, L.k - dt * 7);
+    this.sky.material.uniforms.flash.value = L.k * L.k * 0.9;
+    if (this.hemi) {
+      if (L.hemi) this.hemi.intensity -= L.hemi;
+      L.hemi = L.k * L.k * 0.8;
+      this.hemi.intensity += L.hemi;
+    }
     if (this.animated) for (const f of this.animated) f(dt, time);
     setLedPanels(this, this._led || 'none', time);
     if (this.crowdMat && this.crowdMat.map) this.crowdMat.map.offset.y = this.crowdExcite ? Math.sin(time * 14) * 0.006 * this.crowdExcite : 0;

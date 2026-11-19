@@ -377,6 +377,7 @@ export const TRACK_DEFS = [
     name: 'Sakura Ridge Circuit',
     country: 'Highlands',
     blurb: 'Flowing esses over a wooded ridge: commit through the fast sweepers, brake for the hairpin, repeat.',
+    brakeDucts: 1.2, // downhill braking zones
     width: 14,
     smooth: 9,
     scale: 0.86,
@@ -415,6 +416,7 @@ export const TRACK_DEFS = [
     name: 'Circuit de la Bastide',
     country: 'Riviera',
     blurb: 'Walls everywhere on a medieval harbour town: short, tight and unforgiving. High downforce, no room for error.',
+    brakeDucts: 1.25, // short, stop-start street circuit
     width: 11.5,
     smooth: 7,
     scale: 0.6,
@@ -486,6 +488,7 @@ export const TRACK_DEFS = [
     name: 'Serpentine Pass',
     country: 'High Sierra',
     blurb: 'A mountain road made into a circuit: a 70-metre climb through switchback esses, a blind crest and a plunging descent. Guard rails close on both sides.',
+    brakeDucts: 1.3, // the descent: teams would run their biggest brake ducts here
     width: 12.5,
     smooth: 7,
     scale: 1,
@@ -566,6 +569,7 @@ export const TRACK_DEFS = [
     name: 'Kasbah Streets',
     country: 'Old Medina',
     blurb: 'The narrowest circuit on the calendar: walls within an arm\'s length, right-angle corners and a steep climb through the old town. One mistake and it is over.',
+    brakeDucts: 1.5, // stop-start at walking pace between walls: the biggest ducts
     width: 10,
     smooth: 6,
     scale: 1,
@@ -601,44 +605,46 @@ export const TRACK_DEFS = [
       hills: 0.4,
     },
   },
-  // ---- five circuits designed by an outside model (6.2 Sol) and repaired here: the start lines sat inside hairpins and two
-  // layouts doubled back on themselves; see CHANGELOG
+  // ---- five circuits designed by an outside model (6.2 Sol), revised here: Ironwood and Aurora Frost doubled back on
+  // themselves into the start (they would not build) and were rerouted, the start straights of Neon and Scarp were lengthened,
+  // and the shallow kinks, all drawn with 20-40 m radii, were opened into fast sweepers (see CHANGELOG)
 
   { id: 'neon', setup: { front: 7, rear: 6 }, name: 'Neon Crescent', country: 'Lumen District',
-    blurb: 'A floodlit city loop where the racing line threads between illuminated towers and a fast riverside return.',
+    blurb: 'A dusk-lit city loop between the towers: a long main straight into a tight first corner, a slow sector of right angles in the old blocks, then the riverside blast that ends in a hairpin onto the line. Walls everywhere, within half a metre.',
+    brakeDucts: 1.25, // a stop-start city sector
     width: 13, smooth: 8, scale: 1, elevation: [[1, 4.5, 0.4], [2, 2.2, 1.7]], hills: [[1180, 250, 3], [3590, 300, -4]],
     runoff: { mode: 'street', gap: 0.3, kerbs: true }, kerbWidth: 0.8, lineMargin: 2.2,
     points: [[0,0,34],[1050,0,30],[1300,260,55],[1300,720,28],[850,980,110],[300,980,55],[80,720,55],[80,300,24],[-220,180,30],[-220,-180,24],[120,-300,250],[520,-300,55],[700,-120,24]],
-    start: [0, 620], pit: { in: -170, out: 240, rampIn: 60, rampOut: 70, boxStart: 12, boxSpacing: 14 },
+    start: [0, 300], pit: { in: -170, out: 240, rampIn: 60, rampOut: 70, boxStart: 12, boxSpacing: 14 },
     theme: { sky: { top: '#101d45', horizon: '#d55f92', sun: [0.25, 0.65, 0.35], sunColor: '#ffc1ad' }, fog: '#46385c', fogFar: 1800, grass: ['#263b38', '#304b43'], trees: { density: 0.015, kind: 'broadleaf' }, buildings: true, water: true, stands: 4, hills: 0.1 } },
   { id: 'meridian', setup: { front: 3, rear: 2 }, name: 'Meridian Airfield', country: 'West Meridian',
-    blurb: 'A former aerospace test ground with brutal runway acceleration zones and technical apron corners.',
+    blurb: 'An old test airfield: a two-kilometre runway, the fastest straight on the calendar, flat-out kinks across the apron and a handful of slow corners where every pass happens. Flat, open and windswept.',
     width: 16, smooth: 10, scale: 1, elevation: [[1, 3.2, 0.2], [3, 1.1, 2.1]], hills: [[2410, 300, 2], [4200, 420, -3]],
     runoff: { mode: 'modern', cornerRoom: 18, grass: 14, kerbs: true }, kerbWidth: 0.9, lineMargin: 2.4,
     points: [[-1000,0,42],[1000,0,38],[1180,260,28],[1000,620,55],[500,780,250],[-300,780,250],[-900,620,55],[-1120,300,30]],
     start: [0, 1000], pit: { in: -170, out: 240, rampIn: 60, rampOut: 70, boxStart: 12, boxSpacing: 14 },
-    theme: { sky: { top: '#4b8fc4', horizon: '#e6d2aa', sun: [0.55, 0.7, 0.25], sunColor: '#fff0c7' }, fog: '#d8cdb9', fogFar: 2400, grass: ['#71804f', '#84935a'], trees: { density: 0.025, kind: 'broadleaf' }, buildings: true, water: false, stands: 3, hills: 0.2 } },
+    theme: { sky: { top: '#4b8fc4', horizon: '#e6d2aa', sun: [0.55, 0.7, 0.25], sunColor: '#fff0c7' }, fog: '#d8cdb9', fogFar: 2400, grass: ['#71804f', '#84935a'], trees: { density: 0.025, kind: 'broadleaf' }, buildings: false, water: false, stands: 3, hills: 0.2 } },
   { id: 'scarp', setup: { front: 8, rear: 8 }, name: 'Azure Scarp', country: 'Cape Orison',
-    blurb: 'A cliff-top coastal circuit with a tunnel-like rock cut, blind crests and a wind-exposed descent.',
+    blurb: 'Cliff-top coast road: a sequence of fast sweepers along the edge, a plunge of 30 m at 11 % towards the sea, and two hairpins at the end of the lap that decide the race.',
     width: 12, smooth: 7, scale: 1, elevation: [[1, 10, 0.7], [2, 5, 2.2], [3, 2.5, 0.1]], hills: [[980, 360, 8], [2770, 320, -9], [4210, 280, 6]],
     runoff: { mode: 'mixed', cornerRoom: 14, grass: 10, kerbs: true }, kerbWidth: 0.85, lineMargin: 2.1,
     points: [[0,0,36],[960,0,32],[1140,240,26],[1020,520,55],[600,700,110],[260,680,55],[60,500,55],[-220,470,55],[-430,650,55],[-700,600,55],[-820,340,55],[-720,80,55],[-400,-60,250],[-140,-250,55],[300,-250,110],[520,-130,26]],
-    start: [0, 540], pit: { in: -170, out: 240, rampIn: 60, rampOut: 70, boxStart: 12, boxSpacing: 14 },
+    start: [0, 270], pit: { in: -170, out: 240, rampIn: 60, rampOut: 70, boxStart: 12, boxSpacing: 14 },
     theme: { sky: { top: '#4f9fd5', horizon: '#f1cda8', sun: [0.7, 0.55, 0.3], sunColor: '#ffe1b0' }, fog: '#bdd0ce', fogFar: 1700, grass: ['#6f916b', '#84a476'], trees: { density: 0.03, kind: 'broadleaf' }, buildings: false, water: true, stands: 2, hills: 0.7 } },
   { id: 'ironwood', setup: { front: 7, rear: 7 }, name: 'Ironwood Ascent', country: 'Veyr Forest',
-    blurb: 'A forest venue built around one long uphill blast, a blind ridge and a plunging sequence of linked bends.',
+    blurb: 'A pine forest on a ridge: the main straight climbs to a fast first sector along the top, then the road falls 30 m through linked bends to two slow corners in the valley, the hardest braking of the lap.',
     width: 14, smooth: 9, scale: 1, elevation: [[1, 15, 0.3], [2, 6, 1.8], [4, 2, 2.7]], hills: [[1170, 500, 10], [3110, 350, -11]],
     runoff: { mode: 'classic', cornerRoom: 12, grass: 16, kerbs: true }, kerbWidth: 0.85, lineMargin: 2.3,
     points: [[0,0,40],[780,0,36],[950,240,55],[850,520,55],[590,700,110],[240,760,110],[-80,670,250],[-320,500,55],[-400,210,110],[-600,30,26],[-540,-240,24],[-230,-350,250],[220,-350,30]],
     start: [0, 300], pit: { in: -170, out: 240, rampIn: 60, rampOut: 70, boxStart: 12, boxSpacing: 14 },
     theme: { sky: { top: '#5d88b2', horizon: '#d8d8c2', sun: [0.5, 0.7, 0.2], sunColor: '#fff0c8' }, fog: '#b8c3b8', fogFar: 1350, grass: ['#355d3d', '#47734a'], trees: { density: 0.09, kind: 'pine' }, buildings: false, water: false, stands: 3, hills: 0.8 } },
   { id: 'frost', setup: { front: 6, rear: 7 }, name: 'Aurora Frost Circuit', country: 'Norrvale',
-    blurb: 'A cold-weather circuit of polished ice-side run-off, long-radius corners and a tightening final sector.',
+    blurb: 'A northern circuit by a frozen lake: long, open sweepers taken flat in the cold, then a tightening final sector into a slow corner and a right angle onto the straight.',
     width: 15, smooth: 9, scale: 1, elevation: [[1, 8, 1.1], [2, 4, 0.3], [3, 2, 2.5]], hills: [[980, 300, 5], [3200, 360, -6]],
     runoff: { mode: 'modern', cornerRoom: 17, grass: 12, kerbs: true }, kerbWidth: 0.9, lineMargin: 2.4,
     points: [[0,0,38],[780,0,34],[960,240,24],[860,540,55],[560,700,110],[200,750,55],[-80,600,55],[-330,640,55],[-600,480,110],[-720,220,55],[-600,-40,55],[-320,-190,110],[0,-220,22]],
     start: [0, 270], pit: { in: -170, out: 240, rampIn: 60, rampOut: 70, boxStart: 12, boxSpacing: 14 },
-    theme: { sky: { top: '#263f72', horizon: '#d8d6dc', sun: [0.35, 0.65, 0.2], sunColor: '#d8e8ff' }, fog: '#c8d5df', fogFar: 1600, grass: ['#7e958d', '#9eafa5'], trees: { density: 0.05, kind: 'pine' }, buildings: true, water: true, stands: 3, hills: 0.55 } },
+    theme: { sky: { top: '#263f72', horizon: '#d8d6dc', sun: [0.35, 0.65, 0.2], sunColor: '#d8e8ff' }, fog: '#d6e0e8', fogFar: 1600, grass: ['#e4ebef', '#d3dde3'], trees: { density: 0.05, kind: 'pine' }, buildings: true, water: true, stands: 3, hills: 0.55 } },
 ];
 
 export const TRACK_BY_ID = Object.fromEntries(TRACK_DEFS.map((t) => [t.id, t]));

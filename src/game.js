@@ -2138,7 +2138,7 @@ class Game {
       this.hud.radio(`${p.behind.info.code} is right behind, ${(p.behind.gapAhead).toFixed(1)} seconds. Defend.`, 4);
     } else if (!p.behind || (p.behind.gapAhead ?? 9) > 2) s._behindCalled = false;
     const bmax = Math.max(p.brakeTemp[0], p.brakeTemp[1], p.brakeTemp[2], p.brakeTemp[3]);
-    if (bmax > 1020 && !s._brakeCalled) {
+    if (bmax > 1100 && !s._brakeCalled) {
       s._brakeCalled = true;
       this.hud.radio('Brake temperatures are very high and the pedal will fade. Lift and coast earlier to let them cool.', 6);
     } else if (bmax < 800) s._brakeCalled = false;

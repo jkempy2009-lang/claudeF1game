@@ -1,6 +1,6 @@
 # Apex Grand Prix
 
-A 3D Formula-style racing game that runs in the browser. Twenty cars, twelve original circuits, a physics model built from first principles (not a canned arcade handling model), and an AI field with adjustable difficulty.
+A 3D Formula-style racing game that runs in the browser. Twenty cars, twenty original circuits, a physics model built from first principles (not a canned arcade handling model), and an AI field with adjustable difficulty.
 
 **Play:** open `dist/apex-grand-prix.html` (one self-contained file: download it and double-click it, no server or install needed; saves are kept in that browser), or serve `docs/` with any static server (GitHub Pages works: set the source to the `docs` folder).
 
@@ -37,6 +37,11 @@ npm run test:leak    # browser: GPU resources across repeated sessions
 | Serpentine Pass | 5.6 km | A mountain road: a 73 m climb through switchback esses, a blind crest and a plunging descent, guard rails on both sides |
 | Vortex Ring | 4.9 km | Rollercoaster: 12° banked bowls, crests down both straights and a corkscrew that drops off a crest |
 | Kasbah Streets | 4.3 km | The narrowest circuit: 10 m wide, walls a quarter of a metre from the track, right-angle corners, 10 % grades |
+| Neon Crescent | 5.3 km | Dusk-lit city loop, walls half a metre away, a slow sector of right angles, a riverside blast into a hairpin onto the straight |
+| Meridian Airfield | 5.3 km | An old test airfield: a 2 km runway (the fastest straight of all), flat-out kinks, a few slow corners where the passes happen |
+| Azure Scarp | 5.3 km | Cliff-top coast road: fast sweepers along the edge, a 30 m plunge at 11 %, two hairpins to finish the lap |
+| Ironwood Ascent | 4.6 km | Pine forest: the straight climbs to a fast top sector, then a 30 m fall through linked bends to the heaviest braking of the lap |
+| Aurora Frost Circuit | 4.4 km | Snow and a frozen lake: long sweepers taken flat, a tightening final sector |
 
 **Racing** – standing start with lights, 10 fictional teams x 2 drivers, live timing tower with real time gaps, sector timing (purple/green), best-lap delta, DRS (detection line + <1 s rule, painted lines and signs), ERS deploy/harvest with a boost button and three ERS modes, fuel mix, live brake bias, slipstream and dirty air, damage (wings, bendable and crumpling sidepods, floor, punctures), tyre compounds (including **Wet**) with a temperature window, wear and lock-up flat spots, mandatory-stop option, pit lane with speed limiter and an **interactive pit stop** (time your presses on the four wheel nuts: 2.5 s if perfect), track-limits warnings, collision penalties, pit speeding penalties, **safety car**, marshal recovery, fast-forward to the final classification.
 
@@ -55,20 +60,25 @@ Reference clean-lap pace of the best car at each level (medium tyres; `node tool
 | | Rookie | Amateur | Pro | Elite | Legend | F1 |
 |---|---|---|---|---|---|---|
 | Autodromo del Vettore | 1:21.633 | 1:15.829 | 1:11.129 | 1:07.337 | 1:05.417 | 1:04.671 |
-| Circuit de la Rade | 1:14.533 | 1:09.742 | 1:05.246 | 1:01.467 | 0:59.146 | 0:58.042 |
+| Circuit de la Rade | 1:14.533 | 1:09.742 | 1:05.225 | 1:01.425 | 0:59.158 | 0:58.021 |
 | Northfield Grand Prix Circuit | 1:30.442 | 1:23.912 | 1:18.592 | 1:14.308 | 1:12.662 | 1:11.800 |
 | Circuit des Hautes-Fagnes | 1:28.092 | 1:21.600 | 1:16.321 | 1:12.221 | 1:10.683 | 1:09.975 |
 | Autódromo Costa Azul | 1:30.983 | 1:24.275 | 1:18.600 | 1:14.346 | 1:12.679 | 1:11.758 |
 | Monte Aurora Ring | 1:17.892 | 1:12.175 | 1:07.296 | 1:03.546 | 1:01.779 | 1:00.942 |
 | Mirage International Circuit | 1:33.821 | 1:26.887 | 1:20.892 | 1:16.383 | 1:14.308 | 1:13.362 |
-| Parc Lumière | 1:37.129 | 1:29.833 | 1:23.742 | 1:18.742 | 1:15.833 | 1:14.604 |
-| Porto Vecchio Harbour Circuit | 1:34.446 | 1:27.667 | 1:21.796 | 1:17.012 | 1:14.254 | 1:13.162 |
+| Parc Lumière | 1:37.129 | 1:29.833 | 1:23.742 | 1:18.742 | 1:15.846 | 1:14.583 |
+| Porto Vecchio Harbour Circuit | 1:34.446 | 1:27.667 | 1:21.742 | 1:16.971 | 1:14.267 | 1:13.150 |
 | Sakura Ridge Circuit | 1:51.962 | 1:43.596 | 1:36.342 | 1:31.175 | 1:29.371 | 1:28.312 |
-| Circuit de la Bastide | 1:23.325 | 1:17.492 | 1:12.267 | 1:08.521 | 1:07.025 | 1:06.158 |
+| Circuit de la Bastide | 1:23.325 | 1:17.492 | 1:12.267 | 1:08.529 | 1:07.033 | 1:06.179 |
 | Caldera Speedway | 1:21.687 | 1:15.854 | 1:10.896 | 1:07.237 | 1:05.550 | 1:04.917 |
-| Serpentine Pass | 2:03.775 | 1:54.067 | 1:45.908 | 1:40.625 | 1:38.750 | 1:37.612 |
+| Serpentine Pass | 2:03.775 | 1:54.067 | 1:45.908 | 1:40.625 | 1:38.754 | 1:37.592 |
 | Vortex Ring | 1:26.042 | 1:19.567 | 1:14.400 | 1:10.379 | 1:08.587 | 1:07.767 |
-| Kasbah Streets | 1:45.937 | 1:38.171 | 1:31.075 | 1:27.129 | 1:25.296 | 1:24.183 |
+| Kasbah Streets | 1:45.937 | 1:38.171 | 1:31.075 | 1:27.125 | 1:25.325 | 1:24.196 |
+| Neon Crescent | 1:52.754 | 1:44.042 | 1:36.704 | 1:31.925 | 1:30.187 | 1:29.179 |
+| Meridian Airfield | 1:30.429 | 1:23.796 | 1:18.437 | 1:14.087 | 1:12.375 | 1:11.771 |
+| Azure Scarp | 1:47.896 | 1:39.775 | 1:32.846 | 1:28.200 | 1:26.517 | 1:25.504 |
+| Ironwood Ascent | 1:28.987 | 1:22.700 | 1:17.221 | 1:13.287 | 1:11.900 | 1:11.237 |
+| Aurora Frost Circuit | 1:25.408 | 1:19.362 | 1:14.217 | 1:10.308 | 1:08.933 | 1:08.150 |
 
 **Formation lap** – an optional slow lap before the lights: the field weaves and brakes to keep tyres and brakes hot, then lines up in its grid boxes.
 

@@ -17,6 +17,8 @@ export const TUNE = { heat: 0.1, coolBase: 0.0011, coolSpeed: 0.00007 };
  * marbles: off-line rubber pick-up; banking: road camber; brakes2: surface/core brake temperatures and glazing
  * fuelCg: CG shift with fuel burn and fuel slosh; reliability: component stress and failures; clutch: launch clutch
  */
+/** Where carbon brakes start to fade and where they lose the most (C), with PHYS.brakes2. */
+export const BRAKE_FADE = [1050, 1300];
 export const PHYS = { suspension: true, marbles: true, banking: true, brakes2: true, fuelCg: true, reliability: true, clutch: true, flatHop: true, ebControl: true };
 // suspension (per corner): spring rate N/m, damper Ns/m, static ride height m
 const K_SPRING = [180000, 180000, 160000, 160000];
@@ -40,6 +42,8 @@ export class Car {
     this.rand = mulberry32(0x5eed + 7919 * (Car.count = (Car.count || 0) + 1)); // punctures and the like: deterministic, so a replayed race is the same race
     this.spec = spec;
     this.track = track;
+    // brake cooling ducts sized for the circuit, as teams do (bigger at heavy-braking venues: TRACK_DEFS brakeDucts)
+    this.brakeDucts = (track && track.def && track.def.brakeDucts) || 1;
     this.assist = { abs: true, tc: 2, steer: 1, autoGear: true, stability: 1 };
     this.wheelPos = [
       [0, 0],
@@ -563,9 +567,10 @@ export class Car {
       // brakes (+ABS)
       let Tb = front ? brk * sp.brakeTorque * sp.brakeBias * 0.5 : brk * sp.brakeTorque * (1 - sp.brakeBias) * 0.5;
       {
-        // carbon discs: weak when cold, best at 450-850 C, fading beyond ~900 C
+        // carbon discs: weak when cold, best at 450-1000 C (F1 discs touch 1000 C at the heaviest stops of the year without
+        // trouble), fading beyond about 1050 C
         const bt = this.brakeTemp[w];
-        Tb *= (0.86 + 0.14 * smoothstep(120, 420, bt)) * (1 - 0.3 * smoothstep(PHYS.brakes2 ? 960 : 880, PHYS.brakes2 ? 1230 : 1150, bt));
+        Tb *= (0.86 + 0.14 * smoothstep(120, 420, bt)) * (1 - 0.3 * smoothstep(PHYS.brakes2 ? BRAKE_FADE[0] : 880, PHYS.brakes2 ? BRAKE_FADE[1] : 1150, bt));
         if (PHYS.brakes2) Tb *= 1 - 0.15 * this.glaze[w];
         if (w === this.brakeLineFail) Tb *= 0.55; // a failed brake line: the car pulls under braking
       }
@@ -578,7 +583,7 @@ export class Car {
       if (PHYS.brakes2) {
         // two nodes (SPEC 5.3): the core is the disc's mass; the friction face sits above it by the power going through it
         const Pb = Tb * Math.abs(om);
-        const cool = (0.011 + 0.0008 * V * (1 - 0.35 * (this.dirtyAir || 0)));
+        const cool = (0.011 + 0.0008 * V * (1 - 0.35 * (this.dirtyAir || 0))) * this.brakeDucts;
         this.brakeCore[w] += (Pb / BRAKE_HEAT_CAP - (this.brakeCore[w] - AMBIENT) * cool) * dt;
         const face = this.brakeCore[w] + Pb / 5200;
         this.brakeTemp[w] += (face - this.brakeTemp[w]) * Math.min(1, dt / 0.03);
@@ -764,7 +769,7 @@ export class Car {
       this.engStress = Math.min(1, this.engStress + dt * (this.fuelMode === 2 ? 0.0022 : this.fuelMode === 1 ? 0.0004 : 0) * clamp((this.rpm - 12500) / 2500, 0, 1));
       let bMax = 0;
       for (let w = 0; w < 4; w++) bMax = Math.max(bMax, this.brakeTemp[w]);
-      this.brakeStress = Math.min(1, this.brakeStress + dt * 0.008 * smoothstep(980, 1180, bMax));
+      this.brakeStress = Math.min(1, this.brakeStress + dt * 0.008 * smoothstep(1080, 1280, bMax));
       if (this.shiftTimer > 0 && this.rpm > 14600) this.boxStress = Math.min(1, this.boxStress + dt * 0.003);
       if (this.engStress >= 1) this.failed = 'Power unit';
       else if (this.boxStress >= 1) this.failed = 'Gearbox';
